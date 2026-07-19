@@ -237,6 +237,9 @@ namespace ferram4
         private double AoAcurrentFlap;    // current deflection due to flap/spoiler deployment
         private double AoAoffset;         // total current deflection
 
+        /// <summary>Live total control-surface deflection, degrees. For the heatmap prediction check.</summary>
+        public double ControlDeflection => AoAoffset;
+
         private double lastAoAoffset;
         private Vector3d deflectedNormal = Vector3d.forward;
         public bool brake;

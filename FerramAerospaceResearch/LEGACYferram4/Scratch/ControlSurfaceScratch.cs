@@ -1,0 +1,65 @@
+/*
+Ferram Aerospace Research
+=========================
+Per-call mutable state extracted from FARControllableSurface for thread safety.
+
+   This file is part of Ferram Aerospace Research.
+
+   Ferram Aerospace Research is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 3 of the License, or
+   (at your option) any later version.
+ */
+
+using UnityEngine;
+
+// ReSharper disable once CheckNamespace
+namespace ferram4
+{
+    /// <summary>
+    /// Per-call mutable state of <see cref="FARControllableSurface"/>.
+    /// Composes a <see cref="WingScratch"/> for the base aerodynamic state and adds the
+    /// 14 control-surface specific scratch fields. One instance is allocated per
+    /// (thread × control surface) on the parallel evaluation path.
+    ///
+    /// The original <see cref="FARControllableSurface"/> animates
+    /// <c>movableSection.localRotation</c> (a Unity Transform) inside
+    /// <c>DeflectionAnimation</c>. The parallel path uses
+    /// <see cref="ControlSurfaceScratch.deflectedNormal"/> directly without touching the
+    /// Transform — the animation is purely cosmetic and unsafe to run off the main
+    /// thread.
+    /// </summary>
+    public sealed class ControlSurfaceScratch
+    {
+        // Base wing scratch (composition, not inheritance, so wing math can take a
+        // WingScratch ref without knowing about surface fields).
+        public readonly WingScratch Wing = new WingScratch();
+
+        // Blended deflection state (linear/exponential ramps in flight; forced to
+        // desired value in editor sim via SetControlStateEditor).
+        public double AoAcurrentControl;
+        public double AoAcurrentFlap;
+        public double AoAoffset;
+        public double AoAdesiredControl;
+        public double AoAdesiredFlap;
+
+        // Deflected surface normal, used by FARControllableSurface.CalculateAoA in place
+        // of part_transform.forward.
+        public Vector3 deflectedNormal;
+
+        // Cache of previous AoAoffset to skip Transform animation on tiny changes
+        public double lastAoAoffset;
+
+        // Control-effectiveness factors recomputed from part geometry each call
+        public double PitchLocation;
+        public double YawLocation;
+        public double RollLocation;
+        public double BrakeRudderLocation;
+        public double BrakeRudderSide;
+        public double AoAsign = 1.0;
+
+        // Flap/spoiler control mapping
+        public double flapLocation;
+        public double spoilerLocation;
+    }
+}
