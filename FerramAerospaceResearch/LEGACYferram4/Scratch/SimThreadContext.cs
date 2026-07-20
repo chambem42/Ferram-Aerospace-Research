@@ -12,65 +12,87 @@ Fast per-thread slot assignment for the parallel editor sweep.
  */
 
 using System;
-using System.Threading;
+using System.Collections.Concurrent;
 
 // ReSharper disable once CheckNamespace
 namespace ferram4
 {
     /// <summary>
-    /// Assigns each thread a small dense slot index so the aero solve can hold per-thread scratch in
-    /// plain arrays indexed by <see cref="Slot"/>. This replaces <see cref="ThreadLocal{T}"/> on the
-    /// hot path: under KSP's Mono runtime ThreadLocal.Value is slow enough that reading it millions of
-    /// times per sweep across many worker threads erased (and reversed) the parallel speedup. A
-    /// <c>[ThreadStatic]</c> int plus an array index is effectively free.
+    /// Hands each parallel unit of work a small dense slot index so the aero solve can hold per-thread
+    /// scratch in plain arrays indexed by <see cref="Slot"/>. This replaces <see cref="System.Threading.ThreadLocal{T}"/>
+    /// on the hot path: under KSP's Mono runtime ThreadLocal.Value is slow enough that reading it
+    /// millions of times per sweep erased (and reversed) the parallel speedup. A <c>[ThreadStatic]</c>
+    /// int plus an array index is effectively free.
     ///
-    /// Slots are handed out lazily via an interlocked counter and invalidated between sweeps by an
-    /// epoch bump, so thread-pool threads reused across sweeps re-acquire a fresh slot. The main thread
-    /// takes the first slot each sweep (it calls <see cref="BeginSweep"/> then touches Slot first).
+    /// Slots come from a POOL: each row acquires one with <see cref="AcquireSlot"/> on entry and returns
+    /// it with <see cref="ReleaseSlot"/> on exit. So the live-slot count is bounded by the CONCURRENCY,
+    /// not by how many distinct threads the pool cycles through — which matters because an
+    /// allocation-heavy sweep makes the thread pool inject and retire workers over its lifetime. A
+    /// per-thread counter would grow past the array size and two threads would end up sharing a slot,
+    /// corrupting rows; the pool never hands the same slot to two live workers.
+    ///
+    /// Serial callers (the stability sweep, the static/stability tabs, flight aero) never acquire and
+    /// simply read slot 0 — safe because they are single-threaded.
     /// </summary>
     public static class SimThreadContext
     {
-        /// <summary>Hard upper bound on concurrent solver threads; scratch arrays are sized to this.</summary>
+        /// <summary>Upper bound the scratch arrays are sized to. The pool only uses ~concurrency of them.</summary>
         public const int MaxSlots = 64;
 
         [ThreadStatic] private static int slot;
-        [ThreadStatic] private static int slotEpoch;
+        [ThreadStatic] private static bool holdsSlot;
 
-        private static int epoch;
-        private static int nextSlot;
-        private static int slotCap = MaxSlots;
+        private static readonly ConcurrentStack<int> pool = new ConcurrentStack<int>();
+
+        /// <summary>The calling thread's current slot; 0 when it holds none (serial contexts).</summary>
+        public static int Slot => slot;
 
         /// <summary>
-        /// The active slot ceiling for this sweep, clamped to [1, MaxSlots]. A sweep sizes its per-slot
-        /// resources (e.g. the engine solver clone pool) to this and caps its worker count just below,
-        /// so no thread is ever handed a slot past what was allocated. Defaults to MaxSlots.
+        /// (Re)fills the pool for a sweep with one slot per possible concurrent worker plus a small
+        /// margin. Main thread, before the parallel loop. The margin means <see cref="AcquireSlot"/>
+        /// never comes up empty, so no worker is ever forced to share.
         /// </summary>
-        public static int SlotCap
+        public static void BeginSweep()
         {
-            get => slotCap;
-            set => slotCap = Math.Max(1, Math.Min(MaxSlots, value));
+            int poolSize = Math.Max(1, Math.Min(MaxSlots, Environment.ProcessorCount + 2));
+            while (pool.TryPop(out int _))
+            {
+            }
+
+            for (int i = poolSize - 1; i >= 0; i--)
+                pool.Push(i);
+
+            slot = 0;
+            holdsSlot = false;
         }
 
-        public static int Slot
+        /// <summary>Claims a slot for this thread for the duration of one parallel iteration.</summary>
+        public static void AcquireSlot()
         {
-            get
+            if (pool.TryPop(out int s))
             {
-                if (slotEpoch != epoch)
-                {
-                    int s = Interlocked.Increment(ref nextSlot) - 1;
-                    slot = s < slotCap ? s : slotCap - 1;
-                    slotEpoch = epoch;
-                }
-
-                return slot;
+                slot = s;
+                holdsSlot = true;
+            }
+            else
+            {
+                // Pool is sized above the worker count, so this should not happen; fall back to slot 0
+                // (which exists) rather than an out-of-range index, and do not later push a fake slot.
+                slot = 0;
+                holdsSlot = false;
             }
         }
 
-        /// <summary>Starts a new slot epoch. Call on the main thread before spawning worker threads.</summary>
-        public static void BeginSweep()
+        /// <summary>Returns this thread's slot to the pool. Pair with <see cref="AcquireSlot"/>.</summary>
+        public static void ReleaseSlot()
         {
-            nextSlot = 0;
-            epoch++;
+            if (holdsSlot)
+            {
+                pool.Push(slot);
+                holdsSlot = false;
+            }
+
+            slot = 0;
         }
     }
 }
