@@ -80,6 +80,8 @@ namespace FerramAerospaceResearch.FARAeroComponents
 
         public Vector3 LocalVelocity(FARAeroSection.PartData pd)
         {
+            if (pd.aeroModule.SimGeom.HasValue)
+                return pd.aeroModule.SimGeom.Value.InverseTransformVector(worldVel);
             if (pd.aeroModule.part == null || pd.aeroModule.part.partTransform == null)
                 return Vector3.zero;
             return pd.aeroModule.part.partTransform.InverseTransformVector(worldVel);
@@ -89,21 +91,41 @@ namespace FerramAerospaceResearch.FARAeroComponents
         {
             double tmp = 0.0005 * Vector3.SqrMagnitude(localVel);
             double dynamicPressurekPa = tmp * atmDensity;
-            double dragFactor = dynamicPressurekPa *
-                                Mathf.Max(PhysicsGlobals.DragCurvePseudoReynolds.Evaluate(atmDensity *
-                                                                                          Vector3.Magnitude(localVel)),
-                                          1.0f);
+
+            // On the parallel sweep (frozen geometry set) evaluate the thread-safe lookup table;
+            // PhysicsGlobals.DragCurvePseudoReynolds is a shared Unity FloatCurve, not safe to Evaluate
+            // concurrently.
+            float pseudoReynolds = atmDensity * Vector3.Magnitude(localVel);
+            float dragPseudo = pd.aeroModule.SimGeom.HasValue && FARAeroSection.DragPseudoReynoldsLUT != null
+                                   ? FARAeroSection.DragPseudoReynoldsLUT.Evaluate(pseudoReynolds)
+                                   : PhysicsGlobals.DragCurvePseudoReynolds.Evaluate(pseudoReynolds);
+            double dragFactor = dynamicPressurekPa * Mathf.Max(dragPseudo, 1.0f);
             double liftFactor = dynamicPressurekPa;
 
             Vector3 localVelNorm = Vector3.Normalize(localVel);
             Vector3 localForceTemp = Vector3.Dot(localVelNorm, forceVector) * localVelNorm;
             Vector3 partLocalForce =
                 localForceTemp * (float)dragFactor + (forceVector - localForceTemp) * (float)liftFactor;
+
+            Vector3 centroid;
+            if (pd.aeroModule.SimGeom.HasValue)
+            {
+                ferram4.FrozenPartTransform g = pd.aeroModule.SimGeom.Value;
+                forceVector = g.TransformDirection(partLocalForce);
+                torqueVector = g.TransformDirection(torqueVector * (float)dynamicPressurekPa);
+                if (float.IsNaN(forceVector.x) || float.IsNaN(torqueVector.x))
+                    return;
+                centroid = g.TransformPoint(pd.centroidPartSpace - pd.aeroModule.SimCoMOffset);
+                center.AddForce(centroid, forceVector);
+                center.AddTorque(torqueVector);
+                return;
+            }
+
             forceVector = pd.aeroModule.part.transform.TransformDirection(partLocalForce);
             torqueVector = pd.aeroModule.part.transform.TransformDirection(torqueVector * (float)dynamicPressurekPa);
             if (float.IsNaN(forceVector.x) || float.IsNaN(torqueVector.x))
                 return;
-            Vector3 centroid =
+            centroid =
                 pd.aeroModule.part.transform.TransformPoint(pd.centroidPartSpace - pd.aeroModule.part.CoMOffset);
             center.AddForce(centroid, forceVector);
             center.AddTorque(torqueVector);

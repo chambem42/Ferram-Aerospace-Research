@@ -44,6 +44,7 @@ Copyright 2022, Michael Ferrara, aka Ferram4
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using ferram4;
 using FerramAerospaceResearch.FARPartGeometry;
 using Unity.Mathematics;
@@ -55,6 +56,13 @@ namespace FerramAerospaceResearch.FARAeroComponents
     {
         private static FloatCurve crossFlowDragMachCurve;
         private static FloatCurve crossFlowDragReynoldsCurve;
+
+        // Thread-safe lookup tables sampled from the shared Unity-backed FloatCurves for the parallel
+        // sweep (see SampledCurve / FARAeroUtil.ParallelSweepActive). DragPseudoReynoldsLUT stands in
+        // for PhysicsGlobals.DragCurvePseudoReynolds, which SimulatedForceContext evaluates per part.
+        private static ferram4.SampledCurve crossFlowMachLUT;
+        private static ferram4.SampledCurve crossFlowReynoldsLUT;
+        public static ferram4.SampledCurve DragPseudoReynoldsLUT;
 
         public FARFloatCurve xForcePressureAoA0;
         public FARFloatCurve xForcePressureAoA180;
@@ -473,8 +481,26 @@ namespace FerramAerospaceResearch.FARAeroComponents
             }
         }
 
-        private readonly SimulatedForceContext simContext =
-            new SimulatedForceContext(Vector3.zero, new FARCenterQuery(), 0.0f);
+        // One force context per thread slot (see SimThreadContext); an array index is much cheaper
+        // than ThreadLocal.Value under Mono. Each slot is single-threaded, so lazy create is safe.
+        private readonly SimulatedForceContext[] simContextSlots =
+            new SimulatedForceContext[SimThreadContext.MaxSlots];
+
+        private SimulatedForceContext SimContext
+        {
+            get
+            {
+                int s = SimThreadContext.Slot;
+                SimulatedForceContext c = simContextSlots[s];
+                if (c == null)
+                {
+                    c = new SimulatedForceContext(Vector3.zero, new FARCenterQuery(), 0.0f);
+                    simContextSlots[s] = c;
+                }
+
+                return c;
+            }
+        }
 
         public void PredictionCalculateAeroForces(
             float atmDensity,
@@ -486,6 +512,7 @@ namespace FerramAerospaceResearch.FARAeroComponents
             FARCenterQuery center
         )
         {
+            SimulatedForceContext simContext = SimContext;
             simContext.UpdateSimulationContext(vel, center, atmDensity);
             CalculateAeroForces(machNumber, reynoldsPerUnitLength, pseudoKnudsenNumber, skinFrictionDrag, simContext);
         }
@@ -534,17 +561,43 @@ namespace FerramAerospaceResearch.FARAeroComponents
             crossFlowDragReynoldsCurve.Add(10000000, 0.58333333333333333333333333333333f, 0, 0);
         }
 
+        /// <summary>
+        /// Samples the shared cross-flow and drag-pseudo-Reynolds FloatCurves into thread-safe lookup
+        /// tables for the parallel sweep. Main thread only. Cross-flow Mach spans the curve's [0, 10]
+        /// domain and cross-flow Reynolds its [1e4, 1e7] domain. The pseudo-Reynolds input is
+        /// atmDensity * |localVelocity|, and the editor sim runs the sections at density 2 with a unit
+        /// velocity vector, so that input is only ~2 (a few for scaled parts). It is sampled densely
+        /// over a small range so the curve's steep low-input region is captured; out-of-range inputs
+        /// clamp to the ends. (An earlier [0, 1e5] range put the real input in a single coarse
+        /// interval and read a wrong value, making body drag differ from the serial path.)
+        /// </summary>
+        public static void BuildSweepLUTs()
+        {
+            GenerateCrossFlowDragCurve();
+            crossFlowMachLUT = new ferram4.SampledCurve(crossFlowDragMachCurve, 0f, 10f, 1024);
+            crossFlowReynoldsLUT = new ferram4.SampledCurve(crossFlowDragReynoldsCurve, 10000f, 10000000f, 8192);
+            if (PhysicsGlobals.DragCurvePseudoReynolds != null)
+                DragPseudoReynoldsLUT =
+                    new ferram4.SampledCurve(PhysicsGlobals.DragCurvePseudoReynolds, 0f, 100f, 8192);
+        }
+
         private static float CalculateCrossFlowDrag(float crossFlowMach, float crossFlowReynolds)
         {
+            // On the parallel sweep, evaluate the thread-safe lookup tables; the shared FloatCurves are
+            // not safe to Evaluate concurrently.
+            bool sweep = FARAeroUtil.ParallelSweepActive && crossFlowMachLUT != null;
+
             if (crossFlowMach > 0.5f)
-                return crossFlowDragMachCurve.Evaluate(crossFlowMach);
+                return sweep ? crossFlowMachLUT.Evaluate(crossFlowMach) : crossFlowDragMachCurve.Evaluate(crossFlowMach);
             float reynoldsInfluenceFactor = 1;
             if (crossFlowMach > 0.4f)
                 reynoldsInfluenceFactor -= (crossFlowMach - 0.4f) * 10;
 
-            float crossFlowDrag = crossFlowDragReynoldsCurve.Evaluate(crossFlowReynolds);
+            float crossFlowDrag = sweep
+                                      ? crossFlowReynoldsLUT.Evaluate(crossFlowReynolds)
+                                      : crossFlowDragReynoldsCurve.Evaluate(crossFlowReynolds);
             crossFlowDrag = (crossFlowDrag - 1) * reynoldsInfluenceFactor + 1;
-            crossFlowDrag *= crossFlowDragMachCurve.Evaluate(crossFlowMach);
+            crossFlowDrag *= sweep ? crossFlowMachLUT.Evaluate(crossFlowMach) : crossFlowDragMachCurve.Evaluate(crossFlowMach);
 
             return crossFlowDrag;
         }

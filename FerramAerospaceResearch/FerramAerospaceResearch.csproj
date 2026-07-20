@@ -212,6 +212,9 @@
     <Compile Include="FARAtmosphere.cs" />
     <Compile Include="LEGACYferram4\FARWingAerodynamicModel.cs" />
     <Compile Include="LEGACYferram4\FARWingInteraction.cs" />
+    <Compile Include="LEGACYferram4\Scratch\FrozenPartTransform.cs" />
+    <Compile Include="LEGACYferram4\Scratch\SampledCurve.cs" />
+    <Compile Include="LEGACYferram4\Scratch\SimThreadContext.cs" />
     <Compile Include="LEGACYferram4\Scratch\WingScratch.cs" />
     <Compile Include="LEGACYferram4\Scratch\WingInteractionScratch.cs" />
     <Compile Include="LEGACYferram4\Scratch\ControlSurfaceScratch.cs" />

@@ -44,8 +44,9 @@ namespace ferram4
         public double AoAdesiredFlap;
 
         // Deflected surface normal, used by FARControllableSurface.CalculateAoA in place
-        // of part_transform.forward.
-        public Vector3 deflectedNormal;
+        // of part_transform.forward. Vector3d and initialised to forward to match the
+        // instance-field default it backs.
+        public Vector3d deflectedNormal = Vector3d.forward;
 
         // Cache of previous AoAoffset to skip Transform animation on tiny changes
         public double lastAoAoffset;
@@ -59,7 +60,12 @@ namespace ferram4
         public double AoAsign = 1.0;
 
         // Flap/spoiler control mapping
-        public double flapLocation;
-        public double spoilerLocation;
+        public int flapLocation;
+        public int spoilerLocation;
+
+        // Shielded state: CheckShielded rewrites it from the deflection every trim step, and the solve
+        // reads it (SetState, wing interaction) to decide whether to skip the surface. It must be
+        // per-thread on the parallel path or those reads race. Seeded from the instance value.
+        public bool IsShielded;
     }
 }

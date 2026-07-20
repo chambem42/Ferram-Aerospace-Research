@@ -112,7 +112,7 @@ namespace ferram4
                 part_transform = part.partTransform;
         }
 
-        public Vector3d GetVelocity()
+        public virtual Vector3d GetVelocity()
         {
             if (HighLogic.LoadedSceneIsFlight)
                 return part.Rigidbody.velocity +

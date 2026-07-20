@@ -45,6 +45,7 @@ Copyright 2022, Michael Ferrara, aka Ferram4
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using FerramAerospaceResearch;
 using UnityEngine;
 
@@ -58,6 +59,12 @@ namespace ferram4
 
         private static FloatCurve wingCamberFactor;
         private static FloatCurve wingCamberMoment;
+
+        // Thread-safe lookup tables sampled from the shared camber FloatCurves for the parallel sweep;
+        // the input is a flap-ratio in [0, 1]. See SampledCurve / FARAeroUtil.ParallelSweepActive.
+        private static SampledCurve wingCamberFactorLUT;
+        private static SampledCurve wingCamberMomentLUT;
+
         private readonly Vector3 rootChordMidLocal;
         private readonly short srfAttachFlipped;
 
@@ -129,9 +136,29 @@ namespace ferram4
 
         // Per-call mutable state lives in _scratch so multiple threads can evaluate
         // independent (Mach, altitude) cells against the same FARWingInteraction
-        // instance using their own scratch (allocated per-thread in the parallel
-        // sweep). Public properties delegate to scratch.
-        internal readonly WingInteractionScratch _scratch = new WingInteractionScratch();
+        // instance using their own scratch. Thread-local so each worker in the parallel
+        // sweep gets its own; the single-threaded paths use the calling (main) thread's.
+        // Public properties delegate to scratch.
+        // Per-thread-slot scratch (see SimThreadContext) — an array index is much cheaper than
+        // ThreadLocal.Value under Mono. Each slot is single-threaded, so the lazy create is safe.
+        private readonly WingInteractionScratch[] _scratchSlots =
+            new WingInteractionScratch[SimThreadContext.MaxSlots];
+
+        internal WingInteractionScratch _scratch
+        {
+            get
+            {
+                int s = SimThreadContext.Slot;
+                WingInteractionScratch sc = _scratchSlots[s];
+                if (sc == null)
+                {
+                    sc = new WingInteractionScratch();
+                    _scratchSlots[s] = sc;
+                }
+
+                return sc;
+            }
+        }
 
         public double EffectiveUpstreamMAC => _scratch.EffectiveUpstreamMAC;
         public double EffectiveUpstreamb_2 => _scratch.EffectiveUpstreamb_2;
@@ -148,6 +175,19 @@ namespace ferram4
         public double ARFactor => _scratch.ARFactor;
 
         public double ClInterferenceFactor => _scratch.ClInterferenceFactor;
+
+        /// <summary>
+        /// Samples the shared wing-camber FloatCurves into thread-safe lookup tables for the parallel
+        /// sweep. Main thread only. The curves are built in the constructor when the first interaction
+        /// is created (at wing init), so they exist by the time a sweep runs; guarded in case not.
+        /// </summary>
+        public static void BuildSweepLUTs()
+        {
+            if (wingCamberFactor != null)
+                wingCamberFactorLUT = new SampledCurve(wingCamberFactor, 0f, 1f, 1024);
+            if (wingCamberMoment != null)
+                wingCamberMomentLUT = new SampledCurve(wingCamberMoment, 0f, 1f, 1024);
+        }
 
         public void Destroy()
         {
@@ -694,10 +734,11 @@ namespace ferram4
                 return;
             double flapRatio = (thisWingMAC / (thisWingMAC + EffectiveUpstreamMAC)).Clamp(0, 1);
             float flt_flapRatio = (float)flapRatio;
+            bool sweep = FARAeroUtil.ParallelSweepActive && wingCamberFactorLUT != null;
             //Flap Effectiveness Factor
-            double flapFactor = wingCamberFactor.Evaluate(flt_flapRatio);
+            double flapFactor = sweep ? wingCamberFactorLUT.Evaluate(flt_flapRatio) : wingCamberFactor.Evaluate(flt_flapRatio);
             //Change in moment due to change in lift from flap
-            double dCm_dCl = wingCamberMoment.Evaluate(flt_flapRatio);
+            double dCm_dCl = sweep ? wingCamberMomentLUT.Evaluate(flt_flapRatio) : wingCamberMoment.Evaluate(flt_flapRatio);
 
             //This accounts for the wing possibly having a longer span than the flap
             double WingFraction = (thisWingb_2 / EffectiveUpstreamb_2).Clamp(0, 1);
@@ -755,10 +796,16 @@ namespace ferram4
                     continue;
                 }
 
-                if (wingModule.isShielded)
+                if (wingModule.GetShielded())
                     continue;
 
-                double tmp = Vector3.Dot(wingModule.transform.forward, parentWingModule.transform.forward);
+                Vector3 wingForward = wingModule.SimGeom.HasValue
+                                          ? wingModule.SimGeom.Value.Forward
+                                          : wingModule.transform.forward;
+                Vector3 parentForward = parentWingModule.SimGeom.HasValue
+                                            ? parentWingModule.SimGeom.Value.Forward
+                                            : parentWingModule.transform.forward;
+                double tmp = Vector3.Dot(wingForward, parentForward);
 
                 _scratch.EffectiveUpstreamMAC += wingModule.GetMAC() * wingInfluenceFactor;
                 _scratch.EffectiveUpstreamb_2 += wingModule.Getb_2() * wingInfluenceFactor;
@@ -767,7 +814,7 @@ namespace ferram4
                 _scratch.EffectiveUpstreamLiftSlope += wingModule.GetRawLiftSlope() * wingInfluenceFactor;
                 _scratch.EffectiveUpstreamStall += wingModule.GetStall() * wingInfluenceFactor;
                 _scratch.EffectiveUpstreamCosSweepAngle += wingModule.GetCosSweepAngle() * wingInfluenceFactor;
-                _scratch.EffectiveUpstreamAoAMax += wingModule.rawAoAmax * wingInfluenceFactor;
+                _scratch.EffectiveUpstreamAoAMax += wingModule.GetRawAoAmax() * wingInfluenceFactor;
                 _scratch.EffectiveUpstreamCd0 += wingModule.GetCd0() * wingInfluenceFactor;
                 _scratch.EffectiveUpstreamInfluence += wingInfluenceFactor;
 

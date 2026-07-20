@@ -65,6 +65,13 @@ namespace FerramAerospaceResearch
         private static FloatCurve prandtlMeyerAngle;
         public static double maxPrandtlMeyerTurnAngle;
 
+        // True while a parallel heatmap sweep is running. Worker threads read the thread-safe SampledCurve
+        // lookup tables below instead of the shared Unity-backed FloatCurves, whose Evaluate is not
+        // concurrency-safe. Set/cleared on the main thread by InstantConditionSim.Begin/EndParallelSweep.
+        public static bool ParallelSweepActive;
+        private static SampledCurve prandtlMeyerMachLUT;
+        private static SampledCurve prandtlMeyerAngleLUT;
+
         public static double massPerWingAreaSupported;
         public static double massStressPower;
         public static bool AJELoaded;
@@ -105,10 +112,18 @@ namespace FerramAerospaceResearch
             }
         }
 
+        // Set on the main thread for the duration of a parallel heatmap sweep. The adiabatic index is
+        // constant for a given body during a sweep, and computing it live calls Planetarium/atmosphere
+        // (main-thread only), so the sweep snapshots it once and every worker reads the snapshot.
+        public static double? SimAdiabaticIndexOverride;
+
         public static double CurrentAdiabaticIndex
         {
             get
             {
+                if (SimAdiabaticIndexOverride.HasValue)
+                    return SimAdiabaticIndexOverride.Value;
+
                 double ut = Planetarium.fetch.time;
                 if (HighLogic.LoadedSceneIsEditor)
                 {
@@ -222,6 +237,35 @@ namespace FerramAerospaceResearch
                 maxPrandtlMeyerTurnAngle *= 90;
                 return prandtlMeyerAngle;
             }
+        }
+
+        /// <summary>Prandtl-Meyer Mach lookup, thread-safe under a parallel sweep.</summary>
+        public static float PrandtlMeyerMachEval(float mach)
+        {
+            return ParallelSweepActive && prandtlMeyerMachLUT != null
+                       ? prandtlMeyerMachLUT.Evaluate(mach)
+                       : PrandtlMeyerMach.Evaluate(mach);
+        }
+
+        /// <summary>Prandtl-Meyer angle lookup, thread-safe under a parallel sweep.</summary>
+        public static float PrandtlMeyerAngleEval(float nu)
+        {
+            return ParallelSweepActive && prandtlMeyerAngleLUT != null
+                       ? prandtlMeyerAngleLUT.Evaluate(nu)
+                       : PrandtlMeyerAngle.Evaluate(nu);
+        }
+
+        /// <summary>
+        /// Samples the shared Prandtl-Meyer FloatCurves into thread-safe lookup tables. Call on the
+        /// main thread before a parallel sweep; accessing the getters here also forces the curves to
+        /// build. Mach spans the curve's [1, 250] domain; the angle spans [0, max turn angle].
+        /// </summary>
+        public static void BuildSweepLUTs()
+        {
+            FloatCurve mach = PrandtlMeyerMach;   // builds the curves and maxPrandtlMeyerTurnAngle
+            FloatCurve angle = PrandtlMeyerAngle;
+            prandtlMeyerMachLUT = new SampledCurve(mach, 1f, 250f, 4096);
+            prandtlMeyerAngleLUT = new SampledCurve(angle, 0f, (float)maxPrandtlMeyerTurnAngle, 4096);
         }
 
         // ReSharper disable once UnusedMember.Global
