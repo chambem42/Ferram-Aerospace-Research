@@ -47,8 +47,10 @@ namespace ferram4
         public double stall;
         public double minStall;
 
-        // Stall-angle bounds
-        public double rawAoAmax;
+        // Stall-angle bounds. rawAoAmax defaults to 15 to match the wing module's
+        // instance-field default, so a worker thread's freshly-created scratch sees the
+        // same value before CalculateAoAmax first populates it.
+        public double rawAoAmax = 15;
         public double AoAmax;
 
         // Lift slope (working copy; upstream interactions can modify)
@@ -78,6 +80,11 @@ namespace ferram4
         // piARe initial of 1 matches the legacy private-field default.
         public double e;
         public double piARe = 1;
+
+        // Zero-lift Cd increment (compressibility). Read-modify-written across the
+        // compressibility calc and read by downstream wings via GetCd0, so it must be
+        // per-thread rather than a shared instance field.
+        public double zeroLiftCdIncrement;
 
         // Final lift slope reported via property
         public double FinalLiftSlope;

@@ -44,6 +44,7 @@ Copyright 2022, Michael Ferrara, aka Ferram4
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using FerramAerospaceResearch;
 using FerramAerospaceResearch.FARAeroComponents;
 using FerramAerospaceResearch.Settings;
@@ -178,10 +179,46 @@ namespace ferram4
         protected double NUFAR_areaExposedFactor;
         protected double NUFAR_totalExposedAreaFactor;
 
-        // Per-call mutable state for thread-safe simulation paths. Single-threaded
-        // call sites use this instance scratch; the heatmap sweep allocates per-thread
-        // scratch arrays in InstantConditionSim.GetClCdCmSteadyParallel.
-        internal readonly WingScratch _scratch = new WingScratch();
+        // Per-call mutable state, thread-local so the parallel heatmap sweep can evaluate
+        // independent (Mach, altitude) cells against the same wing module concurrently.
+        // The single-threaded flight/editor paths transparently use the calling thread's
+        // instance (the main thread), so behaviour there is unchanged.
+        // One scratch per thread slot (see SimThreadContext). Indexing an array by a [ThreadStatic]
+        // slot is far cheaper than ThreadLocal.Value under Mono, which dominated the parallel sweep.
+        // Each slot is used by a single thread at a time, so the lazy create needs no synchronisation.
+        private readonly WingScratch[] _scratchSlots = new WingScratch[SimThreadContext.MaxSlots];
+
+        internal WingScratch _scratch
+        {
+            get
+            {
+                int s = SimThreadContext.Slot;
+                WingScratch sc = _scratchSlots[s];
+                if (sc == null)
+                {
+                    sc = new WingScratch {rawAoAmax = rawAoAmax, transformed_AR = b_2_actual / MAC_actual};
+                    _scratchSlots[s] = sc;
+                }
+
+                return sc;
+            }
+        }
+
+        // Drops the per-thread scratch so it is lazily recreated with the current geometry seed. Called
+        // when geometry changes (MathAndFunctionInitialization); slots re-seed on next access.
+        private void SeedScratchFactory()
+        {
+            Array.Clear(_scratchSlots, 0, _scratchSlots.Length);
+        }
+
+        // Snapshot of this part's transform, non-null only while a sweep is running. When
+        // set, the editor solve reads geometry from it instead of the Unity Transform,
+        // which is main-thread-only; flight and the single-threaded tabs leave it null and
+        // read the live transform exactly as before. Also captures the two other main-thread
+        // reads on the solve path (rigidbody mass and the physics timestep).
+        public FrozenPartTransform? SimGeom;
+        private double simRbMass;
+        private double simFixedDeltaTime;
 
         private bool massScaleReady;
         public double FinalLiftSlope { get; private set; }
@@ -278,7 +315,61 @@ namespace ferram4
 
         public double GetStall()
         {
-            return stall;
+            return _scratch.stall;
+        }
+
+        /// <summary>
+        /// Shielded state as the solve should see it. Plain wings use the (sweep-invariant) instance
+        /// field; control surfaces override this to read the per-thread value, since they rewrite
+        /// shielded state from their deflection every trim step and the instance field would race.
+        /// </summary>
+        public virtual bool GetShielded()
+        {
+            return isShielded;
+        }
+
+        public double GetRawAoAmax()
+        {
+            return _scratch.rawAoAmax;
+        }
+
+        public double GetCdInduced()
+        {
+            return _scratch.CdInduced;
+        }
+
+        public double GetCdProfile()
+        {
+            return _scratch.CdProfile;
+        }
+
+        // Editor velocity comes from the thread-local scratch so that a neighbour wing read
+        // during the parallel sweep (FARWingInteraction) sees the value from the calling
+        // thread's cell, not whichever thread last touched the shared instance field.
+        public override Vector3d GetVelocity()
+        {
+            if (!HighLogic.LoadedSceneIsFlight)
+                return _scratch.velocityEditor;
+            return base.GetVelocity();
+        }
+
+        /// <summary>
+        /// Snapshots the Unity reads on the editor solve path (the part transform, rigidbody mass and
+        /// physics timestep) into plain data so the sweep can run on worker threads. Must be called on
+        /// the main thread. Pass false to release the snapshot when the sweep ends, restoring the live
+        /// transform path used by flight and the single-threaded tabs.
+        /// </summary>
+        public virtual void SetSimGeometry(bool capture)
+        {
+            if (!capture)
+            {
+                SimGeom = null;
+                return;
+            }
+
+            SimGeom = new FrozenPartTransform(part_transform);
+            simRbMass = part.rb != null ? part.rb.mass : part.mass;
+            simFixedDeltaTime = TimeWarp.fixedDeltaTime;
         }
 
         // ReSharper disable once UnusedMember.Global
@@ -300,7 +391,7 @@ namespace ferram4
 
         public Vector3d GetAerodynamicCenter()
         {
-            return AerodynamicCenter;
+            return _scratch.AerodynamicCenter;
         }
 
         public double GetMAC()
@@ -330,7 +421,7 @@ namespace ferram4
 
         public double GetCd0()
         {
-            return zeroLiftCdIncrement;
+            return _scratch.zeroLiftCdIncrement;
         }
 
         /// <summary>
@@ -353,6 +444,7 @@ namespace ferram4
         )
         {
             velocityEditor = velocityVector;
+            _scratch.velocityEditor = velocityVector;
 
             rho = density;
 
@@ -363,6 +455,7 @@ namespace ferram4
         public void ComputeClCdEditor(Vector3d velocityVector, double M, double density)
         {
             velocityEditor = velocityVector;
+            _scratch.velocityEditor = velocityVector;
 
             rho = density;
 
@@ -427,6 +520,8 @@ namespace ferram4
 
         public Vector3 WingCentroid()
         {
+            if (SimGeom.HasValue)
+                return SimGeom.Value.TransformDirection(localWingCentroid) + SimGeom.Value.Position;
             return part_transform.TransformDirection(localWingCentroid) + part.partTransform.position;
         }
 
@@ -514,6 +609,7 @@ namespace ferram4
         {
             // Seed scratch with the wing's initial geometry/state so the first math
             // call sees the same defaults as the legacy code.
+            SeedScratchFactory();
             _scratch.rawAoAmax = rawAoAmax;
 
             S = b_2_actual * MAC_actual;
@@ -793,7 +889,7 @@ namespace ferram4
         {
             double v_scalar = velocity.magnitude;
 
-            Vector3 forward = part_transform.forward;
+            Vector3 forward = SimGeom.HasValue ? SimGeom.Value.Forward : part_transform.forward;
             Vector3d velocity_normalized = velocity / v_scalar;
 
             double q = density * v_scalar * v_scalar * 0.0005; //dynamic pressure, q
@@ -804,7 +900,9 @@ namespace ferram4
             _scratch.perp = Vector3d.Cross(forward, _scratch.ParallelInPlane).normalized;
             _scratch.liftDirection = Vector3d.Cross(_scratch.perp, velocity).normalized;
 
-            _scratch.ParallelInPlaneLocal = part_transform.InverseTransformDirection(_scratch.ParallelInPlane);
+            _scratch.ParallelInPlaneLocal = SimGeom.HasValue
+                                                ? SimGeom.Value.InverseTransformDirection(_scratch.ParallelInPlane)
+                                                : part_transform.InverseTransformDirection(_scratch.ParallelInPlane);
 
             // Calculate the adjusted AC position (uses ParallelInPlane)
             _scratch.AerodynamicCenter = CalculateAerodynamicCenter(MachNumber, AoA, _scratch.CurWingCentroid);
@@ -855,7 +953,9 @@ namespace ferram4
                 D = -velocity_normalized * (_scratch.Cd * S) * q;
             }
 
-            if (updateAeroArrows)
+            // Arrow display touches Unity objects (ArrowPointer create/destroy); skip it on the
+            // frozen sweep path, which may run off the main thread.
+            if (updateAeroArrows && !SimGeom.HasValue)
                 UpdateAeroDisplay(L, D);
 
             Vector3d force = L + D;
@@ -882,13 +982,17 @@ namespace ferram4
                 force = _scratch.AerodynamicCenter = Vector3d.zero;
             }
 
-            double numericalControlFactor =
-                part.rb.mass * v_scalar * 0.67 / (force.magnitude * TimeWarp.fixedDeltaTime);
+            double rbMass = SimGeom.HasValue ? simRbMass : part.rb.mass;
+            double fixedDt = SimGeom.HasValue ? simFixedDeltaTime : TimeWarp.fixedDeltaTime;
+            double numericalControlFactor = rbMass * v_scalar * 0.67 / (force.magnitude * fixedDt);
             force *= Math.Min(numericalControlFactor, 1);
 
-            // Sync scratch back to instance fields for KSPField/observable consumers
-            // (other wings reading our stall, Cl, Cd, AerodynamicCenter; UI display).
-            // rawAoAmax is read directly by FARWingInteraction from upstream wings.
+            // Sync scratch back to instance fields for KSPField/observable consumers and the UI.
+            // NOTE: the solve path itself never reads these instance fields — downstream wings and
+            // the sim read the thread-local scratch via the Get*() accessors (GetStall/GetRawAoAmax/
+            // GetCd0/GetCdInduced/GetAerodynamicCenter). Do not reintroduce a direct instance read on
+            // the solve path: it would race under the parallel sweep. These writes are last-writer-wins
+            // and feed display only.
             Cl = _scratch.Cl;
             Cd = _scratch.Cd;
             CdInduced = _scratch.CdInduced;
@@ -969,7 +1073,8 @@ namespace ferram4
 
         public virtual double CalculateAoA(Vector3d velocity)
         {
-            double PerpVelocity = Vector3d.Dot(part_transform.forward, velocity.normalized);
+            Vector3 forward = SimGeom.HasValue ? SimGeom.Value.Forward : part_transform.forward;
+            double PerpVelocity = Vector3d.Dot(forward, velocity.normalized);
             return Math.Asin(PerpVelocity.Clamp(-1, 1));
         }
 
@@ -1299,12 +1404,12 @@ namespace ferram4
         private static double PMExpansionCalculation(double angle, double inM, out double outM)
         {
             inM = inM.Clamp(1, double.PositiveInfinity);
-            double nu1 = FARAeroUtil.PrandtlMeyerMach.Evaluate((float)inM);
+            double nu1 = FARAeroUtil.PrandtlMeyerMachEval((float)inM);
             double theta = angle * FARMathUtil.rad2deg;
             double nu2 = nu1 + theta;
             if (nu2 >= FARAeroUtil.maxPrandtlMeyerTurnAngle)
                 nu2 = FARAeroUtil.maxPrandtlMeyerTurnAngle;
-            outM = FARAeroUtil.PrandtlMeyerAngle.Evaluate((float)nu2);
+            outM = FARAeroUtil.PrandtlMeyerAngleEval((float)nu2);
 
             return FARAeroUtil.StagnationPressureCalc(inM) / FARAeroUtil.StagnationPressureCalc(outM);
         }
@@ -1313,12 +1418,12 @@ namespace ferram4
         private static double PMExpansionCalculation(double angle, double inM)
         {
             inM = inM.Clamp(1, double.PositiveInfinity);
-            double nu1 = FARAeroUtil.PrandtlMeyerMach.Evaluate((float)inM);
+            double nu1 = FARAeroUtil.PrandtlMeyerMachEval((float)inM);
             double theta = angle * FARMathUtil.rad2deg;
             double nu2 = nu1 + theta;
             if (nu2 >= FARAeroUtil.maxPrandtlMeyerTurnAngle)
                 nu2 = FARAeroUtil.maxPrandtlMeyerTurnAngle;
-            float outM = FARAeroUtil.PrandtlMeyerAngle.Evaluate((float)nu2);
+            float outM = FARAeroUtil.PrandtlMeyerAngleEval((float)nu2);
 
             return FARAeroUtil.StagnationPressureCalc(inM) / FARAeroUtil.StagnationPressureCalc(outM);
         }
@@ -1439,8 +1544,8 @@ namespace ferram4
             {
                 if (wingInteraction.EffectiveUpstreamInfluence > 0.99)
                 {
-                    zeroLiftCdIncrement = wingInteraction.EffectiveUpstreamCd0;
-                    return zeroLiftCdIncrement;
+                    _scratch.zeroLiftCdIncrement = wingInteraction.EffectiveUpstreamCd0;
+                    return _scratch.zeroLiftCdIncrement;
                 }
 
                 thisInteractionFactor = 1 - wingInteraction.EffectiveUpstreamInfluence;
@@ -1452,14 +1557,14 @@ namespace ferram4
                 //Subsonic leading edge
                 if (beta_TanSweep < 1)
                     //This constant is due to airfoil shape and thickness
-                    zeroLiftCdIncrement = 0.009216 / TanSweep;
+                    _scratch.zeroLiftCdIncrement = 0.009216 / TanSweep;
                 //Supersonic leading edge
                 else
-                    zeroLiftCdIncrement = 0.009216 / beta;
-                zeroLiftCdIncrement *= thisInteractionFactor;
-                zeroLiftCdIncrement +=
+                    _scratch.zeroLiftCdIncrement = 0.009216 / beta;
+                _scratch.zeroLiftCdIncrement *= thisInteractionFactor;
+                _scratch.zeroLiftCdIncrement +=
                     wingInteraction.EffectiveUpstreamCd0 * wingInteraction.EffectiveUpstreamInfluence;
-                return zeroLiftCdIncrement;
+                return _scratch.zeroLiftCdIncrement;
             }
 
 
@@ -1470,7 +1575,7 @@ namespace ferram4
 
             if (M < dd_MachNumber) //If below this number,
             {
-                zeroLiftCdIncrement = 0;
+                _scratch.zeroLiftCdIncrement = 0;
                 return 0;
             }
 
@@ -1480,7 +1585,7 @@ namespace ferram4
 
             if (M > peak_MachNumber)
             {
-                zeroLiftCdIncrement = peak_Increment;
+                _scratch.zeroLiftCdIncrement = peak_Increment;
             }
             else
             {
@@ -1497,34 +1602,34 @@ namespace ferram4
                 CdIncrement *= tmp;
                 CdIncrement *= peak_Increment;
 
-                zeroLiftCdIncrement = CdIncrement;
+                _scratch.zeroLiftCdIncrement = CdIncrement;
             }
 
             double scalingMachNumber = Math.Min(peak_MachNumber, 1.2);
 
             if (M < scalingMachNumber)
             {
-                zeroLiftCdIncrement *= thisInteractionFactor;
-                zeroLiftCdIncrement +=
+                _scratch.zeroLiftCdIncrement *= thisInteractionFactor;
+                _scratch.zeroLiftCdIncrement +=
                     wingInteraction.EffectiveUpstreamCd0 * wingInteraction.EffectiveUpstreamInfluence;
-                return zeroLiftCdIncrement;
+                return _scratch.zeroLiftCdIncrement;
             }
 
             double scale = (M - 1.4) / (scalingMachNumber - 1.4);
-            zeroLiftCdIncrement *= scale;
+            _scratch.zeroLiftCdIncrement *= scale;
             scale = 1 - scale;
 
             //Subsonic leading edge
             if (beta_TanSweep < 1)
                 //This constant is due to airfoil shape and thickness
-                zeroLiftCdIncrement += 0.009216 / TanSweep * scale;
+                _scratch.zeroLiftCdIncrement += 0.009216 / TanSweep * scale;
             //Supersonic leading edge
             else
-                zeroLiftCdIncrement += 0.009216 / beta * scale;
-            zeroLiftCdIncrement *= thisInteractionFactor;
-            zeroLiftCdIncrement += wingInteraction.EffectiveUpstreamCd0 * wingInteraction.EffectiveUpstreamInfluence;
+                _scratch.zeroLiftCdIncrement += 0.009216 / beta * scale;
+            _scratch.zeroLiftCdIncrement *= thisInteractionFactor;
+            _scratch.zeroLiftCdIncrement += wingInteraction.EffectiveUpstreamCd0 * wingInteraction.EffectiveUpstreamInfluence;
 
-            return zeroLiftCdIncrement;
+            return _scratch.zeroLiftCdIncrement;
         }
 
         public override void OnLoad(ConfigNode node)
