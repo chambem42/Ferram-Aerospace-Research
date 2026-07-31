@@ -59,36 +59,45 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI.Simulation
             _instantCondition = instantConditionSim;
         }
 
-        public StabilityDerivOutput CalculateStabilityDerivs(
-            CelestialBody body,
-            double alt,
-            double machNumber,
-            int flapSetting,
-            bool spoilers,
-            double alpha,
-            double beta,
-            double phi
-        )
+        /// <summary>
+        /// Vehicle mass, CoM and moments of inertia. Flight-condition-independent, and it reads Unity part
+        /// transforms and Rigidbody inertia tensors (main-thread only), so a stability sweep computes it
+        /// ONCE on the main thread and reuses it for every (Mach, altitude) cell — which also removes two
+        /// per-cell part loops that the old code re-ran for every cell.
+        /// </summary>
+        public readonly struct VehicleProperties
         {
-            GasProperties properties = FARAtmosphere.GetGasProperties(body,
-                                                                      new Vector3d(0, 0, alt),
-                                                                      Planetarium.GetUniversalTime());
+            public readonly Vector3d CoM;
+            public readonly double Mass; // kg
+            public readonly double Area;
+            public readonly double MAC;
+            public readonly double B;
+            public readonly double Ix, Iy, Iz, Ixy, Iyz, Ixz;
 
-            double density = properties.Density;
-            double sspeed = properties.SpeedOfSound;
-            double u0 = sspeed * machNumber;
-            double q = u0 * u0 * density * 0.5f;
-
-            var stabDerivOutput = new StabilityDerivOutput
+            public VehicleProperties(Vector3d com, double mass, double area, double mac, double b,
+                                     double ix, double iy, double iz, double ixy, double iyz, double ixz)
             {
-                nominalVelocity = u0,
-                altitude = alt,
-                body = body
-            };
+                CoM = com;
+                Mass = mass;
+                Area = area;
+                MAC = mac;
+                B = b;
+                Ix = ix;
+                Iy = iy;
+                Iz = iz;
+                Ixy = ixy;
+                Iyz = iyz;
+                Ixz = ixz;
+            }
+        }
+
+        /// <summary>Main-thread only (reads Unity transforms / Rigidbody tensors). See <see cref="VehicleProperties" />.</summary>
+        public VehicleProperties ComputeVehicleProperties(int flapSetting, bool spoilers)
+        {
+            var input = new InstantConditionSimInput(0, 0, 0, 0, 0, 0, 0, 0, flapSetting, spoilers);
 
             Vector3d CoM = Vector3d.zero;
             double mass = 0;
-
             double MAC = 0;
             double b = 0;
             double area = 0;
@@ -99,11 +108,6 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI.Simulation
             double Ixy = 0;
             double Iyz = 0;
             double Ixz = 0;
-
-            var input = new InstantConditionSimInput(alpha, beta, phi, 0, 0, 0, machNumber, 0, flapSetting, spoilers);
-            var pertOutput = new InstantConditionSimOutput();
-
-            _instantCondition.GetClCdCmSteady(input, out InstantConditionSimOutput nominalOutput, true);
 
             List<Part> partsList = EditorLogic.SortedShipList;
             foreach (Part p in partsList)
@@ -147,10 +151,6 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI.Simulation
             b /= area;
             CoM /= mass;
             mass *= 1000;
-
-            stabDerivOutput.b = b;
-            stabDerivOutput.MAC = MAC;
-            stabDerivOutput.area = area;
 
             foreach (Part p in partsList)
             {
@@ -233,13 +233,66 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI.Simulation
             Iy *= 1000;
             Iz *= 1000;
 
-            stabDerivOutput.stabDerivs[0] = Ix;
-            stabDerivOutput.stabDerivs[1] = Iy;
-            stabDerivOutput.stabDerivs[2] = Iz;
+            return new VehicleProperties(CoM, mass, area, MAC, b, Ix, Iy, Iz, Ixy, Iyz, Ixz);
+        }
 
-            stabDerivOutput.stabDerivs[24] = Ixy;
-            stabDerivOutput.stabDerivs[25] = Iyz;
-            stabDerivOutput.stabDerivs[26] = Ixz;
+        /// <summary>
+        /// Per-cell stability derivatives at one (Mach, altitude), given the vehicle mass properties from
+        /// <see cref="ComputeVehicleProperties" />. The aero solve reads only thread-local sim state
+        /// (per <see cref="SimThreadContext" />) and the frozen geometry snapshot, so this is safe to call
+        /// from parallel-sweep worker threads.
+        /// </summary>
+        public StabilityDerivOutput CalculateStabilityDerivs(
+            in VehicleProperties props,
+            CelestialBody body,
+            double alt,
+            double machNumber,
+            double density,
+            double sspeed,
+            int flapSetting,
+            bool spoilers,
+            double alpha,
+            double beta,
+            double phi
+        )
+        {
+            // density and sspeed are sampled on the main thread and passed in (FARAtmosphere/Planetarium
+            // are main-thread only), so this is safe to run on a parallel-sweep worker.
+            double u0 = sspeed * machNumber;
+            double q = u0 * u0 * density * 0.5f;
+
+            var stabDerivOutput = new StabilityDerivOutput
+            {
+                nominalVelocity = u0,
+                altitude = alt,
+                body = body
+            };
+
+            Vector3d CoM = props.CoM;
+            double mass = props.Mass;
+            double MAC = props.MAC;
+            double b = props.B;
+            double area = props.Area;
+            double Ix = props.Ix;
+            double Iy = props.Iy;
+            double Iz = props.Iz;
+
+            var input = new InstantConditionSimInput(alpha, beta, phi, 0, 0, 0, machNumber, 0, flapSetting, spoilers);
+            var pertOutput = new InstantConditionSimOutput();
+
+            _instantCondition.GetClCdCmSteady(input, out InstantConditionSimOutput nominalOutput, true);
+
+            stabDerivOutput.b = b;
+            stabDerivOutput.MAC = MAC;
+            stabDerivOutput.area = area;
+
+            stabDerivOutput.stabDerivs[0] = props.Ix;
+            stabDerivOutput.stabDerivs[1] = props.Iy;
+            stabDerivOutput.stabDerivs[2] = props.Iz;
+
+            stabDerivOutput.stabDerivs[24] = props.Ixy;
+            stabDerivOutput.stabDerivs[25] = props.Iyz;
+            stabDerivOutput.stabDerivs[26] = props.Ixz;
 
             //This is the effect of gravity
             double effectiveG = InstantConditionSim.CalculateAccelerationDueToGravity(body, alt);
