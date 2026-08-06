@@ -317,7 +317,11 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI.Simulation
             // if stable AoA doesn't exist, calculate derivatives at 0 incidence
             if (!optResult.Converged)
             {
-                FARLogger.Info("Stable angle of attack not found, calculating derivatives at 0 incidence instead");
+                // Never log from inside a parallel sweep: this runs on a worker thread, and FARLogger
+                // routes to Unity's log handler / debug console (TextMeshPro), which is main-thread-only
+                // and crashes the process natively when driven from a worker (and this fires per cell).
+                if (!FARAeroUtil.ParallelSweepActive)
+                    FARLogger.Info("Stable angle of attack not found, calculating derivatives at 0 incidence instead");
                 alpha = 0;
                 _instantCondition.FunctionIterateForAlpha(alpha);
                 calls += 1;
@@ -341,16 +345,19 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI.Simulation
             if (Math.Abs((nominalOutput.Cl - neededCl) / neededCl) > 0.1)
                 stabDerivOutput.stableAoAState = nominalOutput.Cl > neededCl ? "<" : ">";
 
-            FARLogger.Info("Cl needed: " +
-                           neededCl.ToString(CultureInfo.InvariantCulture) +
-                           ", AoA: " +
-                           stabDerivOutput.stableAoA.ToString(CultureInfo.InvariantCulture) +
-                           ", Cl: " +
-                           nominalOutput.Cl.ToString(CultureInfo.InvariantCulture) +
-                           ", Cd: " +
-                           nominalOutput.Cd.ToString(CultureInfo.InvariantCulture) +
-                           ", function calls: " +
-                           calls.ToString());
+            // Per-cell solver trace — must stay off worker threads (see above) and would flood the log
+            // thousands of times over a sweep regardless. Only emit it in an interactive (non-sweep) solve.
+            if (!FARAeroUtil.ParallelSweepActive)
+                FARLogger.Info("Cl needed: " +
+                               neededCl.ToString(CultureInfo.InvariantCulture) +
+                               ", AoA: " +
+                               stabDerivOutput.stableAoA.ToString(CultureInfo.InvariantCulture) +
+                               ", Cl: " +
+                               nominalOutput.Cl.ToString(CultureInfo.InvariantCulture) +
+                               ", Cd: " +
+                               nominalOutput.Cd.ToString(CultureInfo.InvariantCulture) +
+                               ", function calls: " +
+                               calls.ToString());
 
             //vert vel derivs
             pertOutput.Cl = (pertOutput.Cl - nominalOutput.Cl) / (2 * FARMathUtil.deg2rad);
