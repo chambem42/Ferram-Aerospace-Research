@@ -1,0 +1,9 @@
+<Project>
+  <!-- FAR's own build settings (KSP_DIR_BUILD, from Directory.Build.props.user), and the KSP install the in-game tests
+       are built against and run in: KspDir, else the KSPDIR environment variable, else KSP_DIR_BUILD -->
+  <Import Project="../Directory.Build.props" />
+  <PropertyGroup>
+    <KspDir Condition="'$(KspDir)' == ''">$(KSP_DIR_BUILD)</KspDir>
+    <KspTestVersion>0.1.0</KspTestVersion>
+  </PropertyGroup>
+</Project>

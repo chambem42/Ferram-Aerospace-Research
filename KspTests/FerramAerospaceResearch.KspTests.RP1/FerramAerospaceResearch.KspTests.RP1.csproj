@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        FAR's reentry tests in an RP-1 career (KCT simulations, MechJeb attitude holds): deployed only into installs with RP-1.
+        [UITest] methods the KspTest harness runs in a KSP session; loaded by KSP, so net48, built against the install in
+        KspDir (see ../Directory.Build.props). FerramAerospaceResearch.KspTests.Run runs them with dotnet test; FAR itself
+        does not depend on this.
+    -->
+    <PropertyGroup>
+        <TargetFramework>net48</TargetFramework>
+        <LangVersion>9</LangVersion>
+        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+        <RootNamespace>FerramAerospaceResearch.KspTests.RP1</RootNamespace>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>false</IsTestProject>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- compile-time only: the harness is deployed into GameData by the runner -->
+        <PackageReference Include="KspTest" Version="$(KspTestVersion)" />
+        <PackageReference Include="KspTest.MechJeb" Version="$(KspTestVersion)" />
+        <PackageReference Include="KspTest.RP1" Version="$(KspTestVersion)" />
+    </ItemGroup>
+
+</Project>

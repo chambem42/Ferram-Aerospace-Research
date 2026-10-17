@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        Runs FAR's in-game tests in KSP with dotnet test: each [KspFact] deploys the KspTest harness and the in-game test
+        assemblies into the install, starts KSP on a new sandbox game with crafts/ in its SPH, and passes when the in-game
+        test does. Skipped when no install is configured (KSPDIR, or "install" in ksptest.json; see ksptest.example.json).
+    -->
+    <PropertyGroup>
+        <TargetFramework>net8.0</TargetFramework>
+        <RollForward>Major</RollForward>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>true</IsTestProject>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+        <PackageReference Include="xunit" Version="2.9.3" />
+        <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="KspTest.Xunit" Version="$(KspTestVersion)" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- built and copied to ksp-plugins/<name>/ for the runner to deploy; not referenced. The MechJeb and RP-1 ones
+             only go into installs with that mod: KSP drops an assembly whose types do not load. -->
+        <ProjectReference Include="..\FerramAerospaceResearch.KspTests\FerramAerospaceResearch.KspTests.csproj"
+                          ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" OutputItemType="KspTestPlugin" />
+        <ProjectReference Include="..\FerramAerospaceResearch.KspTests.MechJeb\FerramAerospaceResearch.KspTests.MechJeb.csproj"
+                          ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" OutputItemType="KspTestPlugin"
+                          KspRequires="MechJeb2/Plugins/MechJeb2.dll" />
+        <ProjectReference Include="..\FerramAerospaceResearch.KspTests.RP1\FerramAerospaceResearch.KspTests.RP1.csproj"
+                          ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" OutputItemType="KspTestPlugin"
+                          KspRequires="MechJeb2/Plugins/MechJeb2.dll;RP-1/Plugins/RP0.dll" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- the crafts the tests fly that KSP and FAR do not ship, put into every run's save -->
+        <KspTestCraft Include="crafts/*.craft" />
+        <None Include="ksptest.json" Condition="Exists('ksptest.json')" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+</Project>

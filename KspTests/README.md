@@ -1,0 +1,57 @@
+# FAR in-game tests
+
+FAR's tests that run in KSP, on [KspTest](https://github.com/chambem42/KspTest): `dotnet test` starts your KSP, flies
+or inspects crafts with FAR's own numbers, and passes or fails each test from what it measured. FAR's build doesn't
+depend on any of this.
+
+| Project | What |
+|---|---|
+| `FerramAerospaceResearch.KspTests` | the in-game tests on stock KSP and FAR (a few fly on AtmosphereAutopilot, a few use B9 procedural wings) |
+| `FerramAerospaceResearch.KspTests.MechJeb` | in-game tests that fly on MechJeb; only deployed where MechJeb is installed |
+| `FerramAerospaceResearch.KspTests.RP1` | reentries in an RP-1 career; only deployed where RP-1 is installed |
+| `FerramAerospaceResearch.KspTests.Run` | the `dotnet test` project: one test per in-game test |
+
+## Running
+
+You need the .NET 8 SDK and a KSP 1.12 install with FAR (the build you want to test) and Harmony.
+
+```
+cd KspTests
+set KSPDIR=C:\path\to\Kerbal Space Program        (the build and the runs both use it)
+dotnet test FarKspTests.slnx --filter Kind=Check
+dotnet test FarKspTests.slnx --filter Far_ArCruise
+```
+
+Each test deploys the harness and the test assemblies into `GameData/KspTest`, starts KSP on a new sandbox game in
+`saves/ksptest` (emptied first; anything you saved there is backed up), runs the in-game test and quits. Only one KSP
+runs at a time; a test waits for a KSP that is already running. The results (result.json, CSVs, screenshots, KSP.log)
+land in `FerramAerospaceResearch.KspTests.Run/bin/<config>/net8.0/results/<time>-<test>/`; each test's output names
+its folder.
+
+`Kind=Check` tests assert what they measure. `Kind=Measure` tests record numbers and pictures for comparing FAR builds
+(run them on one build, then the other, and compare the results folders) and fail only when the flight itself does.
+
+## Your own crafts
+
+Copy `FerramAerospaceResearch.KspTests.Run/ksptest.example.json` to `ksptest.json` beside it, or use the environment:
+
+- `crafts` / `KSPTEST_CRAFTS`: craft files, or folders of them, put into the test save (SPH or VAB, from the craft).
+- `params` / `KSPTEST_PARAMS`: parameters over the tests' own, `k=v;k=v`. Each in-game test lists its parameters in its
+  doc comment; for example the aspect-ratio cruise on your planes:
+
+```
+set KSPTEST_CRAFTS=C:\my crafts
+set KSPTEST_PARAMS=crafts=My Plane+My Other Plane
+dotnet test FarKspTests.slnx --filter Far_ArCruise
+```
+
+The crafts the tests fly by default are KSP's and FAR's stock planes, and the ones in
+`FerramAerospaceResearch.KspTests.Run/crafts/`.
+
+## Writing a test
+
+An in-game test is a static `IEnumerator` method with `[UITest("Name", StartsAt = ...)]` in one of the in-game
+projects; the harness gets the game to its start state (the space center, an editor with a craft, a craft on the
+runway), then runs it as a coroutine. Add a `[KspFact]` method calling `Run("Name", timeoutSec)` in
+`FarTests.cs` to run it with `dotnet test`. See KspTest's README for the harness's API (scenes, flight, FAR's numbers
+through `FarApi`/`FarSim`, screenshots, recording values).
