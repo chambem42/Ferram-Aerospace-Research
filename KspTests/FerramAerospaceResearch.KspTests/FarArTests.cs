@@ -445,7 +445,9 @@ namespace FerramAerospaceResearch.KspTests
                         Reflect.Set(viz, "TintForCd", tint == "cd");
                         Reflect.Set(viz, "TintForStall", tint == "stall");
                     }
-                    foreach (var (view, pitch, hdg, dist) in new[] { ("above", 1.35f, 0f, 1.6f), ("side", 0.12f, 1.5708f, 1.5f), ("rear", 0.5f, 3.1416f, 1.5f) })
+                    // the camera's heading is from north, and every flight here is on course 90 (east): 3.14 looks from the
+                    // south at its right side, 1.57 from behind
+                    foreach (var (view, pitch, hdg, dist) in new[] { ("above", 1.35f, 0f, 1.6f), ("side", 0.12f, 3.1416f, 1.5f), ("rear", 0.5f, 1.5708f, 1.5f) })
                     {
                         cam.camPitch = pitch;
                         cam.camHdg = hdg;
