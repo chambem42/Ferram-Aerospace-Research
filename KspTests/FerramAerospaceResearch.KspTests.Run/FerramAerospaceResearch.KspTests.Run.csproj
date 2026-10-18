@@ -20,7 +20,6 @@
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-        <PackageReference Include="KspTest.Xunit" Version="$(KspTestVersion)" />
     </ItemGroup>
 
     <ItemGroup>
@@ -41,5 +40,8 @@
         <KspTestCraft Include="crafts/*.craft" />
         <None Include="ksptest.json" Condition="Exists('ksptest.json')" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
+
+    <!-- KspTest.Xunit, the runner and the harness from the KspTest submodule -->
+    <Import Project="$(KspTestRoot)/build/KspTest.FromSource.targets" />
 
 </Project>

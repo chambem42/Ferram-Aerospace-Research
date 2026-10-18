@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using KspTest;
+using KspTest.AtmosphereAutopilot;
 using UnityEngine;
 
 namespace FerramAerospaceResearch.KspTests

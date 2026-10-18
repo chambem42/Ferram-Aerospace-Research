@@ -13,7 +13,8 @@ depend on any of this.
 
 ## Running
 
-You need the .NET 8 SDK and a KSP 1.12 install with FAR (the build you want to test) and Harmony.
+You need the .NET 8 SDK and a KSP 1.12 install with FAR (the build you want to test) and Harmony. KspTest comes in
+as a git submodule (`KspTests/KspTest`): clone with `--recursive`, or run `git submodule update --init` once.
 
 ```
 cd KspTests

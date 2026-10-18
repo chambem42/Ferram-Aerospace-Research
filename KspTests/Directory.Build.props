@@ -4,6 +4,8 @@
   <Import Project="../Directory.Build.props" />
   <PropertyGroup>
     <KspDir Condition="'$(KspDir)' == ''">$(KSP_DIR_BUILD)</KspDir>
-    <KspTestVersion>0.1.0</KspTestVersion>
+    <!-- the KspTest submodule; KSPTEST_ROOT (or KspTestRoot) points at another checkout, to work on KspTest and these together -->
+    <KspTestRoot Condition="'$(KspTestRoot)' == ''">$(KSPTEST_ROOT)</KspTestRoot>
+    <KspTestRoot Condition="'$(KspTestRoot)' == ''">$(MSBuildThisFileDirectory)KspTest</KspTestRoot>
   </PropertyGroup>
 </Project>

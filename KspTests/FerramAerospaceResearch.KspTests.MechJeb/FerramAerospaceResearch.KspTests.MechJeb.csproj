@@ -15,10 +15,11 @@
         <IsTestProject>false</IsTestProject>
     </PropertyGroup>
 
-    <ItemGroup>
-        <!-- compile-time only: the harness is deployed into GameData by the runner -->
-        <PackageReference Include="KspTest" Version="$(KspTestVersion)" />
-        <PackageReference Include="KspTest.MechJeb" Version="$(KspTestVersion)" />
-    </ItemGroup>
+    <PropertyGroup>
+        <!-- the harness and these modules from the KspTest submodule, compile-time only: the runner deploys them -->
+        <KspTestModules>MechJeb;AtmosphereAutopilot</KspTestModules>
+    </PropertyGroup>
+
+    <Import Project="$(KspTestRoot)/build/KspTest.FromSource.targets" />
 
 </Project>
