@@ -31,6 +31,13 @@ namespace FerramAerospaceResearch.KspTests.Run
         [KspFact(Requires = "AtmosphereAutopilot"), Trait("Kind", "Measure")]
         public void Far_ArCruise() => Run("Far_ArCruise", 10800);
 
+        /// <summary>
+        ///     A full circle on AtmosphereAutopilot (the Gull by default): FAR's predicted against flown lift and drag, and
+        ///     the wings' effective aspect ratio, steady with heading.
+        /// </summary>
+        [KspFact(Requires = "AtmosphereAutopilot"), Trait("Kind", "Check")]
+        public void Far_ArCircle() => Run("Far_ArCircle", 10800);
+
         [KspFact, Trait("Kind", "Check")]
         public void Far_ComOffset_Editor() => Run("Far_ComOffset_Editor", 300);
 

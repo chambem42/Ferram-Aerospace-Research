@@ -286,6 +286,210 @@ namespace FerramAerospaceResearch.KspTests
             }
         }
 
+        /// <summary>
+        /// Each craft air-started level at the point, settled on AtmosphereAutopilot's cruise (course 90, the altitude, the
+        /// speed from the Mach), then flown around a full circle: the autopilot's course turned at turnRateDegS until it
+        /// has come round 360 deg. Every sampleSec the flight's FAR force and pitching moment (from the last physics
+        /// frame) are set against FAR's prediction API at the same position, velocity and time (the vessel's attitude as
+        /// it is), as lift, drag and pitching moment; the next two frames after a prediction are not sampled, since a
+        /// prediction leaves state on the wings. Each sample also records heading, bank, AoA, sideslip and the wings'
+        /// area-weighted effective aspect ratio, which should not change as the vessel turns. A craft passes when, around
+        /// the circle (the middle 90 % of the samples: 5th to 95th percentile), the predicted-over-flown lift and drag
+        /// each stay within ratioTol and the aspect ratio within arTol of its mean. The prediction's constant offset from
+        /// the flight (median) is recorded, and flagged over offsetWarn, but does not decide the pass: upstream FAR's own
+        /// prediction API reads about 11 % more lift than its flight on the Gull, at every heading. Reaction wheels off.
+        /// With ffmpeg given, a failing or broken craft's flight is kept on video. Params: crafts ("+"-separated; default
+        /// the Gull, steady in every cruise run), point (altM:mach, 3000:0.5), turnRateDegS (3), sampleSec (0.5), steadySec
+        /// (8), settleTimeoutSec (120), ratioTol (0.03), arTol (0.005), offsetWarn (0.05), ffmpeg. Writes ar-circle.csv
+        /// (every sample) and ar-circle-summary.csv.
+        /// </summary>
+        [UITest("Far_ArCircle", StartsAt = StartState.SpaceCenter, TimeoutSec = 10800)]
+        public static IEnumerator Far_ArCircle(TestContext ctx)
+        {
+            ctx.Record("farBuild", FarSim.FarVersion());
+            Assert.True(Aa.Present, "AtmosphereAutopilot is installed");
+            string[] crafts = (ctx.Param("crafts") ?? "Gull").Split('+');
+            string[] pt = (ctx.Param("point") ?? "3000:0.5").Split(':');
+            double altM = double.Parse(pt[0], Inv), mach = double.Parse(pt[1], Inv);
+            double rate = ctx.ParamDouble("turnRateDegS", 3), sampleSec = ctx.ParamDouble("sampleSec", 0.5);
+            double steadySec = ctx.ParamDouble("steadySec", 8), timeout = ctx.ParamDouble("settleTimeoutSec", 120);
+            double ratioTol = ctx.ParamDouble("ratioTol", 0.03), arTol = ctx.ParamDouble("arTol", 0.005), offsetWarn = ctx.ParamDouble("offsetWarn", 0.05);
+            string ffmpeg = ctx.Param("ffmpeg");
+            var csv = new StringBuilder("craft,ut,headingDeg,bankDeg,aoaDeg,sideslipDeg,altM,srfSpeed,mach,qKPa,liftKN,predLiftKN,dragKN,predDragKN," +
+                                        "pitchKNm,predPitchKNm,meanAR\n");
+            var summary = new StringBuilder("craft,pass,samples,turnedDeg,bankMeanDeg,bankMaxDeg,aoaMeanDeg,liftOffset,liftBand,dragOffset,dragBand," +
+                                            "pitchErrKNm,arMean,arBand,arMaxMin\n");
+            bool[] trajectories = FarFlightProbe.QuietOtherPredictors();
+            Recorder rec = null;
+            try
+            {
+                foreach (string craftRaw in crafts)
+                {
+                    string craft = craftRaw.Trim();
+                    string path = ctx.CraftPath(craft, "SPH");
+                    if (!File.Exists(path))
+                        path = Path.GetFullPath(Path.Combine(KSPUtil.ApplicationRootPath, "Ships", "SPH", craft + ".craft"));
+                    string missing = MissingParts(path);
+                    if (missing.Length > 0)
+                    {
+                        ctx.Record(craft + ".skipped", "missing parts: " + missing);
+                        continue;
+                    }
+                    ctx.Step("Air start " + craft);
+                    yield return Nav.EnsureState(ctx, StartState.Flight, path, "Runway");
+                    yield return Wait.Seconds(5);   // FAR voxelizes the craft after load
+                    Vessel v = FlightGlobals.ActiveVessel;
+                    if (ffmpeg != null && File.Exists(ffmpeg))
+                        rec = Recorder.Start(ffmpeg, Path.Combine(ctx.ResultsDir, $"circle_{craft.Replace(' ', '_')}.mp4"));
+                    Flight.IgnoreMaxTemperature(true);
+                    foreach (Part p in v.parts)
+                        foreach (PartModule m in p.Modules)
+                            if (m is ModuleReactionWheel rw)
+                            {
+                                rw.wheelState = ModuleReactionWheel.WheelState.Disabled;
+                                rw.authorityLimiter = 0;
+                            }
+                    Ctrl.Sas(false);
+                    Ctrl.Stage();
+                    CelestialBody body = v.mainBody;
+                    double p0 = body.GetPressure(altM);
+                    double speed = mach * body.GetSpeedOfSound(p0, body.GetDensity(p0, body.GetTemperature(altM)));
+                    var start = new FarFlightProbe.Condition { Name = "air start", AltM = altM, Mach = mach, AoADeg = 3, Lat = 0, Lon = DaylightLon(body, altM) };
+                    yield return FarFlightProbe.Place(start);
+                    Flight.PointAtAoA(start.AoADeg);
+                    Ctrl.RetractGear();
+                    Ctrl.SetThrottle(1f);
+                    Aa.Cruise(FlightGlobals.ActiveVessel, altM, speed, 90);
+                    int parts = FlightGlobals.ActiveVessel.parts.Count;
+
+                    ctx.Step(craft + ": settle on course 90");
+                    double since = double.NaN, deadline = Planetarium.GetUniversalTime() + timeout;
+                    while (Planetarium.GetUniversalTime() < deadline)
+                    {
+                        Vessel w = FlightGlobals.ActiveVessel;
+                        if (w == null || w.parts.Count < parts) break;
+                        bool now = Math.Abs(w.altitude - altM) < 60 && Math.Abs(w.srfSpeed - speed) < 4 && Math.Abs(w.verticalSpeed) < 3;
+                        double ut = Planetarium.GetUniversalTime();
+                        if (!now) since = double.NaN;
+                        else if (double.IsNaN(since)) since = ut;
+                        else if (ut - since >= steadySec) break;
+                        yield return null;
+                    }
+
+                    ctx.Step($"{craft}: circle at {rate:0.#} deg/s, prediction against flight");
+                    double area = WingArea(FlightGlobals.ActiveVessel);
+                    object course = Aa.Read(FlightGlobals.ActiveVessel, "CruiseController", "desired_course");
+                    var valueProp = course?.GetType().GetProperty("Value", System.Reflection.BindingFlags.Instance |
+                                                                            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                    if (valueProp == null)
+                        throw new UITestFailure("AtmosphereAutopilot: no desired_course to turn");
+                    double t0 = Planetarium.GetUniversalTime(), circleEnd = t0 + 360 / rate + 5, nextSample = t0 + sampleSec;
+                    int skip = 0;
+                    bool broken = false;
+                    var liftErr = new List<double>();
+                    var dragErr = new List<double>();
+                    var pitchErr = new List<double>();
+                    var ars = new List<double>();
+                    var banks = new List<double>();
+                    var aoas = new List<double>();
+                    double lastHdg = double.NaN, turned = 0;
+                    var fixedWait = new WaitForFixedUpdate();
+                    while (Planetarium.GetUniversalTime() < circleEnd)
+                    {
+                        yield return fixedWait;
+                        v = FlightGlobals.ActiveVessel;
+                        if (v == null || v.parts.Count < parts)
+                        {
+                            broken = true;
+                            break;
+                        }
+                        double ut = Planetarium.GetUniversalTime();
+                        valueProp.SetValue(course, (float)((90 + rate * (ut - t0)) % 360), null);
+                        // heading of the velocity over the ground, and how far it has come round
+                        Vector3d up = (v.CoM - body.position).normalized;
+                        Vector3d north = Vector3d.Exclude(up, body.transform.up).normalized;
+                        Vector3d east = Vector3d.Cross(up, north);
+                        Vector3d hvel = Vector3d.Exclude(up, v.srf_velocity);
+                        double hdg = (Math.Atan2(Vector3d.Dot(hvel, east), Vector3d.Dot(hvel, north)) * Mathf.Rad2Deg + 360) % 360;
+                        if (!double.IsNaN(lastHdg))
+                            turned += ((hdg - lastHdg + 540) % 360) - 180;
+                        lastHdg = hdg;
+                        if (skip > 0)
+                        {
+                            skip--;
+                            continue;
+                        }
+                        if (ut < nextSample || !FarApi.FlightForceAndTorque(v, out Vector3 fFlight, out Vector3 tFlight))
+                            continue;
+                        nextSample = ut + sampleSec;
+
+                        Vector3 vel = v.srf_velocity, axis = FarApi.PitchUpAxis(v);
+                        FarApi.ClearMemo(v);
+                        if (!FarApi.PredictAtFull(v, vel, v.latitude, v.longitude, v.altitude, ut, out Vector3 fPred, out Vector3 tPred))
+                            continue;
+                        FarApi.ClearMemo(v);
+                        skip = 2;
+                        LiftDrag(v, fFlight, vel, out double L, out double D);
+                        LiftDrag(v, fPred, vel, out double Lp, out double Dp);
+                        double pm = Vector3.Dot(tFlight, axis), pmp = Vector3.Dot(tPred, axis);
+                        double bank = Math.Asin(Mathf.Clamp(Vector3.Dot(v.ReferenceTransform.right, (Vector3)up), -1, 1)) * Mathf.Rad2Deg;
+                        double beta = Math.Asin(Mathf.Clamp(Vector3.Dot(vel.normalized, v.ReferenceTransform.right), -1, 1)) * Mathf.Rad2Deg;
+                        double ar = MeanAr(v);
+                        liftErr.Add(Lp / L - 1);
+                        dragErr.Add(Dp / D - 1);
+                        pitchErr.Add(pmp - pm);
+                        ars.Add(ar);
+                        banks.Add(Math.Abs(bank));
+                        aoas.Add(Flight.AoA);
+                        csv.Append(string.Join(",", Csv(craft), F(ut, "F3"), F(hdg, "F2"), F(bank, "F2"), F(Flight.AoA, "F3"), F(beta, "F3"), F(v.altitude, "F1"),
+                            F(v.srfSpeed, "F2"), F(v.mach, "F4"), F(v.dynamicPressurekPa, "F4"), F(L, "G6"), F(Lp, "G6"), F(D, "G6"), F(Dp, "G6"),
+                            F(pm, "G6"), F(pmp, "G6"), F(ar, "F4"))).Append('\n');
+                    }
+
+                    v = FlightGlobals.ActiveVessel;
+                    if (v != null) Aa.Off(v);
+                    double Mean(List<double> l, Func<double, double> f) => l.Count > 0 ? l.Select(f).Average() : double.NaN;
+                    double Max(List<double> l, Func<double, double> f) => l.Count > 0 ? l.Select(f).Max() : double.NaN;
+                    // the middle 90 % of the samples: transients (the roll into the turn, an autopilot wobble) left out
+                    double Pct(List<double> l, double q)
+                    {
+                        if (l.Count == 0) return double.NaN;
+                        var sorted = l.OrderBy(x => x).ToList();
+                        return sorted[(int)Math.Round(q * (sorted.Count - 1))];
+                    }
+                    double Band(List<double> l) => Pct(l, 0.95) - Pct(l, 0.05);
+                    double lOff = Pct(liftErr, 0.5), dOff = Pct(dragErr, 0.5), lBand = Band(liftErr), dBand = Band(dragErr);
+                    double arMean = Mean(ars, x => x), arBand = Band(ars) / arMean, arMaxMin = ars.Count > 0 ? (ars.Max() - ars.Min()) / arMean : double.NaN;
+                    bool pass = !broken && liftErr.Count > 10 && Math.Abs(turned) >= 330 && lBand <= ratioTol && dBand <= ratioTol && arBand <= arTol;
+                    string k0 = craft + ".";
+                    if (broken)
+                        ctx.Record(k0 + "broken", v == null ? "no vessel" : $"{parts - v.parts.Count} parts lost");
+                    ctx.Record(k0 + "pass", pass);
+                    ctx.Record(k0 + "turnedDeg", Math.Round(turned, 0));
+                    ctx.Record(k0 + "liftPredicted", string.Format(Inv, "{0:+0.0%;-0.0%} of flight, band {1:P1}", lOff, lBand));
+                    ctx.Record(k0 + "dragPredicted", string.Format(Inv, "{0:+0.0%;-0.0%} of flight, band {1:P1}", dOff, dBand));
+                    ctx.Record(k0 + "arBand", string.Format(Inv, "{0:P2} of {1:F2} (max-min {2:P2})", arBand, arMean, arMaxMin));
+                    if (Math.Abs(lOff) > offsetWarn || Math.Abs(dOff) > offsetWarn)
+                        ctx.Record(k0 + "predictionOffset", "over " + offsetWarn.ToString("P0", Inv) + ": FAR's prediction API differs from its flight forces by a constant");
+                    summary.Append(string.Join(",", Csv(craft), pass ? "1" : "0", liftErr.Count.ToString(Inv), F(turned, "F0"), F(Mean(banks, x => x), "F1"),
+                        F(Max(banks, x => x), "F1"), F(Mean(aoas, x => x), "F2"), F(lOff, "F4"), F(lBand, "F4"), F(dOff, "F4"),
+                        F(dBand, "F4"), F(Mean(pitchErr, Math.Abs), "F3"), F(arMean, "F3"), F(arBand, "F5"), F(arMaxMin, "F5"))).Append('\n');
+                    if (broken)
+                        yield return Wait.Seconds(3);
+                    rec?.Stop(!pass, ctx, craft);
+                    rec = null;
+                    File.WriteAllText(Path.Combine(ctx.ResultsDir, "ar-circle-summary.csv"), summary.ToString());
+                }
+            }
+            finally
+            {
+                rec?.Stop(true, ctx, "interrupted");
+                FarFlightProbe.ResumeOtherPredictors(trajectories);
+                File.WriteAllText(Path.Combine(ctx.ResultsDir, "ar-circle.csv"), csv.ToString());
+                File.WriteAllText(Path.Combine(ctx.ResultsDir, "ar-circle-summary.csv"), summary.ToString());
+            }
+        }
+
         private static string F(double x, string fmt) => x.ToString(fmt, Inv);
 
         private static string Csv(string s) => s.Contains(',') ? "\"" + s + "\"" : s;
