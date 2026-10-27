@@ -399,6 +399,10 @@ namespace FerramAerospaceResearch.FARAeroComponents
                                                                   center);
 
                     SimulateWings(_legacyWingModels, true, velocityWorldVector, machNumber, properties.Density, center);
+
+                    // The flight path adds intake ram drag after the sections; without it the prediction's drag was low
+                    // by the whole ram drag, which grows toward Mach 1 (5-7% of an Aeris 4A's drag below 20 km).
+                    _vesselIntakeRamDrag?.SimulateIntakeRamDrag(machNumber, velocityWorldVector, (float)properties.Density, center);
                 }
                 finally
                 {
@@ -484,7 +488,8 @@ namespace FerramAerospaceResearch.FARAeroComponents
                 AdiabaticIndex = FARAeroUtil.CurrentAdiabaticIndex,
                 VesselAdiabaticIndex = FARAtmosphere.GetAdiabaticIndex(vessel),
                 ExternalTemperature = vessel.externalTemperature,
-                BodyData = FARAeroUtil.currentBodyData
+                BodyData = FARAeroUtil.currentBodyData,
+                RamDrag = _vesselIntakeRamDrag?.Capture()
             };
 
             // Sections and the part modules they apply force to.
@@ -682,6 +687,13 @@ namespace FerramAerospaceResearch.FARAeroComponents
                                                               center);
 
                     SimulateWings(snapshot.SimulatedWings, false, velocityWorldVector, machNumber, properties.Density, center);
+
+                    if (snapshot.RamDrag != null)
+                        VesselIntakeRamDrag.SimulateIntakeRamDrag(snapshot.RamDrag,
+                                                                  machNumber,
+                                                                  velocityWorldVector,
+                                                                  (float)properties.Density,
+                                                                  center);
                 }
                 finally
                 {

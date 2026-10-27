@@ -392,8 +392,8 @@ namespace FerramAerospaceResearch
         ///     <see cref="CalculateSnapshotAeroForcesAt" />. Main thread only (null otherwise), and null when the vessel has
         ///     no FAR aerodynamics or has not been voxelized yet. The snapshot holds the voxel sections, the wings and
         ///     control surfaces with their parts' geometry, shielding and deflection, the body parts' geometry, the
-        ///     center of mass and the body's atmosphere, so a prediction from it reads no live game state and gives the
-        ///     same answer on any thread.
+        ///     intakes and engine throttle, the center of mass and the body's atmosphere, so a prediction from it reads
+        ///     no live game state and gives the same answer on any thread.
         ///
         ///     The atmosphere: FAR's default functions are reproduced for the body from its curves and constants, and
         ///     checked against the live functions at capture (to a relative 1e-5; a body

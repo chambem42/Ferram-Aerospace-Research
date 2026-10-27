@@ -22,8 +22,8 @@ namespace FerramAerospaceResearch
     /// <summary>
     ///     A vessel's aerodynamic model as it stood when <see cref="FARAPI.CaptureVesselSnapshot" /> took it on the main
     ///     thread: the voxel sections, every wing and control surface with its part's transform, mass, shielding and
-    ///     deflection, the body parts' transforms and angular velocities, the vessel's center of mass, and the body's
-    ///     atmosphere. <see cref="FARAPI.CalculateSnapshotAeroForcesAt" />
+    ///     deflection, the body parts' transforms and angular velocities, the intakes and engine throttle, the
+    ///     vessel's center of mass, and the body's atmosphere. <see cref="FARAPI.CalculateSnapshotAeroForcesAt" />
     ///     predicts from it on any thread, reading no live game state; world-frame vectors are those of the capture
     ///     frame. Once the vessel changes (a re-voxelization, a part added, removed or destroyed, a wing rebuilt) the
     ///     snapshot is stale and predictions from it return false; take a new one.
@@ -77,6 +77,7 @@ namespace FerramAerospaceResearch
         internal FARWingAerodynamicModel.SnapshotState[] WingStates;
         internal FARWingAerodynamicModel[] SimulatedWings;
 
+        internal VesselIntakeRamDrag.Snapshot RamDrag;
         internal Vector3 CenterOfMass;
         internal double Length;
         internal double AdiabaticIndex;
