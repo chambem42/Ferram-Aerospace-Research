@@ -441,7 +441,8 @@ namespace FerramAerospaceResearch.FARAeroComponents
         /// The wings at one condition on the calling thread's prediction slot. A wing reads its upstream neighbours'
         /// lift slope, stall, sweep and Cd0 as last calculated on the slot, so every wing starts from the same fixed
         /// state and passes are repeated until no wing's Cl, Cd or stall changes (at most MaxPredictionPasses), then
-        /// the forces are taken. The answer depends on the inputs alone.
+        /// the forces are taken. The answer depends on the inputs alone. A shielded wing (under a tenth of its area
+        /// exposed) applies no force in flight and is left out of the editor's analyses, so it is left out here too.
         /// </summary>
         private static void SimulateWings(
             IList<FARWingAerodynamicModel> wings,
@@ -468,7 +469,7 @@ namespace FerramAerospaceResearch.FARAeroComponents
                 for (int i = 0; i < n; i++)
                 {
                     FARWingAerodynamicModel w = wings[i];
-                    if (IsMissing(w, live))
+                    if (IsMissing(w, live) || w.GetShielded())
                         continue;
                     w.PrecomputeCenterOfLift(velocity, machNumber, density, discard);
                     w.GetPredictionState(out double cl, out double cd, out double stallFraction);
@@ -486,7 +487,7 @@ namespace FerramAerospaceResearch.FARAeroComponents
             // PrecomputeCenterOfLift adds the wing's force at its aerodynamic center, as the flight path does;
             // adding it again at the part's transform origin put every wing's lift at its attach point.
             foreach (FARWingAerodynamicModel w in wings)
-                if (!IsMissing(w, live))
+                if (!IsMissing(w, live) && !w.GetShielded())
                     w.PrecomputeCenterOfLift(velocity, machNumber, density, center);
         }
 
