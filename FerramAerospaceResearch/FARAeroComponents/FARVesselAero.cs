@@ -407,6 +407,8 @@ namespace FerramAerospaceResearch.FARAeroComponents
 
                 try
                 {
+                    call.ExternalTemperature =
+                        FARBaseAerodynamics.StockExternalTemperature(vessel.mainBody, properties.Temperature, velocityMag, machNumber);
                     foreach (FARAeroSection curSection in _currentAeroSections)
                         curSection?.PredictionCalculateAeroForces((float)properties.Density,
                                                                   machNumber,
@@ -530,7 +532,7 @@ namespace FerramAerospaceResearch.FARAeroComponents
                 Length = Length,
                 AdiabaticIndex = FARAeroUtil.CurrentAdiabaticIndex,
                 VesselAdiabaticIndex = FARAtmosphere.GetAdiabaticIndex(vessel),
-                ExternalTemperature = vessel.externalTemperature,
+                Shock = FARBaseAerodynamics.ShockTemperatureParameters.Capture(body),
                 BodyData = FARAeroUtil.currentBodyData,
                 RamDrag = _vesselIntakeRamDrag?.Capture()
             };
@@ -690,7 +692,8 @@ namespace FerramAerospaceResearch.FARAeroComponents
                     call.AdiabaticIndex = snapshot.AdiabaticIndex;
                     call.VesselAdiabaticIndex = snapshot.VesselAdiabaticIndex;
                     call.BodyData = snapshot.BodyData;
-                    call.ExternalTemperature = snapshot.ExternalTemperature;
+                    call.ExternalTemperature =
+                        FARBaseAerodynamics.StockExternalTemperature(in snapshot.Shock, properties.Temperature, velocityMag, machNumber);
 
                     // Inside the call, so the viscosity is the captured body's. The viscosity takes the temperature
                     // the flight's Reynolds number does, not the density's.

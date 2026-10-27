@@ -1134,6 +1134,8 @@ namespace ferram4
             // coefficients, which makes v_scalar useless for this. The 0.005 fallback is roughly
             // double the true coefficient at sea-level Reynolds numbers and below it at low ones,
             // so callers that know the real condition being simulated can pass it in instead.
+            // A prediction takes the external temperature of the simulated condition, not the vessel's: in vacuum that
+            // is ~4 K and at 7 km/s a shock temperature of thousands of K.
             double skinFrictionDrag = skinFrictionOverride ??
                                       (HighLogic.LoadedSceneIsFlight
                                            ? FARAeroUtil.SkinFrictionDrag(density,

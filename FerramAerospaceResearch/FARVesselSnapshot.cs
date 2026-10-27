@@ -82,7 +82,7 @@ namespace FerramAerospaceResearch
         internal double Length;
         internal double AdiabaticIndex;
         internal double VesselAdiabaticIndex;
-        internal double ExternalTemperature;
+        internal FARBaseAerodynamics.ShockTemperatureParameters Shock;
         internal Settings.BodySettings BodyData;
 
         internal CelestialBody Body;

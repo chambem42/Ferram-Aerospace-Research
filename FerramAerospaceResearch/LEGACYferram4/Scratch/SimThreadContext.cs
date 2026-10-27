@@ -108,8 +108,7 @@ namespace ferram4
 
         /// <summary>
         /// The flight prediction the calling thread is inside, or null: the airflow it simulates (what a wing's
-        /// GetVelocity reports to its neighbours) and the external temperature its skin friction takes (the vessel's
-        /// as captured with a snapshot), if set.
+        /// GetVelocity reports to its neighbours) and the external temperature its skin friction takes.
         /// </summary>
         public sealed class PredictionCall
         {
