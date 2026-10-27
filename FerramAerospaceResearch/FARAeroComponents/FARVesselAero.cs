@@ -59,13 +59,15 @@ namespace FerramAerospaceResearch.FARAeroComponents
     {
         public readonly Vector3 VelocityVector;
         public readonly Vector3d Position;
+        public readonly double UT;
         public readonly Vector3 Force;
         public readonly Vector3 Torque;
 
-        public CachedSimResults(Vector3 velocityVector, Vector3d position, Vector3 force, Vector3 torque)
+        public CachedSimResults(Vector3 velocityVector, Vector3d position, double ut, Vector3 force, Vector3 torque)
         {
             VelocityVector = velocityVector;
             Position = position;
+            UT = ut;
             Force = force;
             Torque = torque;
         }
@@ -296,14 +298,29 @@ namespace FerramAerospaceResearch.FARAeroComponents
                 m.ApplyForces();
         }
 
-        private static bool loggedOffMainThread;
-        private static bool loggedNoSlot;
-
         public void SimulateAeroProperties(
             out Vector3 aeroForce,
             out Vector3 aeroTorque,
             Vector3 velocityWorldVector,
             double altitude
+        )
+        {
+            SimulateAeroPropertiesAt(out aeroForce,
+                                   out aeroTorque,
+                                   velocityWorldVector,
+                                   vessel.CurrentPosition(altitude),
+                                   Planetarium.GetUniversalTime());
+        }
+
+        private static bool loggedOffMainThread;
+        private static bool loggedNoSlot;
+
+        public void SimulateAeroPropertiesAt(
+            out Vector3 aeroForce,
+            out Vector3 aeroTorque,
+            Vector3 velocityWorldVector,
+            Vector3d position,
+            double ut
         )
         {
             // The live vessel is read here (transforms, rigidbodies, the atmosphere functions), which only the main
@@ -321,16 +338,13 @@ namespace FerramAerospaceResearch.FARAeroComponents
                 return;
             }
 
-            Vector3d position = vessel.CurrentPosition(altitude);
-
+            // The atmosphere depends on latitude, longitude and time (sun heating), custom or not.
             CachedSimResults memo;
             lock (lastSimResultsLock)
                 memo = lastSimResults;
             if (velocityWorldVector.NearlyEqual(memo.VelocityVector) &&
-                (FARAtmosphere.IsCustom
-                     // Custom atmospheres are not guaranteed to be independent of latitude and longitude
-                     ? position.NearlyEqual(memo.Position)
-                     : altitude.NearlyEqual(memo.Position.z)))
+                position.NearlyEqual(memo.Position) &&
+                ut.NearlyEqual(memo.UT))
             {
                 aeroForce = memo.Force;
                 aeroTorque = memo.Torque;
@@ -339,9 +353,9 @@ namespace FerramAerospaceResearch.FARAeroComponents
 
             var center = new FARCenterQuery();
 
-            //Calculate main gas properties
+            //Calculate main gas properties (the game's temperature at the point, so the density is the game's)
             GasProperties properties =
-                FARAtmosphere.GetGasProperties(vessel.mainBody, position, Planetarium.GetUniversalTime());
+                FARAtmosphere.GetPredictionGasProperties(vessel.mainBody, position, ut);
 
             if (properties.Pressure <= 0 || properties.Temperature <= 0)
             {
@@ -352,11 +366,13 @@ namespace FerramAerospaceResearch.FARAeroComponents
 
             float velocityMag = velocityWorldVector.magnitude;
             float machNumber = (float)(velocityMag / properties.SpeedOfSound);
+            // The viscosity takes the temperature the flight's Reynolds number does (FARAtmosphere.GetTemperature, the
+            // altitude curve unless a custom function is set), not the density's.
             float reynoldsNumber = (float)FARAeroUtil.CalculateReynoldsNumber(properties.Density,
                                                                               Length,
                                                                               velocityMag,
                                                                               machNumber,
-                                                                              properties.Temperature,
+                                                                              FARAtmosphere.GetTemperature(vessel.mainBody, position, ut),
                                                                               properties.AdiabaticIndex);
 
             float reynoldsPerLength = reynoldsNumber / (float)Length;
@@ -414,7 +430,7 @@ namespace FerramAerospaceResearch.FARAeroComponents
             aeroTorque = center.TorqueAt(vessel.CoM);
 
             lock (lastSimResultsLock)
-                lastSimResults = new CachedSimResults(velocityWorldVector, position, aeroForce, aeroTorque);
+                lastSimResults = new CachedSimResults(velocityWorldVector, position, ut, aeroForce, aeroTorque);
         }
 
         /// <summary>
@@ -649,12 +665,13 @@ namespace FerramAerospaceResearch.FARAeroComponents
                     call.BodyData = snapshot.BodyData;
                     call.ExternalTemperature = snapshot.ExternalTemperature;
 
-                    // Inside the call, so the viscosity is the captured body's.
+                    // Inside the call, so the viscosity is the captured body's. The viscosity takes the temperature
+                    // the flight's Reynolds number does, not the density's.
                     float reynoldsNumber = (float)FARAeroUtil.CalculateReynoldsNumber(properties.Density,
                                                                                       snapshot.Length,
                                                                                       velocityMag,
                                                                                       machNumber,
-                                                                                      properties.Temperature,
+                                                                                      snapshot.ReynoldsTemperature(latLonAltitude, ut, in properties),
                                                                                       properties.AdiabaticIndex);
                     float reynoldsPerLength = reynoldsNumber / (float)snapshot.Length;
                     float skinFriction = (float)FARAeroUtil.SkinFrictionDrag(reynoldsNumber, machNumber);
