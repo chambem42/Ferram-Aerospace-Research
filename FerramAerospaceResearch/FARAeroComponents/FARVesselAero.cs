@@ -415,7 +415,7 @@ namespace FerramAerospaceResearch.FARAeroComponents
 
         /// <summary>
         /// The wings at one condition on the calling thread's prediction slot, each from the state the flight left
-        /// (slot 0's, or the snapshot's capture of it), its force added at its part's position.
+        /// (slot 0's, or the snapshot's capture of it), its force added at its aerodynamic center.
         /// </summary>
         private static void SimulateWings(
             IList<FARWingAerodynamicModel> wings,
@@ -434,14 +434,11 @@ namespace FerramAerospaceResearch.FARAeroComponents
                 foreach (FARWingAerodynamicModel w in wings)
                     w?.BeginPredictionState();
 
-            var dummy = new FARCenterQuery();
+            // PrecomputeCenterOfLift adds the wing's force at its aerodynamic center, as the flight path does;
+            // adding it again at the part's transform origin put every wing's lift at its attach point.
             foreach (FARWingAerodynamicModel w in wings)
-            {
-                if (IsMissing(w, live))
-                    continue;
-                Vector3 position = live ? w.transform.position : w.SolveGeom.Value.Position;
-                center.AddForce(position, w.PrecomputeCenterOfLift(velocity, machNumber, density, dummy));
-            }
+                if (!IsMissing(w, live))
+                    w.PrecomputeCenterOfLift(velocity, machNumber, density, center);
         }
 
         private static bool IsMissing(FARWingAerodynamicModel w, bool live)

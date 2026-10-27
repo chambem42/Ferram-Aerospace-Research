@@ -657,7 +657,9 @@ namespace ferram4
                 double AoA = CalculateAoA(velocity);
 
                 Vector3d force = CalculateForces(velocity, MachNumber, AoA, density, double.PositiveInfinity, false);
-                center.AddForce(AerodynamicCenter, force);
+                // The slot's own aerodynamic center: the instance field is the flight's (slot 0) and a prediction
+                // does not write it.
+                center.AddForce(_scratch.AerodynamicCenter, force);
 
                 return force;
             }
