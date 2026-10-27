@@ -97,6 +97,9 @@ namespace FerramAerospaceResearch.FARAeroComponents
         // Predictions can come from more than one thread; the memo is read and written whole under this lock.
         private readonly object lastSimResultsLock = new object();
 
+        // At most this many passes over the wings in a prediction to bring them to a consistent state.
+        private const int MaxPredictionPasses = 8;
+
         // Changes whenever the aerodynamic model a snapshot holds changes: bumped before and after the aero data is
         // swapped for a new voxelization (the sections swapped out are then refilled by the voxel thread), when the
         // vessel is modified, and when it is unloaded or destroyed.
@@ -386,8 +389,7 @@ namespace FerramAerospaceResearch.FARAeroComponents
                 // control surfaces keep their working state per slot, and slot 0 is the flight's: evaluating on it
                 // overwrote the lift slope, stall, aerodynamic center and neighbour values the next physics frame
                 // reads, so any caller (a trajectory predictor, an autopilot) changed how the vessel flew, and each
-                // prediction started from whatever the last one left. The slot starts from the flight's state, the
-                // one a prediction found on slot 0 before any other prediction had run.
+                // prediction started from whatever the flight or the last prediction left.
                 SimThreadContext.PredictionCall call = SimThreadContext.BeginPrediction(velocityWorldVector);
                 if (call == null)
                 {
@@ -434,8 +436,10 @@ namespace FerramAerospaceResearch.FARAeroComponents
         }
 
         /// <summary>
-        /// The wings at one condition on the calling thread's prediction slot, each from the state the flight left
-        /// (slot 0's, or the snapshot's capture of it), its force added at its aerodynamic center.
+        /// The wings at one condition on the calling thread's prediction slot. A wing reads its upstream neighbours'
+        /// lift slope, stall, sweep and Cd0 as last calculated on the slot, so every wing starts from the same fixed
+        /// state and passes are repeated until no wing's Cl, Cd or stall changes (at most MaxPredictionPasses), then
+        /// the forces are taken. The answer depends on the inputs alone.
         /// </summary>
         private static void SimulateWings(
             IList<FARWingAerodynamicModel> wings,
@@ -447,12 +451,35 @@ namespace FerramAerospaceResearch.FARAeroComponents
         )
         {
             // live: the vessel's wing list, where a destroyed wing is found with Unity's == null and each wing's
-            // prediction state is started here, every wing before any is computed (a wing reads its neighbours'
-            // values on the slot). From a snapshot the wings are the captured ones (C# references, given their
-            // captured state beforehand), and no Unity call is made.
+            // prediction state is reset here. From a snapshot the wings are the captured ones (C# references,
+            // reset and given their captured state beforehand), and no Unity call is made.
+            int n = wings.Count;
             if (live)
                 foreach (FARWingAerodynamicModel w in wings)
                     w?.BeginPredictionState();
+
+            var last = new double[3 * n];
+            var discard = new FARCenterQuery();
+            for (int pass = 0; pass < MaxPredictionPasses; pass++)
+            {
+                bool changed = pass == 0;
+                for (int i = 0; i < n; i++)
+                {
+                    FARWingAerodynamicModel w = wings[i];
+                    if (IsMissing(w, live))
+                        continue;
+                    w.PrecomputeCenterOfLift(velocity, machNumber, density, discard);
+                    w.GetPredictionState(out double cl, out double cd, out double stallFraction);
+                    if (cl != last[3 * i] || cd != last[3 * i + 1] || stallFraction != last[3 * i + 2])
+                        changed = true;
+                    last[3 * i] = cl;
+                    last[3 * i + 1] = cd;
+                    last[3 * i + 2] = stallFraction;
+                }
+
+                if (!changed)
+                    break;
+            }
 
             // PrecomputeCenterOfLift adds the wing's force at its aerodynamic center, as the flight path does;
             // adding it again at the part's transform origin put every wing's lift at its attach point.

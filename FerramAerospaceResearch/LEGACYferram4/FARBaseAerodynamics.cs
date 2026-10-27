@@ -121,6 +121,11 @@ namespace ferram4
 
         public virtual Vector3d GetVelocity()
         {
+            // Inside a flight prediction the airflow is the simulated one, so a wing reading an upstream neighbour's
+            // angle of attack takes it at the simulated condition, not the one the vessel is flying.
+            SimThreadContext.PredictionCall call = SimThreadContext.Prediction;
+            if (call != null)
+                return call.Velocity;
             if (HighLogic.LoadedSceneIsFlight)
                 return part.Rigidbody.velocity +
                        Krakensbane.GetFrameVelocityV3f() -
