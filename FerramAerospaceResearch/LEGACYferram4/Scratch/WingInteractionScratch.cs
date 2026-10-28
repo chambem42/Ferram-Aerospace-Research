@@ -40,6 +40,10 @@ namespace ferram4
         public double EffectiveUpstreamCd0;
         public double EffectiveUpstreamInfluence;
 
+        // Set by SpanChainedAR (whole-wing aspect ratio)
+        public double BodyLiftFactor = 1.0;
+        public double GroupTanSweep = double.NaN;
+
         /// <summary>Every field from another slot's (the flight's): the state a flight prediction starts from.</summary>
         public void CopyFrom(WingInteractionScratch src)
         {
@@ -55,6 +59,8 @@ namespace ferram4
             EffectiveUpstreamAoA = src.EffectiveUpstreamAoA;
             EffectiveUpstreamCd0 = src.EffectiveUpstreamCd0;
             EffectiveUpstreamInfluence = src.EffectiveUpstreamInfluence;
+            BodyLiftFactor = src.BodyLiftFactor;
+            GroupTanSweep = src.GroupTanSweep;
         }
     }
 }
