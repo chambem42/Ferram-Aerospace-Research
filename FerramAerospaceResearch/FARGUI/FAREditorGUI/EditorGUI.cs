@@ -71,15 +71,6 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
 
         private static IButton blizzyEditorGUIButton;
 
-        private static readonly string[] FAReditorMode_str =
-        {
-            Localizer.Format("FAREditorModeStatic"),
-            Localizer.Format("FAREditorModeDataStab"),
-            Localizer.Format("FAREditorModeDerivSim"),
-            Localizer.Format("FAREditorModeTrans"),
-            Localizer.Format("FAREditorModeComponents")
-        };
-
         // ReSharper disable once ConvertToConstant.Local
         private readonly bool useKSPSkin = true; // currently cannot be changed from outside
         private readonly List<GeometryPartModule> _currentGeometryModules = new List<GeometryPartModule>();
@@ -109,10 +100,14 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
         private bool componentsShown;
         // the window to fit itself to the Components tab at the next layout (it was shown, or its table toggled)
         private bool fitWindow;
+        private HeatmapsGUI _heatmaps;
+        private EngineDeckGUI _engineDeck;
 
         private MethodInfo editorReportUpdate;
 
         private bool gearToggle;
+        // Velocity/AoA arrow, toggled by the Show/Hide button. The button and the arrow are both absent
+        // on the Heatmaps tab, which has no use for the arrow; elsewhere it defaults on.
         private bool showAoAArrow = true;
 
         private ArrowPointer velocityArrow;
@@ -161,15 +156,38 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
                                      new[] {0, 1, 2, 3});
             GUIDropDown<CelestialBody> celestialBodyDropdown = CreateBodyDropdown();
 
-            modeDropdown = new GUIDropDown<FAREditorMode>(FAReditorMode_str,
-                                                          new[]
-                                                          {
-                                                              FAREditorMode.STATIC,
-                                                              FAREditorMode.STABILITY,
-                                                              FAREditorMode.SIMULATION,
-                                                              FAREditorMode.AREA_RULING,
-                                                              FAREditorMode.COMPONENTS
-                                                          });
+            // The Engine Deck tab is useless without SolverEngines/AJE (its thrust sampling has nothing
+            // to talk to), so drop it from the tab list on installs that don't have them. The Heatmaps
+            // tab stays — it falls back to an engine-independent stability-only sweep there.
+            Simulation.SolverEnginesInterop.Initialize();
+            bool hasEngineDeck = Simulation.SolverEnginesInterop.Available;
+
+            var modeLabels = new List<string>
+            {
+                Localizer.Format("FAREditorModeStatic"),
+                Localizer.Format("FAREditorModeDataStab"),
+                Localizer.Format("FAREditorModeDerivSim"),
+                Localizer.Format("FAREditorModeHeatmaps")
+            };
+            var modeValues = new List<FAREditorMode>
+            {
+                FAREditorMode.STATIC,
+                FAREditorMode.STABILITY,
+                FAREditorMode.SIMULATION,
+                FAREditorMode.HEATMAPS
+            };
+            if (hasEngineDeck)
+            {
+                modeLabels.Add(Localizer.Format("FAREditorModeEngineDeck"));
+                modeValues.Add(FAREditorMode.ENGINE_DECK);
+            }
+
+            modeLabels.Add(Localizer.Format("FAREditorModeTrans"));
+            modeValues.Add(FAREditorMode.AREA_RULING);
+            modeLabels.Add(Localizer.Format("FAREditorModeComponents"));
+            modeValues.Add(FAREditorMode.COMPONENTS);
+
+            modeDropdown = new GUIDropDown<FAREditorMode>(modeLabels.ToArray(), modeValues.ToArray());
 
             _simManager = new EditorSimManager(_instantSim);
 
@@ -177,6 +195,8 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
             _stabDeriv = new StabilityDerivGUI(_simManager, flapSettingDropDown, celestialBodyDropdown);
             _stabDerivLinSim = new StabilityDerivSimulationGUI(_simManager);
             _components = new ComponentsGUI(_simManager, flapSettingDropDown, celestialBodyDropdown, ShowVoxels);
+            _heatmaps = new HeatmapsGUI(_simManager, flapSettingDropDown, celestialBodyDropdown);
+            _engineDeck = new EngineDeckGUI(celestialBodyDropdown);
 
             Color crossSection = FARConfig.GUIColors.LdColor;
             crossSection.a = 0.8f;
@@ -256,6 +276,9 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
             _stabDerivLinSim = null;
             _components?.ClearTints();
             _components = null;
+            _heatmaps?.Cleanup();
+            _heatmaps = null;
+            _engineDeck = null;
             _instantSim = null;
             _areaRulingOverlay.Cleanup();
             _areaRulingOverlay = null;
@@ -279,7 +302,46 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
                     UpdateGeometryModule(part);
             }
 
+            // Only re-voxelize when the voxelized ship actually changed. onEditorShipModified also
+            // fires for edits that leave SortedShipList untouched -- most visibly moving or deleting a
+            // detached piece, but also fuel/crew/action-group tweaks -- and those can't change the
+            // voxel model. Mesh/shape edits queue their own voxel through GeometryPartModule, so gating
+            // here can't drop a real geometry change.
+            int sig = ComputeShipVoxelSignature();
+            if (_haveShipVoxelSig && sig == _lastShipVoxelSig)
+                return;
+            _haveShipVoxelSig = true;
+            _lastShipVoxelSig = sig;
+
             RequestUpdateVoxel();
+        }
+
+        private int _lastShipVoxelSig;
+        private bool _haveShipVoxelSig;
+
+        // Cheap signature of the voxelized ship: part count plus each part's id and world transform.
+        // A detached piece isn't in SortedShipList, so moving or deleting it leaves this unchanged.
+        private static int ComputeShipVoxelSignature()
+        {
+            List<Part> parts = EditorLogic.SortedShipList;
+            if (parts == null)
+                return 0;
+
+            int hash = 17;
+            hash = hash * 31 + parts.Count;
+            foreach (Part p in parts)
+            {
+                if (p is null)
+                    continue;
+                hash = hash * 31 + (int)p.persistentId;
+                Transform t = p.partTransform;
+                if (t == null)
+                    continue;
+                hash = hash * 31 + t.position.GetHashCode();
+                hash = hash * 31 + t.rotation.GetHashCode();
+            }
+
+            return hash;
         }
 
         // ReSharper disable once MemberCanBeMadeStatic.Local -> static does not work with GameEvents
@@ -539,6 +601,10 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
                 cursorInGUI = guiRect.Contains(GUIUtils.GetMousePos());
             }
 
+            // Heatmap tooltips are drawn here, at the top level, so they are not clipped to the FAR
+            // window. A no-op unless a cell was hovered this frame.
+            HeatmapAxes.DrawQueuedTooltip();
+
             if (cursorInGUI)
             {
                 if (!CameraMouseLook.GetMouseLook())
@@ -581,9 +647,15 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
                                          : Localizer.Format("FARGearToggleRaise")))
                     ToggleGear();
                 GUILayout.EndVertical();
+            }
 
+            // Vel-indicator toggle — shown on every tab except Heatmaps and Components, which have no use for the arrow.
+            if (currentMode != FAREditorMode.HEATMAPS && !components)
+            {
                 GUILayout.BeginVertical();
-                if (GUILayout.Button(showAoAArrow ? Localizer.Format("FARVelIndHide") : Localizer.Format("FARVelIndShow")))
+                if (GUILayout.Button(showAoAArrow
+                                         ? Localizer.Format("FARVelIndHide")
+                                         : Localizer.Format("FARVelIndShow")))
                     showAoAArrow = !showAoAArrow;
                 GUILayout.EndVertical();
             }
@@ -602,6 +674,15 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
                 case FAREditorMode.SIMULATION:
                     _stabDerivLinSim.Display();
                     guiRect.height = useKSPSkin ? 570 : 450;
+                    break;
+                case FAREditorMode.HEATMAPS:
+                    _heatmaps.Display();
+                    // Fill the display: the maps are sized (HeatmapsGUI) to exactly fill this height.
+                    guiRect.height = HeatmapsGUI.WindowFloor();
+                    break;
+                case FAREditorMode.ENGINE_DECK:
+                    _engineDeck.Display();
+                    guiRect.height = useKSPSkin ? 620 : 500;
                     break;
                 case FAREditorMode.AREA_RULING:
                     CrossSectionAnalysisGUI();
@@ -720,7 +801,7 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
                 velocityArrow =
                     ArrowPointer.Create(arrowTransform, Vector3.zero, Vector3.forward, 15, Color.white, true);
 
-            if (showGUI && showAoAArrow)
+            if (showGUI && showAoAArrow && currentMode != FAREditorMode.HEATMAPS)
             {
                 velocityArrow.gameObject.SetActive(true);
                 ArrowDisplay();
@@ -854,6 +935,8 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
             STATIC,
             STABILITY,
             SIMULATION,
+            HEATMAPS,
+            ENGINE_DECK,
             AREA_RULING,
             COMPONENTS
         }
