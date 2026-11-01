@@ -65,6 +65,7 @@ namespace FerramAerospaceResearch.FARGUI.FARFlightGUI
         private static Rect dataGuiRect;
         private static Rect settingsGuiRect;
         private static Rect debugGuiRect;
+        private static Rect heatmapGuiRect;
         private static IButton blizzyFlightGUIButton;
         private static int activeFlightGUICount;
         private static int frameCountForSaving;
@@ -88,6 +89,9 @@ namespace FerramAerospaceResearch.FARGUI.FARFlightGUI
         private bool showSettingsWindow;
         private bool showDebugWindow;
         private bool started;
+        private bool showHeatmapWindow;
+
+        private readonly FlightHeatmapGUI _heatmapGUI = new FlightHeatmapGUI();
 
         private GUIDropDown<int> settingsWindow;
         public VesselFlightInfo InfoParameters { get; private set; }
@@ -105,13 +109,19 @@ namespace FerramAerospaceResearch.FARGUI.FARFlightGUI
         {
             base.OnStart();
 
-            showGUI = savedShowGUI;
-            //since we're sharing the button, we need these shenanigans now
-            if (FARDebugAndSettings.FARDebugButtonStock && HighLogic.LoadedSceneIsFlight)
-                if (showGUI)
-                    FARDebugAndSettings.FARDebugButtonStock.SetTrue(false);
-                else
-                    FARDebugAndSettings.FARDebugButtonStock.SetFalse(false);
+            // showGUI is static (shared by every vessel's FlightGUI), so only the active vessel
+            // should set it. Otherwise a background vessel spawning (e.g. an asteroid) runs OnStart
+            // and resets showGUI, closing the FAR windows the player has open.
+            if (vessel == FlightGlobals.ActiveVessel || FlightGlobals.ActiveVessel == null)
+            {
+                showGUI = savedShowGUI;
+                //since we're sharing the button, we need these shenanigans now
+                if (FARDebugAndSettings.FARDebugButtonStock && HighLogic.LoadedSceneIsFlight)
+                    if (showGUI)
+                        FARDebugAndSettings.FARDebugButtonStock.SetTrue(false);
+                    else
+                        FARDebugAndSettings.FARDebugButtonStock.SetFalse(false);
+            }
 
             _vesselAero = GetComponent<FARVesselAero>();
             _physicsCalcs = new PhysicsCalcs(vessel, _vesselAero);
@@ -165,6 +175,7 @@ namespace FerramAerospaceResearch.FARGUI.FARFlightGUI
 
             _flightDataGUI?.SaveSettings();
             _flightDataGUI = null;
+            _heatmapGUI?.Cleanup();
 
             _stabilityAugmentation?.SaveAndDestroy();
             _stabilityAugmentation = null;
@@ -323,7 +334,6 @@ namespace FerramAerospaceResearch.FARGUI.FARFlightGUI
                 GUIUtils.ClampToScreen(settingsGuiRect);
             }
 
-            // ReSharper disable once InvertIf
             if (showDebugWindow)
             {
                 debugGuiRect = GUILayout.Window(GetHashCode() + 3,
@@ -333,6 +343,26 @@ namespace FerramAerospaceResearch.FARGUI.FARFlightGUI
                                                 GUILayout.MinWidth(200));
                 GUIUtils.ClampToScreen(debugGuiRect);
             }
+
+            if (showHeatmapWindow)
+            {
+                heatmapGuiRect = GUILayout.Window(GetHashCode() + 4,
+                                                  heatmapGuiRect,
+                                                  HeatmapWindow,
+                                                  LocalizerExtensions.Get("FARFlightHeatmapTitle"),
+                                                  GUILayout.MinWidth(520));
+                GUIUtils.ClampToScreen(heatmapGuiRect);
+            }
+
+            // Heatmap tooltips draw here, at the top level, so they are not clipped to the flight
+            // window. A no-op unless a cell was hovered this frame.
+            FAREditorGUI.HeatmapAxes.DrawQueuedTooltip();
+        }
+
+        private void HeatmapWindow(int windowId)
+        {
+            _heatmapGUI.Display(vessel);
+            GUI.DragWindow();
         }
 
         private void MainFlightGUIWindow(int windowId)
@@ -358,6 +388,10 @@ namespace FerramAerospaceResearch.FARGUI.FARFlightGUI
                                                     LocalizerExtensions.Get("FARFlightGUIFltDataBtn"),
                                                     buttonStyle,
                                                     GUILayout.ExpandWidth(true));
+            showHeatmapWindow = GUILayout.Toggle(showHeatmapWindow,
+                                                 LocalizerExtensions.Get("FARFlightGUIHeatmapBtn"),
+                                                 buttonStyle,
+                                                 GUILayout.ExpandWidth(true));
             showSettingsWindow = GUILayout.Toggle(showSettingsWindow,
                                                   LocalizerExtensions.Get("FARFlightGUIFltSettings"),
                                                   buttonStyle,
