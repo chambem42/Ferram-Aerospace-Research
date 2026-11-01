@@ -534,6 +534,33 @@ namespace FerramAerospaceResearch.FARAeroComponents
             CalculateAeroForces(machNumber, reynoldsPerUnitLength, pseudoKnudsenNumber, skinFrictionDrag, simContext);
         }
 
+        /// <summary>
+        ///     As PredictionCalculateAeroForces, and each part's share of the section's forces gathered in perPart too
+        /// </summary>
+        public void PredictionCalculateAeroForces(
+            float atmDensity,
+            float machNumber,
+            float reynoldsPerUnitLength,
+            float pseudoKnudsenNumber,
+            float skinFrictionDrag,
+            Vector3 vel,
+            FARCenterQuery center,
+            Dictionary<Part, FARCenterQuery> perPart
+        )
+        {
+            SimulatedForceContext simContext = SimContext; // this slot's, the one the call below uses
+            simContext.PerPart = perPart;
+            try
+            {
+                PredictionCalculateAeroForces(atmDensity, machNumber, reynoldsPerUnitLength, pseudoKnudsenNumber,
+                                              skinFrictionDrag, vel, center);
+            }
+            finally
+            {
+                simContext.PerPart = null;
+            }
+        }
+
         private readonly FlightForceContext flightContext = new FlightForceContext();
 
         public void FlightCalculateAeroForces(
