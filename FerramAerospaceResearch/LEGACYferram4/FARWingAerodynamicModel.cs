@@ -395,6 +395,8 @@ namespace ferram4
         /// </summary>
         internal virtual SnapshotState CaptureSnapshotState()
         {
+            // the wing group a prediction off the main thread takes its aspect ratio from
+            wingInteraction?.ResolveWingGroup();
             var seed = new WingScratch();
             seed.CopyFrom(_scratchSlots[0] ?? NewScratch());
             return new SnapshotState
@@ -547,6 +549,8 @@ namespace ferram4
             SimGeom = new FrozenPartTransform(part_transform);
             simRbMass = part.rb != null ? part.rb.mass : part.mass;
             simFixedDeltaTime = TimeWarp.fixedDeltaTime;
+            // the wing group the sweep's workers take their aspect ratio from
+            wingInteraction?.ResolveWingGroup();
         }
 
         // ReSharper disable once UnusedMember.Global
@@ -1775,7 +1779,9 @@ namespace ferram4
 
             SetSweepAngle(sweepHalfChord);
 
-            _scratch.effective_AR = wingInteraction.SpanChainedAR(_scratch.transformed_AR);
+            _scratch.effective_AR = wingInteraction.SpanChainedAR(_scratch.transformed_AR,
+                                                                  out double bodyLiftFactor,
+                                                                  out double groupTanSweep);
 
             //Even this range of effective ARs is large, but it keeps the Oswald's Efficiency numbers in check
             _scratch.effective_AR = _scratch.effective_AR.Clamp(0.25, 30d);
@@ -1786,7 +1792,7 @@ namespace ferram4
                 tmp = 0.19;
 
             // a wing on a bare body lifts as the whole wing through the body: that wing's half-chord sweep
-            double sweepTmp = double.IsNaN(wingInteraction.GroupTanSweep) ? sweepHalfChord : wingInteraction.GroupTanSweep;
+            double sweepTmp = double.IsNaN(groupTanSweep) ? sweepHalfChord : groupTanSweep;
             sweepTmp *= sweepTmp;
 
             tmp += sweepTmp;
@@ -1798,7 +1804,7 @@ namespace ferram4
             tmp *= 2 * Math.PI;
 
             // and the panels carry that wing's lift on the body between its roots
-            return tmp * _scratch.effective_AR * wingInteraction.BodyLiftFactor;
+            return tmp * _scratch.effective_AR * bodyLiftFactor;
         }
 
         //Transforms cos sweep of the midchord to cosine(sweep of the leading edge)

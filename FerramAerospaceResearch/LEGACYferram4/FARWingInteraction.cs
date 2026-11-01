@@ -1056,6 +1056,15 @@ namespace ferram4
         /// </summary>
         private WingGroup GroupForAR()
         {
+            // finding a group reads part transforms and meshes, which only the main thread may: a sweep worker or an
+            // off-thread prediction takes the group the main thread last found (ResolveWingGroup before either)
+            if (!MainThread.IsMainThread)
+                return arGroup;
+            return arGroup = FindGroupForAR();
+        }
+
+        private WingGroup FindGroupForAR()
+        {
             if (!FARDebugValues.wholeWingAspectRatio || parentWingPart == null || vesselParts == null)
                 return null;
             // a control surface is part of the wing it is on, and takes that wing's aspect ratio
@@ -1065,6 +1074,15 @@ namespace ferram4
                 WingGroup.Build(parentWingModule, vesselParts);
             return AsWing(wingGroup) ? wingGroup : null;
         }
+
+        // the group GroupForAR last found on the main thread, measured (AsWing), so other threads only read it
+        private volatile WingGroup arGroup;
+
+        /// <summary>
+        ///     Finds this panel's group on the main thread for the threads that cannot: before a parallel sweep or a vessel
+        ///     snapshot
+        /// </summary>
+        internal void ResolveWingGroup() => GroupForAR();
 
         /// <summary>
         ///     The wing this panel takes its aspect ratio from (a control surface: the wing it is on), one object for every
@@ -1082,19 +1100,22 @@ namespace ferram4
         ///     before. With FARDebugValues.wholeWingAspectRatio off, every panel keeps its own (upstream's model).
         /// </summary>
         /// <param name="transformedAR">This panel's own aspect ratio (semispan over chord, along the flow)</param>
-        internal double SpanChainedAR(double transformedAR)
+        /// <param name="bodyLiftFactor">For a wing on a bare body, its lift slope's factor for the body between the roots; else 1</param>
+        /// <param name="groupTanSweep">For a wing on a bare body, the tangent of the whole wing's half-chord sweep, which
+        ///     replaces the panel's own; else NaN (the panel's)</param>
+        internal double SpanChainedAR(double transformedAR, out double bodyLiftFactor, out double groupTanSweep)
         {
-            BodyLiftFactor = 1;
-            GroupTanSweep = double.NaN;
+            bodyLiftFactor = 1;
+            groupTanSweep = double.NaN;
             WingGroup g = GroupForAR();
             if (g == null)
                 return transformedAR * ARFactor;
 
             // the lift of the wing's planform: overlaps once, and the strip of body between the roots
-            BodyLiftFactor = g.BodyLiftFactor;
+            bodyLiftFactor = g.BodyLiftFactor;
             if (g.RootOnBody)
                 // the whole wing through the body: its sweep
-                GroupTanSweep = g.HalfChordTan;
+                groupTanSweep = g.HalfChordTan;
 
             return g.AspectRatio();
         }
@@ -1105,10 +1126,6 @@ namespace ferram4
         // layers: their own aspect ratio, as before
         private static bool AsWing(WingGroup g) =>
             g != null && g.PanelCount > 0 && g.Measure() && (g.Members.Count > 1 || g.RootOnBody && g.RootOnCenter);
-
-        // for a wing on a bare body (see WingGroup.BodyLiftFactor): its lift slope's factor for the body between the
-        // roots, and the tangent of the whole wing's half-chord sweep, which replaces the panel's own (NaN: the panel's)
-        internal double BodyLiftFactor = 1, GroupTanSweep = double.NaN;
 
         /// <summary>
         ///     Panels of one kind (wing panels, or control surfaces) that touch one another in about the same plane: one
