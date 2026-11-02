@@ -17,7 +17,7 @@
 
     <PropertyGroup>
         <!-- the harness and these modules from the KspTest submodule, compile-time only: the runner deploys them -->
-        <KspTestModules>MechJeb;AtmosphereAutopilot</KspTestModules>
+        <KspTestModules>MechJeb;Far;AtmosphereAutopilot</KspTestModules>
     </PropertyGroup>
 
     <Import Project="$(KspTestRoot)/build/KspTest.FromSource.targets" />

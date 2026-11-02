@@ -33,7 +33,7 @@ namespace FerramAerospaceResearch.KspTests
         /// measured. Writes noise_floor.md (summary) and noise_floor.csv (every frame). Params: frames (50),
         /// settle (25), only (condition names, '+'-separated).
         /// </summary>
-        [UITest("Far_FlightVsApi_NoiseFloor", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 1200)]
+        [UITest("Far_FlightVsApi_NoiseFloor", Kind = "Check", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 1200)]
         public static IEnumerator Far_FlightVsApi_NoiseFloor(TestContext ctx)
         {
             yield return Wait.Seconds(5);   // FAR voxelizes the craft after load
@@ -125,7 +125,7 @@ namespace FerramAerospaceResearch.KspTests
         /// from takeoff (FlightTrace); trim_sweep.csv is FAR's prediction on the runway before takeoff, surfaces
         /// neutral and gear down, over AoA at a few speeds at 500 m.
         /// </summary>
-        [UITest("Far_FlownVsPlaced", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 2400)]
+        [UITest("Far_FlownVsPlaced", Kind = "Check", Requires = "AtmosphereAutopilot", Mods = "AtmosphereAutopilot", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 2400)]
         public static IEnumerator Far_FlownVsPlaced(TestContext ctx)
         {
             Assert.True(Aa.Present, "AtmosphereAutopilot is installed");
@@ -510,7 +510,7 @@ namespace FerramAerospaceResearch.KspTests
         /// Params: frames (50), settle (25), predictFrames (20), craft (another SPH craft in the save), seed (random),
         /// trim (true), trims (coded; fresh finds every trim again), hold (torque), resettle, resetStall, surfaceFix.
         /// </summary>
-        [UITest("Far_CrossCondition", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 3000)]
+        [UITest("Far_CrossCondition", Kind = "Check", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 3000)]
         public static IEnumerator Far_CrossCondition(TestContext ctx)
         {
             yield return Wait.Seconds(5);
@@ -862,7 +862,7 @@ namespace FerramAerospaceResearch.KspTests
         /// predictions of A are exactly equal. Writes isolation.md (the fields that changed, grouped). Params: craft,
         /// strict (true: fail on any change).
         /// </summary>
-        [UITest("Far_PredictionIsolation", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 600)]
+        [UITest("Far_PredictionIsolation", Kind = "Check", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 600)]
         public static IEnumerator Far_PredictionIsolation(TestContext ctx)
         {
             yield return Wait.Seconds(5);
@@ -968,7 +968,7 @@ namespace FerramAerospaceResearch.KspTests
         /// re-voxelizes, the old snapshot is refused and a new one works. Writes threads.md. Params: craft, threads (8),
         /// repeats (3), flyFrames (100), strict (true).
         /// </summary>
-        [UITest("Far_PredictionThreads", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest("Far_PredictionThreads", Kind = "Check", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Far_PredictionThreads(TestContext ctx)
         {
             yield return Wait.Seconds(5);
@@ -1036,7 +1036,10 @@ namespace FerramAerospaceResearch.KspTests
             // one unit in the last place of a float), not bit for bit. Every other comparison here is exact.
             const double LiveTolerance = 1e-6;
             double relForce = (main[0, 0] - fLive).magnitude / Math.Max(1e-9f, fLive.magnitude);
-            double relTorque = (main[0, 1] - tLive).magnitude / Math.Max(1e-9f, tLive.magnitude);
+            // A trimmed vessel's torque is near zero, so the torque's rounding is scaled by what it is made of: the
+            // force times the vessel's size (a float's rounding in a lever arm shows as force x that rounding).
+            double torqueScale = Math.Max(tLive.magnitude, fLive.magnitude * v.vesselSize.magnitude);
+            double relTorque = (main[0, 1] - tLive).magnitude / Math.Max(1e-9, torqueScale);
             bool snapMatchesLive = relForce <= LiveTolerance && relTorque <= LiveTolerance;
             ctx.Record("refusedFresh", refused);
             ctx.Record("snapshotMatchesLive", snapMatchesLive);

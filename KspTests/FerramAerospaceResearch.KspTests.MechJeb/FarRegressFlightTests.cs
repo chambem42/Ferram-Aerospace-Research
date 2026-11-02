@@ -28,7 +28,7 @@ namespace FerramAerospaceResearch.KspTests.MechJeb
         /// Params: crafts ("+"-separated, default "Aeris 4A+PoofySkirt"), heading (90), climbToM (800), pitches ("8,3"),
         /// settleSec (12), sampleSec (15), rotateSpeed (60), cruiseThrottle (0.35), disableWheels (1).
         /// </summary>
-        [UITest("Far_Regress_Flight", Requires = "MechJeb", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 2400)]
+        [UITest("Far_Regress_Flight", Kind = "Check", Mods = "MechJeb2", Requires = "MechJeb", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 2400)]
         public static IEnumerator Far_Regress_Flight(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());

@@ -17,8 +17,13 @@
 
     <PropertyGroup>
         <!-- the harness and these modules from the KspTest submodule, compile-time only: the runner deploys them -->
-        <KspTestModules>AtmosphereAutopilot</KspTestModules>
+        <KspTestModules>Far;Trajectories;AtmosphereAutopilot</KspTestModules>
     </PropertyGroup>
+
+    <ItemGroup>
+        <!-- FarThermalModeTests patches FAR; the game loads GameData/000_Harmony -->
+        <PackageReference Include="Lib.Harmony" Version="2.2.1" ExcludeAssets="runtime" PrivateAssets="all" />
+    </ItemGroup>
 
     <Import Project="$(KspTestRoot)/build/KspTest.FromSource.targets" />
 

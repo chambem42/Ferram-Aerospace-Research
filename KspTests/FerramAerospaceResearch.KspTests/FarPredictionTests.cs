@@ -19,7 +19,7 @@ namespace FerramAerospaceResearch.KspTests
         /// default atmosphere is the altitude curve again (predictions alone take the game's) it is not asserted.
         /// Params: speed (150 m/s, for the quarter-turn check), liftSpeed (40 m/s), aoa (5 deg), alts ("100,10000,30000").
         /// </summary>
-        [UITest("Far_PredictionAtmosphere_Flight", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 600)]
+        [UITest("Far_PredictionAtmosphere_Flight", Kind = "Check", Mods = "Trajectories", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 600)]
         public static IEnumerator Far_PredictionAtmosphere_Flight(TestContext ctx)
         {
             yield return Wait.Seconds(10);   // FAR voxelizes the craft after load

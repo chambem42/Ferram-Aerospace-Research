@@ -48,7 +48,7 @@ namespace FerramAerospaceResearch.KspTests.RP1
             if (File.Exists(parts)) File.Copy(parts, Path.Combine(ctx.ResultsDir, Path.GetFileName(parts)), true);
         }
 
-        [UITest("Reentry_Predict", Requires = "RP-1", StartsAt = StartState.Vab, Craft = "Mk2 SSTO Big", TimeoutSec = 600)]
+        [UITest("Reentry_Predict", Kind = "Check", NewGame = "career", Requires = "RP-1,MechJeb", StartsAt = StartState.Vab, Craft = "Mk2 SSTO Big", TimeoutSec = 600)]
         public static IEnumerator Reentry_Predict(TestContext ctx)
         {
             Ugui.DismissPopups();
@@ -68,7 +68,7 @@ namespace FerramAerospaceResearch.KspTests.RP1
         /// The written prediction's trajectory is the flight's; diff its parts trace against the flight's to see
         /// what the thermal model alone gets wrong.
         /// </summary>
-        [UITest("Reentry_Replay", Requires = "RP-1", StartsAt = StartState.Vab, Craft = "Mk2 SSTO Big", TimeoutSec = 600)]
+        [UITest("Reentry_Replay", Kind = "Check", NewGame = "career", Requires = "RP-1,MechJeb", StartsAt = StartState.Vab, Craft = "Mk2 SSTO Big", TimeoutSec = 600)]
         public static IEnumerator Reentry_Replay(TestContext ctx)
         {
             Ugui.DismissPopups();
@@ -108,7 +108,7 @@ namespace FerramAerospaceResearch.KspTests.RP1
         }
 
         /// <summary>The AoA x Pe heatmap sweep; params peMinKm/peMaxKm/peSteps/aoaMin/aoaMax/aoaSteps/apKm/attitude/propellant.</summary>
-        [UITest("Reentry_Analyse", Requires = "RP-1", StartsAt = StartState.Vab, Craft = "Mk2 SSTO Big", TimeoutSec = 900)]
+        [UITest("Reentry_Analyse", Kind = "Check", NewGame = "career", Requires = "RP-1,MechJeb", StartsAt = StartState.Vab, Craft = "Mk2 SSTO Big", TimeoutSec = 900)]
         public static IEnumerator Reentry_Analyse(TestContext ctx)
         {
             Ugui.DismissPopups();
@@ -124,7 +124,7 @@ namespace FerramAerospaceResearch.KspTests.RP1
             Assert.False(Rp1.LastSummary.StartsWith("Analysis failed"), Rp1.LastSummary);
         }
 
-        [UITest("Reentry_Fly", Requires = "RP-1,MechJeb", StartsAt = StartState.Vab, Craft = "Mk2 SSTO Big", TimeoutSec = 3000)]
+        [UITest("Reentry_Fly", Kind = "Measure", NewGame = "career", Requires = "RP-1,MechJeb", StartsAt = StartState.Vab, Craft = "Mk2 SSTO Big", TimeoutSec = 3000)]
         public static IEnumerator Reentry_Fly(TestContext ctx)
         {
             Ugui.DismissPopups();
@@ -143,7 +143,8 @@ namespace FerramAerospaceResearch.KspTests.RP1
             public bool? DescentMode;                 // RO's CoM shifter, for capsules
             public double ApKm, PeMinKm, PeMaxKm, AoAMin, AoAMax;
             /// <summary>Where over the planet the entry happens: with inclination and LAN, the frame stock's occlusion is judged in.</summary>
-            public double IncDeg, LanDeg, ArgPeDeg;
+            public double IncDeg, ArgPeDeg;
+            public double LanDeg = 0;                 // no scenario needs another yet; given to the sim every time like the other two
             public int PeSteps, AoASteps;
             public double? PropellantPct;
             public double EndAltKm = 45;
@@ -218,7 +219,7 @@ namespace FerramAerospaceResearch.KspTests.RP1
         /// by default); repeat = how many times to fly each (2nd and later carry a "-r2", "-r3" suffix), to measure
         /// the run-to-run spread of one cell.
         /// </summary>
-        [UITest("Reentry_Borderline", Requires = "RP-1,MechJeb", StartsAt = StartState.Vab, Craft = "Mk1-3 Test", TimeoutSec = 7200)]
+        [UITest("Reentry_Borderline", Kind = "Check", NewGame = "career", Requires = "RP-1,MechJeb", StartsAt = StartState.Vab, Craft = "Mk1-3 Test", TimeoutSec = 7200)]
         public static IEnumerator Reentry_Borderline(TestContext ctx)
         {
             string filter = ctx.Param("scenario");

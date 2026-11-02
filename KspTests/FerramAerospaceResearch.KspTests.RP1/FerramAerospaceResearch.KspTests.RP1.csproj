@@ -17,8 +17,20 @@
 
     <PropertyGroup>
         <!-- the harness and these modules from the KspTest submodule, compile-time only: the runner deploys them -->
-        <KspTestModules>MechJeb;RP1;AtmosphereAutopilot</KspTestModules>
+        <KspTestModules>MechJeb;RP1;Far;AtmosphereAutopilot</KspTestModules>
     </PropertyGroup>
+
+    <!-- ksptest serve-plugin's fresh name for each build: changed tests run in a Serve session without a restart -->
+    <PropertyGroup Condition="'$(ServePluginName)' != ''">
+        <AssemblyName>$(ServePluginName)</AssemblyName>
+        <OutputPath>bin/serve-plugins/$(ServePluginName)/</OutputPath>
+        <Deterministic>false</Deterministic>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- ThermalModeRp1Tests uses the thermal area modes; deployed beside this assembly -->
+        <ProjectReference Include="..\FerramAerospaceResearch.KspTests\FerramAerospaceResearch.KspTests.csproj" Private="false" />
+    </ItemGroup>
 
     <Import Project="$(KspTestRoot)/build/KspTest.FromSource.targets" />
 

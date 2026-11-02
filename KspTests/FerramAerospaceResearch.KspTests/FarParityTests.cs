@@ -20,8 +20,15 @@ namespace FerramAerospaceResearch.KspTests
     /// (&lt;segment&gt;.out) and its whole part state every 50 frames (&lt;segment&gt;.state). Compare two replays with
     /// scratchpad parity_replay.py: the same build twice shows whether the replay is exact; two builds, whether
     /// the code differs. predict=1 also calls FAR's prediction API after every frame, at another condition (the leak
-    /// test: with it the flight must still match a replay without).
-    /// Params: mode (record|replay), recording, segments (comma list), seconds (override each segment's length), predict.
+    /// test: with it the flight must still match a replay without). mode=predictgrid loads each segment's save once
+    /// per grid condition and makes one prediction (FARAPI.CalculateVesselAeroForces, which every FAR has) right after
+    /// the replay's frame gridFrame (50), then stops, writing its force and torque bit for bit (&lt;segment&gt;.grid):
+    /// a FAR whose predictions leave state behind (0.16.2) still gives its first one after a frame exactly, so two
+    /// builds compare condition by condition. A segment's first load in a session replays differently from the later
+    /// ones (from its first frame on), so its first replay is a warm-up and is not measured (warmup=0: measured too). Compare with scratchpad parity_grid.py. mode=replaygrid does a replay and then the grid,
+    /// in one run.
+    /// Params: mode (record|replay|predictgrid|replaygrid), recording, segments (comma list), seconds (override each segment's
+    /// length), predict, repeats (replays of each segment in this session, into results/r0, r1, ...).
     /// </summary>
     public static class FarParityTests
     {
@@ -69,17 +76,60 @@ namespace FerramAerospaceResearch.KspTests
                           Pitch = 0.5f, Throttle = 0f, Seconds = 15, Steps = Maneuvers(0.5f, 0f, false) },
         };
 
-        [UITest("Far_FlightParity", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 3000)]
+        private static bool Profile, Methods;
+
+        // FAR's per-frame flight work, method by method (each in 0.16.2 too; GetVelocity is on the base class there)
+        private static readonly string[] TimedMethods =
+        {
+            "ferram4.FARWingAerodynamicModel.FixedUpdate", "ferram4.FARWingAerodynamicModel.CalculateForces",
+            "ferram4.FARWingAerodynamicModel.DoCalculateForces", "ferram4.FARWingAerodynamicModel.CalculateCoefficients",
+            "ferram4.FARWingAerodynamicModel.CalculateWingCamberInteractions", "ferram4.FARWingAerodynamicModel.DetermineStall",
+            "ferram4.FARWingAerodynamicModel.CalculateSubsonicLiftSlope", "ferram4.FARWingAerodynamicModel.CalculateSupersonicLEFactor",
+            "ferram4.FARWingAerodynamicModel.CdCompressibilityZeroLiftIncrement", "ferram4.FARWingAerodynamicModel.CalculateAerodynamicCenter",
+            "ferram4.FARWingAerodynamicModel.WingCentroid", "ferram4.FARWingAerodynamicModel.GetVelocity",
+            "ferram4.FARBaseAerodynamics.GetVelocity", "ferram4.FARWingAerodynamicModel.CalculateAoA",
+            "ferram4.FARWingAerodynamicModel.UpdateAeroDisplay", "ferram4.FARWingAerodynamicModel.GetLiftDirection",
+            "ferram4.FARWingAerodynamicModel.CalculateAoAmax",
+            "ferram4.FARWingInteraction.CalculateEffectsOfUpstreamWing", "ferram4.FARWingInteraction.UpdateUpstreamValuesFromWingModules",
+            "ferram4.FARWingInteraction.UpdateOrientationForInteraction",
+            "ferram4.FARControllableSurface.FixedUpdate", "ferram4.FARControllableSurface.AoAOffsetFromControl",
+            "ferram4.FARControllableSurface.ChangeDeflection", "ferram4.FARControllableSurface.DeflectionAnimation",
+            "ferram4.FARControllableSurface.CalculateAoA", "ferram4.FARControllableSurface.CheckShielded",
+            "ferram4.FARControllableSurface.CalculateDynamicControlFactor",
+            "FerramAerospaceResearch.FARAeroComponents.FARVesselAero.FixedUpdate",
+            "FerramAerospaceResearch.FARAeroComponents.FARVesselAero.CalculateAndApplyVesselAeroProperties",
+            "FerramAerospaceResearch.FARAeroComponents.FARAeroSection.FlightCalculateAeroForces",
+            "FerramAerospaceResearch.FARAeroComponents.FARAeroSection.CalculateAeroForces",
+            "FerramAerospaceResearch.FARAeroComponents.FARAeroPartModule.ApplyForces",
+            "FerramAerospaceResearch.FARAeroComponents.FARAeroPartModule.UpdateVelocityAndAngVelocity",
+        };
+
+        [UITest("Far_FlightParity", Kind = "Measure", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 3000)]
         public static IEnumerator Far_FlightParity(TestContext ctx)
         {
             yield return Wait.Seconds(5);
             string mode = ctx.Param("mode", "record");
             bool predict = ctx.Param("predict", "0") == "1";
+            int repeats = mode == "record" ? 1 : Math.Max(1, (int)ctx.ParamDouble("repeats", 1));
             double seconds = ctx.ParamDouble("seconds", 0);
             var only = ctx.Param("segments", null)?.Split(',').Select(s => s.Trim()).ToList();
             var segments = Segments().Where(s => only == null || only.Contains(s.Name)).ToList();
             if (seconds > 0) segments.ForEach(s => s.Seconds = seconds);
             FlightReplay.TraceFrames = (int)ctx.ParamDouble("trace", 0);
+            // profile=1: FAR's flight cost per physics frame during each replay, into <segment>.prof
+            bool profile = ctx.Param("profile", "0") == "1";
+            if (profile && !FarFrameTimer.EnsurePatched()) throw new UITestFailure("FAR's FixedUpdates to time");
+            Profile = profile;
+            // methods=1: inclusive time of FAR's flight methods during each replay, into <segment>.methods
+            bool methods = ctx.Param("methods", "0") == "1";
+            if (methods)
+                ctx.Record("methodsTimed", string.Join(" ", FarMethodTimer.Patch(TimedMethods)));
+            Methods = methods;
+            // serialVoxel=1: FAR voxelizes on one thread, the same voxel every time (its threaded voxelization differs
+            // from one to the next, which moves the body forces ~1e-4); every replay rebuilds the voxel at its start
+            bool serialVoxel = ctx.Param("serialVoxel", "0") == "1";
+            if (serialVoxel && !FarSerialVoxel.EnsurePatched()) throw new UITestFailure("FAR's VehicleVoxel.CreateNewVoxel to patch");
+            ctx.Record("serialVoxel", serialVoxel);
             string craft = FlightGlobals.ActiveVessel.vesselName;
             ctx.Record("mode", mode);
             ctx.Record("craft", craft);
@@ -106,8 +156,23 @@ namespace FerramAerospaceResearch.KspTests
             foreach (Segment s in segments)
             {
                 ctx.Step($"{mode} {s.Name}");
+                if (mode == "predictgrid")
+                {
+                    yield return PredictGrid(ctx, s, recDir);
+                    continue;
+                }
+
+                if (mode == "replaygrid")
+                    ctx.Step($"replay {s.Name}");
+
+                for (int k = 0; k < repeats; ++k)
+                {
+                // several replays in one session: each into results/r<k>/, its records suffixed .r<k>
+                string dir = repeats > 1 ? Path.Combine(ctx.ResultsDir, "r" + k) : ctx.ResultsDir;
+                string key = repeats > 1 ? s.Name + ".r" + k : s.Name;
+                Directory.CreateDirectory(dir);
                 string rec = Path.Combine(recDir, s.Name + ".rec");
-                string output = Path.Combine(ctx.ResultsDir, s.Name + ".out"), state = Path.Combine(ctx.ResultsDir, s.Name + ".state");
+                string output = Path.Combine(dir, s.Name + ".out"), state = Path.Combine(dir, s.Name + ".state");
                 if (mode == "record")
                 {
                     int frames = (int)Math.Round(s.Seconds / TimeWarp.fixedDeltaTime);
@@ -133,16 +198,28 @@ namespace FerramAerospaceResearch.KspTests
                     FlightReplay.AfterFrame = predict ? (Action<int, Vessel>)PredictElsewhere : null;
                 }
                 yield return RunFromSave(ctx, "parity-" + s.Name);
-                ctx.Record(s.Name + ".frames", FlightReplay.Frame);
-                ctx.Record(s.Name + ".voxelSwaps", string.Join(" ", FlightReplay.VoxelSwaps));
-                ctx.Record(s.Name + ".predictionCalls", FarCallWatch.Summary());
-                ctx.Record(s.Name + ".predictionsBlocked", FlightReplay.BlockedPredictions);
+                ctx.Record(key + ".frames", FlightReplay.Frame);
+                if (methods)
+                    File.WriteAllLines(Path.Combine(dir, s.Name + ".methods"), FarMethodTimer.Report());
+                if (profile)
+                    File.WriteAllLines(Path.Combine(dir, s.Name + ".prof"),
+                                       new[] { $"# ticks per second {FarFrameTimer.Frequency}; per physics frame: wingTicks vesselTicks wingCalls" }
+                                           .Concat(FarFrameTimer.Frames.Select(f => $"{f[0]} {f[1]} {f[2]}")));
+                ctx.Record(key + ".voxelSwaps", string.Join(" ", FlightReplay.VoxelSwaps));
+                ctx.Record(key + ".predictionCalls", FarCallWatch.Summary());
+                ctx.Record(key + ".predictionsBlocked", FlightReplay.BlockedPredictions);
                 if (FlightReplay.State != FlightReplay.Phase.Done)
-                    throw new UITestFailure($"{s.Name}: {FlightReplay.State} {FlightReplay.Error}");
+                    throw new UITestFailure($"{key}: {FlightReplay.State} {FlightReplay.Error}");
                 Vessel v = FlightGlobals.ActiveVessel;
-                ctx.Record(s.Name + ".end", string.Format(CultureInfo.InvariantCulture, "{0:F0} m, {1:F0} m/s, Mach {2:F2}, {3} parts",
-                                                          v.altitude, v.srfSpeed, v.mach, v.parts.Count));
-                yield return Snap.Shot(ctx, "end-" + s.Name);
+                ctx.Record(key + ".end", string.Format(CultureInfo.InvariantCulture, "{0:F0} m, {1:F0} m/s, Mach {2:F2}, {3} parts",
+                                                       v.altitude, v.srfSpeed, v.mach, v.parts.Count));
+                yield return Snap.Shot(ctx, "end-" + key);
+                }
+                if (mode == "replaygrid")
+                {
+                    ctx.Step($"predictgrid {s.Name}");
+                    yield return PredictGrid(ctx, s, recDir);
+                }
             }
         }
 
@@ -156,7 +233,7 @@ namespace FerramAerospaceResearch.KspTests
         /// Params: points ("3000:0.5+12000:1.5", alt m : Mach [: altitude tolerance m, else altTol]; "stage" among them stages there), hyper ("30000:5", empty for none), low ("1000:0.5", empty for none), maxClimb (30, AA's default), maxDescent (10),
         /// altTol (3 m), warp (physics warp from takeoff on: 1, 2, 3 or 4), blockPredictions (1: FAR's prediction API does nothing, whoever calls it).
         /// </summary>
-        [UITest("Far_FlightProfile", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 3600)]
+        [UITest("Far_FlightProfile", Kind = "Check", Requires = "AtmosphereAutopilot", Mods = "AtmosphereAutopilot", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 3600)]
         public static IEnumerator Far_FlightProfile(TestContext ctx)
         {
             Assert.True(Aa.Present, "AtmosphereAutopilot is installed");
@@ -350,7 +427,7 @@ namespace FerramAerospaceResearch.KspTests
 
         // Loads a flight save, keeps the vessel packed until FAR's voxels are built and idle, then lets FlightReplay
         // take it off rails and run.
-        private static IEnumerator RunFromSave(TestContext ctx, string save)
+        private static IEnumerator RunFromSave(TestContext ctx, string save, Func<bool> until = null)
         {
             Ctrl.Detach();
             var node = GamePersistence.LoadSFSFile(save, HighLogic.SaveFolder);
@@ -378,10 +455,67 @@ namespace FerramAerospaceResearch.KspTests
             if (!FarIdle(v)) throw new UITestFailure(save + ": FAR started another voxel update");
             FarCallWatch.EnsurePatched();
             FarCallWatch.Reset();
+            if (Profile) FarFrameTimer.Reset();
+            if (Methods) FarMethodTimer.Reset();
             FlightReplay.Begin();
-            yield return Wait.Until(() => FlightReplay.State == FlightReplay.Phase.Done || FlightReplay.State == FlightReplay.Phase.Failed,
+            yield return Wait.Until(() => FlightReplay.State == FlightReplay.Phase.Done || FlightReplay.State == FlightReplay.Phase.Failed ||
+                                          until != null && until(),
                                     FlightReplay.FrameCount * TimeWarp.fixedDeltaTime * 4 + 60, "replay of " + save, shot: false);
         }
+
+        // The prediction grid, about the vessel's own condition at the grid frame: speed factor, pitch of the velocity
+        // (deg, nose up), altitude offset (m). The first is the condition itself.
+        private static readonly (double speed, double pitch, double dAlt)[] Grid =
+        {
+            (1, 0, 0), (1, 5, 0), (1, -5, 0), (1, 12, 0), (0.5, 0, 0), (0.5, 15, 0), (2, 0, 0), (2, 8, 0),
+            (1, 0, 8000), (1.5, 4, -2000), (3, 2, 12000), (0.3, 30, 0),
+        };
+
+        // One prediction per load, right after the replay's frame gridFrame (default 50), then the replay stops: see
+        // Far_FlightParity's mode=predictgrid. A segment's first load in a session replays differently from the later
+        // ones (from frame 0), so a first load is made and discarded (warmup=0 skips it).
+        private static IEnumerator PredictGrid(TestContext ctx, Segment s, string recDir)
+        {
+            int gridFrame = (int)ctx.ParamDouble("gridFrame", 50);
+            bool warmup = ctx.Param("warmup", "1") != "0";
+            var lines = new List<string> { $"# frame {gridFrame}; index,speed,pitchDeg,dAltM,force(3),torque(3) as float bits" };
+            for (int g = warmup ? -1 : 0; g < Grid.Length; ++g)
+            {
+                (double speed, double pitch, double dAlt) c = Grid[Math.Max(g, 0)];
+                string line = null;
+                FlightReplay.PrepareReplay(Path.Combine(recDir, s.Name + ".rec"), Path.Combine(ctx.ResultsDir, s.Name + ".grid.out"), null);
+                FlightReplay.Script = null;
+                FlightReplay.AfterFrame = (frame, v) =>
+                {
+                    if (frame != gridFrame || line != null) return;
+                    Vector3 vel = Quaternion.AngleAxis((float)c.pitch, FarApi.PitchUpAxis(v)) * (Vector3)v.srf_velocity * (float)c.speed;
+                    Vector3 force, torque;
+                    FlightReplay.AllowPredictions = true;
+                    try
+                    {
+                        object[] args = { v, null, null, vel, v.altitude + c.dAlt };
+                        Reflect.FindType("FerramAerospaceResearch.FARAPI").GetMethod("CalculateVesselAeroForces").Invoke(null, args);
+                        force = (Vector3)args[1];
+                        torque = (Vector3)args[2];
+                    }
+                    finally { FlightReplay.AllowPredictions = false; }
+                    line = string.Join(",", g.ToString(CultureInfo.InvariantCulture), c.speed.ToString("R", CultureInfo.InvariantCulture),
+                                       c.pitch.ToString("R", CultureInfo.InvariantCulture), c.dAlt.ToString("R", CultureInfo.InvariantCulture),
+                                       Bits(force.x), Bits(force.y), Bits(force.z), Bits(torque.x), Bits(torque.y), Bits(torque.z));
+                    FlightReplay.Stop();
+                };
+                yield return RunFromSave(ctx, "parity-" + s.Name, () => line != null);
+                FlightReplay.AfterFrame = null;
+                if (line == null)
+                    throw new UITestFailure($"{s.Name} grid {g}: no prediction ({FlightReplay.State} {FlightReplay.Error})");
+                if (g >= 0) lines.Add(line);
+            }
+
+            File.WriteAllLines(Path.Combine(ctx.ResultsDir, s.Name + ".grid"), lines);
+            ctx.Record(s.Name + ".grid", lines.Count - 1);
+        }
+
+        private static string Bits(float x) => BitConverter.ToInt32(BitConverter.GetBytes(x), 0).ToString("x8");
 
         private static bool FarIdle(Vessel v)
         {

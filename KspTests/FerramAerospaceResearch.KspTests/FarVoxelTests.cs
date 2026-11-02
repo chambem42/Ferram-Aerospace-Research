@@ -43,7 +43,7 @@ namespace FerramAerospaceResearch.KspTests
             public (double total, double filled) Last { get { lock (Lines) return Lines[Lines.Count - 1]; } }
         }
 
-        [UITest("Far_VoxelRepeat", StartsAt = StartState.Sph, Craft = "Aeris 4A", CraftDir = "SPH", TimeoutSec = 1800)]
+        [UITest("Far_VoxelRepeat", Kind = "Measure", StartsAt = StartState.Sph, Craft = "Aeris 4A", CraftDir = "SPH", TimeoutSec = 1800)]
         public static IEnumerator Far_VoxelRepeat(TestContext ctx)
         {
             int n = (int)ctx.ParamDouble("n", 30);

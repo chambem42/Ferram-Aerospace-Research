@@ -19,7 +19,7 @@ namespace FerramAerospaceResearch.KspTests.MechJeb
         /// body forces at the wrong point. Params: craft (default PoofySkirt), pitch (deg, default 12), heading,
         /// climbToKm (default 2), sampleSec (default 40).
         /// </summary>
-        [UITest("Far_ComOffset_Flight", Requires = "MechJeb", StartsAt = StartState.Flight, Craft = "PoofySkirt", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest("Far_ComOffset_Flight", Kind = "Check", Mods = "MechJeb2", Requires = "MechJeb", StartsAt = StartState.Flight, Craft = "PoofySkirt", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Far_ComOffset_Flight(TestContext ctx)
         {
             Assert.True(Mj.Present, "vessel has a MechJebCore (MechJebForAll or an MJ part)");
@@ -79,7 +79,7 @@ namespace FerramAerospaceResearch.KspTests.MechJeb
         /// (default PoofySkirt) or crafts (a "+"-separated list, each launched in turn and its values prefixed with
         /// the craft name), heading, climbToM (default 200), pitches (deg, default "8,14,3"), sampleSec (default 6).
         /// </summary>
-        [UITest("Far_VoxelSize_Flight", Requires = "MechJeb", StartsAt = StartState.Flight, Craft = "PoofySkirt", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 1800)]
+        [UITest("Far_VoxelSize_Flight", Kind = "Check", Mods = "MechJeb2", Requires = "MechJeb", StartsAt = StartState.Flight, Craft = "PoofySkirt", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 1800)]
         public static IEnumerator Far_VoxelSize_Flight(TestContext ctx)
         {
             var rows = new System.Text.StringBuilder(FarApi.PartAreasHeader);
@@ -231,7 +231,7 @@ namespace FerramAerospaceResearch.KspTests.MechJeb
         /// samples below 60 km allowed outside the band, default 0.05): a run whose attitude hold leaves the band more
         /// than that is reported as failed, since its heating is not comparable.
         /// </summary>
-        [UITest("Far_Heating_Flight", Requires = "MechJeb", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 1800)]
+        [UITest("Far_Heating_Flight", Kind = "Check", Mods = "MechJeb2", Requires = "MechJeb", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 1800)]
         public static IEnumerator Far_Heating_Flight(TestContext ctx)
         {
             Assert.True(Mj.Present, "vessel has a MechJebCore (MechJebForAll or an MJ part)");

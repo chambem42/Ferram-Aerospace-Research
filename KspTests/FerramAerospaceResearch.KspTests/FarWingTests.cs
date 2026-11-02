@@ -28,7 +28,7 @@ namespace FerramAerospaceResearch.KspTests
         /// values read from its neighbors. Each wing's lift difference is estimated as q S dCl. Writes wings.md, largest
         /// difference first. Params: craft, settle (75).
         /// </summary>
-        [UITest("Far_WingBreakdown", StartsAt = StartState.Flight, Craft = "Stearwing A300", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 600)]
+        [UITest("Far_WingBreakdown", Kind = "Check", StartsAt = StartState.Flight, Craft = "Stearwing A300", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 600)]
         public static IEnumerator Far_WingBreakdown(TestContext ctx)
         {
             yield return Wait.Seconds(5);
@@ -115,7 +115,7 @@ namespace FerramAerospaceResearch.KspTests
         /// giving each part's section force in the prediction and the local velocity it was given. Writes body.md, lift
         /// and drag per part, largest lift difference first. Params: craft, settle (75).
         /// </summary>
-        [UITest("Far_BodyBreakdown", StartsAt = StartState.Flight, Craft = "Stearwing A300", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 600)]
+        [UITest("Far_BodyBreakdown", Kind = "Check", StartsAt = StartState.Flight, Craft = "Stearwing A300", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 600)]
         public static IEnumerator Far_BodyBreakdown(TestContext ctx)
         {
             yield return Wait.Seconds(5);

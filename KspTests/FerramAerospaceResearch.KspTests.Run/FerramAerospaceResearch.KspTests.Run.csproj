@@ -1,9 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <!--
-        Runs FAR's in-game tests in KSP with dotnet test: each [KspFact] deploys the KspTest harness and the in-game test
-        assemblies into the install, starts KSP on a new sandbox game with crafts/ in its SPH, and passes when the in-game
-        test does. Skipped when no install is configured (KSPDIR, or "install" in ksptest.json; see ksptest.example.json).
+        Runs FAR's in-game tests in KSP with dotnet test: every [UITest] in the in-game projects below is a test here
+        (KspTest.Xunit's generator makes them), which deploys the KspTest harness and the in-game test assemblies into the
+        install or instance, starts KSP on a new game (sandbox, unless the test says otherwise) with crafts/ in its SPH,
+        and passes when the in-game test does. Its Kind (Check, Measure), mods and new game are on its [UITest].
     -->
     <PropertyGroup>
         <TargetFramework>net8.0</TargetFramework>
@@ -36,8 +37,20 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- with no install configured, the tests run in a KSP instance KspTest makes with these mods (CKAN identifiers;
+             a test's [UITest(Mods)] adds its own), and this FAR, built from source, over CKAN's -->
+        <!-- ProceduralParts and B9-PWings-Fork: parts of the crafts in crafts/ -->
+        <KspMod Include="FerramAerospaceResearchContinued;KSPBurst;ProceduralParts;B9-PWings-Fork" />
+        <!-- FarGameData (a property, or the environment) overlays another FAR build's GameData/FerramAerospaceResearch -->
+        <KspOverlay Include="$(FarGameData)" Condition="'$(FarGameData)' != ''" />
+        <KspOverlay Include="..\..\GameData\FerramAerospaceResearch" Condition="'$(FarGameData)' == ''" />
+    </ItemGroup>
+
+    <ItemGroup>
         <!-- the crafts the tests fly that KSP and FAR do not ship, put into every run's save -->
         <KspTestCraft Include="crafts/*.craft" />
+        <!-- a player's save (local only, not checked in): Far_UserSaveEntry_RP1 -->
+        <KspTestSave Include="saves/user-gemini" Condition="Exists('saves/user-gemini')" />
         <None Include="ksptest.json" Condition="Exists('ksptest.json')" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 

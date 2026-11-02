@@ -1,0 +1,197 @@
+name: In-game tests (spike)
+
+# A trial of FAR's in-game tests on GitHub's own runners: does KSP load, reach an editor and fly on Windows (Microsoft's
+# software Direct3D) and on Linux (Xvfb, -batchmode), and how long does it take. KSP 1.12.5 comes from encrypted 7z
+# volumes in a private repo's release (KspTest/ci/Pack-KspGame.ps1). Pushes to this branch and manual runs only: fork
+# PRs get no secrets, and nothing here may run a PR's code. The game folder is never cached or uploaded.
+#
+# Secrets: KSP_GAME_KEY (the archive key), KSP_GAME_TOKEN (fine-grained, Contents: read-only on the game repo alone).
+
+on:
+  push:
+    branches: [ci/ingame-spike]
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: dotnet test --filter
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  GAME_REPO: chambem42/ksp-ci-assets
+  GAME_RELEASE: ksp-1.12.5
+  # an editor test, then a flight test; neither needs a mod beyond the test project's own
+  TEST_FILTER: ${{ inputs.filter || 'FullyQualifiedName~Far_Regress_Editor|FullyQualifiedName~Far_FlightVsApi_NoiseFloor' }}
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+
+jobs:
+  build:
+    # FAR as the Build workflow builds it: stripped KSP assemblies, no game needed
+    runs-on: ubuntu-24.04
+    env:
+      KSP_ROOT: /tmp/ksp
+    steps:
+      - uses: actions/checkout@v6
+      - run: git submodule update --init buildtools
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.x
+
+      - uses: KSPModdingLibs/KSPBuildTools/.github/actions/setup-ckan@1.1.1
+        with:
+          ckan-filters: ""
+
+      - uses: KSPModdingLibs/KSPBuildTools/.github/actions/install-dependencies@1.1.1
+        with:
+          dependency-identifiers: ModularFlightIntegrator KSPCommunityFixes KSPBurst ModuleManager
+
+      - name: Stamp commit SHA
+        run: |
+          cp .github/package.config.json config.json.user
+          python -m buildtools replace
+
+      - uses: KSPModdingLibs/KSPBuildTools/.github/actions/compile@1.1.1
+        with:
+          solution-file-path: FerramAerospaceResearch.sln
+
+      # the test runs lay this over CKAN's FAR (FarGameData)
+      - uses: actions/upload-artifact@v6
+        with:
+          name: far-gamedata
+          path: GameData/FerramAerospaceResearch
+
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows, os: windows-2022, platform: windows, ksp-args: "" }
+          - { name: windows-batchmode, os: windows-2022, platform: windows, ksp-args: "-batchmode" }
+          # drawing with Mesa hangs in the first frame of a flight scene (KspTest/docker/README.md)
+          - { name: linux-batchmode, os: ubuntu-24.04, platform: linux, ksp-args: "-batchmode" }
+    name: test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.x
+
+      - name: Paths and machine
+        run: |
+          w="$RUNNER_TEMP"
+          command -v cygpath >/dev/null && w=$(cygpath -m "$w")
+          echo "WORK=$w" >> "$GITHUB_ENV"
+          echo "KSPTEST_GAME=$w/ksp" >> "$GITHUB_ENV"
+          echo "KSPTEST_INSTANCES=$w/instances" >> "$GITHUB_ENV"
+          echo "KSPTEST_RESULTS=$w/results" >> "$GITHUB_ENV"
+          echo "KSPTEST_CKAN=$w/ckan/ckan.exe" >> "$GITHUB_ENV"
+          echo "KSPTEST_KSP_ARGS=${{ matrix.ksp-args }}" >> "$GITHUB_ENV"
+          echo "KSPTEST_TEXTURES=low" >> "$GITHUB_ENV"
+          echo "FarGameData=$w/far/FerramAerospaceResearch" >> "$GITHUB_ENV"
+          if [ "${{ matrix.platform }}" = windows ]; then
+            powershell -NoProfile -Command "Get-CimInstance Win32_VideoController | Select-Object Name, DriverVersion | Format-Table -AutoSize; Get-CimInstance Win32_ComputerSystem | Select-Object NumberOfLogicalProcessors, @{n='RAM GiB';e={[math]::Round(\$_.TotalPhysicalMemory/1GB,1)}} | Format-Table -AutoSize; query user; exit 0"
+          else
+            nproc; free -g
+          fi
+          df -h "$RUNNER_TEMP"
+
+      - name: Linux packages
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            xvfb xauth x11-utils libgl1 libgl1-mesa-dri libglu1-mesa libegl1 \
+            libxcursor1 libxrandr2 libxi6 libxinerama1 libxss1 libxext6 libx11-6 libgtk-3-0 \
+            libpulse0 libasound2t64 libudev1 mono-runtime mono-devel ca-certificates-mono p7zip-full
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: far-gamedata
+          path: ${{ runner.temp }}/far/FerramAerospaceResearch
+
+      - name: Download the game
+        env:
+          GH_TOKEN: ${{ secrets.KSP_GAME_TOKEN }}
+        run: |
+          start=$SECONDS
+          gh release download "$GAME_RELEASE-${{ matrix.platform }}" -R "$GAME_REPO" -p '*.7z.*' -D "$WORK/game-archive"
+          ls -l "$WORK/game-archive"
+          echo "downloaded in $((SECONDS - start)) s"
+
+      - name: Extract the game
+        env:
+          KSP_GAME_KEY: ${{ secrets.KSP_GAME_KEY }}
+        run: |
+          start=$SECONDS
+          7z x -y -bso0 -bsp0 "-p$KSP_GAME_KEY" "-o$KSPTEST_GAME" "$WORK/game-archive/$GAME_RELEASE-${{ matrix.platform }}.7z.001"
+          rm -rf "$WORK/game-archive"
+          if [ -f "$KSPTEST_GAME/KSP.x86_64" ]; then chmod +x "$KSPTEST_GAME/KSP.x86_64"; fi
+          cat "$KSPTEST_GAME"/buildID*.txt | head -2
+          echo "extracted in $((SECONDS - start)) s"
+
+      - name: CKAN
+        run: |
+          mkdir -p "$WORK/ckan"
+          curl -fsSL -o "$KSPTEST_CKAN" https://github.com/KSP-CKAN/CKAN/releases/latest/download/ckan.exe
+
+      - name: Virtual display
+        if: matrix.platform == 'linux'
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp >"$WORK/xvfb.log" 2>&1 &
+          for i in $(seq 50); do xdpyinfo -display :99 >/dev/null 2>&1 && break; sleep 0.2; done
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+
+      - name: In-game tests
+        run: |
+          start=$SECONDS
+          dotnet test KspTests/FerramAerospaceResearch.KspTests.Run -p:KspDir="$KSPTEST_GAME" \
+            --filter "$TEST_FILTER" --logger "console;verbosity=normal" \
+            --logger "trx;LogFileName=tests.trx" --results-directory "$WORK/trx"
+          echo "tests in $((SECONDS - start)) s"
+
+      - name: Collect logs
+        if: always()
+        run: |
+          d="$WORK/diag"; mkdir -p "$d"
+          if [ "${{ matrix.platform }}" = windows ]; then
+            p="$(cygpath -u "$USERPROFILE")/AppData/LocalLow/Squad/Kerbal Space Program"
+          else
+            p="$HOME/.config/unity3d/Squad/Kerbal Space Program"
+          fi
+          cp "$p"/Player*.log "$d/" 2>/dev/null || true
+          for i in "$KSPTEST_INSTANCES"/*/; do
+            n=$(basename "$i")
+            for f in KSP.log KspTest-instance.json; do [ -f "$i$f" ] && cp "$i$f" "$d/$n-$f"; done
+          done
+          [ -f "$WORK/xvfb.log" ] && cp "$WORK/xvfb.log" "$d/"
+          ls -l "$d"
+
+      # results, logs and the test report only: never the game or an instance
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: results-${{ matrix.name }}
+          path: |
+            ${{ runner.temp }}/results
+            ${{ runner.temp }}/trx
+            ${{ runner.temp }}/diag
+          if-no-files-found: warn

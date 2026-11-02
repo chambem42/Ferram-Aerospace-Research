@@ -53,6 +53,8 @@ The crafts the tests fly by default are KSP's and FAR's stock planes, and the on
 
 An in-game test is a static `IEnumerator` method with `[UITest("Name", StartsAt = ...)]` in one of the in-game
 projects; the harness gets the game to its start state (the space center, an editor with a craft, a craft on the
-runway), then runs it as a coroutine. Add a `[KspFact]` method calling `Run("Name", timeoutSec)` in
-`FarTests.cs` to run it with `dotnet test`. See KspTest's README for the harness's API (scenes, flight, FAR's numbers
+runway), then runs it as a coroutine. It is a `dotnet test` test too, of the same full name: the Run project lists every
+`[UITest]` in the in-game projects. Its `Kind` (`Check` or `Measure`, for `--filter Kind=Check`), the mods it needs
+besides the project's (`Mods`, CKAN identifiers or a local mod's GameData folder) and its new game (`NewGame = "career"`)
+go on the `[UITest]`. See KspTest's README for the harness's API (scenes, flight, FAR's numbers
 through `FarApi`/`FarSim`, screenshots, recording values).

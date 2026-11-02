@@ -37,16 +37,20 @@ namespace FerramAerospaceResearch.KspTests
         /// Params: crafts ("+"-separated stock SPH crafts, default every stock FAR plane but the Stearwing), point
         /// (altM:mach, 3000:0.5), climbTo (altM:mach, 7000:0.5; none for one cruise only), steadySec (8), windowSec (10),
         /// settleTimeoutSec (120), climbTimeoutSec (300), tints (cl; also none, cd, stall), clSat (0.25; FAR's default 0.5
-        /// leaves cruise lift faint), arrows (on), ffmpeg (path to ffmpeg.exe; without it, no video).
+        /// leaves cruise lift faint), arrows (on), ffmpeg (path to ffmpeg.exe; without it, no video), hyperWarp (4; 1 for real time;
+        /// above 1, TimeControl hyper-warp at that rate from the air start, physics step unchanged, off for the shots;
+        /// the speedup got is recorded per craft, and the video plays that much faster).
         /// Writes ar-cruise.csv (every frame, with its phase), ar-parts.csv, ar-summary.csv (one row a craft and phase:
         /// cruise, climb, cruise2), ar_*.png and ar_*.mp4.
         /// </summary>
-        [UITest("Far_ArCruise", StartsAt = StartState.SpaceCenter, TimeoutSec = 10800)]
+        [UITest("Far_ArCruise", Kind = "Measure", Requires = "AtmosphereAutopilot", Mods = "AtmosphereAutopilot;TimeControl", StartsAt = StartState.SpaceCenter, TimeoutSec = 10800)]
         public static IEnumerator Far_ArCruise(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());
             Assert.True(Aa.Present, "AtmosphereAutopilot is installed");
-            string[] crafts = (ctx.Param("crafts") ?? "Aeris 3A+Aeris 4A+Albatross 3+Dove+FAR Firehound MS+FAR SkyEye+Gull+Mallard+" +
+            // the SkyEye flies autostrutted (unstrutted, its wings break up in held flight on any build); the Firehound with
+            // its flaps up (F0: the stock craft is saved with its flaps down, which FAR's editor simulation ignores)
+            string[] crafts = (ctx.Param("crafts") ?? "Aeris 3A+Aeris 4A+Albatross 3+Dove+FAR Firehound MS F0+FAR SkyEye AS+Gull+Mallard+" +
                                                       "Ravenspear Mk3+Ravenspear Mk4+Skywinder AE1+Thunderbird+Velociteze").Split('+');
             var points = new List<(string phase, double alt, double mach)>();
             string[] pt = (ctx.Param("point") ?? "3000:0.5").Split(':');
@@ -64,6 +68,13 @@ namespace FerramAerospaceResearch.KspTests
             bool arrows = !(ctx.Param("arrows", "on") ?? "on").Equals("off", StringComparison.OrdinalIgnoreCase);
             string ffmpeg = ctx.Param("ffmpeg");
             ctx.Record("video", ffmpeg != null && File.Exists(ffmpeg));
+            double hyper = ctx.ParamDouble("hyperWarp", 4);
+            void Hyper(bool on)
+            {
+                if (hyper <= 1) return;
+                if (on) Assert.True(Flight.HyperWarp(hyper, 1.0), "TimeControl hyper-warp on");
+                else Flight.HyperWarpOff();
+            }
             var csv = new StringBuilder("craft,phase,ut,altM,srfSpeed,mach,qKPa,aoaDeg,pitchInput,verticalSpeed,liftKN,dragKN,wingLiftKN,bodyLiftKN,CL,CD,LD,liftOverWeight,g\n");
             var partsCsv = new StringBuilder("craft,phase,part,persistentId,kind,areaM2,effective_AR,Cl,Cd,liftslope,stall,liftKN,dragKN,crossKN,tintCl,shielded\n");
             var summary = new StringBuilder("craft,phase,steady,durationS,altM,srfSpeed,mach,qKPa,massT,wingAreaM2,aoaDeg,aoaSd,aoaMax,pitchInput,pitchInputMax," +
@@ -115,6 +126,8 @@ namespace FerramAerospaceResearch.KspTests
                     int parts = FlightGlobals.ActiveVessel.parts.Count;
                     double area = WingArea(FlightGlobals.ActiveVessel);
                     bool abnormal = false, broken = false;
+                    double ut0 = Planetarium.GetUniversalTime(), wall0 = Time.realtimeSinceStartup;
+                    Hyper(true);
 
                     for (int ph = 0; ph < points.Count && !broken; ph++)
                     {
@@ -260,10 +273,15 @@ namespace FerramAerospaceResearch.KspTests
                             F(M("LW"), "F4"), F(M("g"), "F3"), F(Mx("g"), "F3"), F(slope, "F4"), F(predL, "F3"), F(meanAr, "F3"))).Append('\n');
 
                         ctx.Step($"{craft}: {phase} aero visualization shots");
+                        Hyper(false);
                         yield return VizShots(ctx, FlightGlobals.ActiveVessel, craft.Replace(' ', '_') + (ph > 0 ? "_" + phase : ""), tints, clSat, arrows);
+                        if (ph + 1 < points.Count) Hyper(true);
                         File.WriteAllText(Path.Combine(ctx.ResultsDir, "ar-summary.csv"), summary.ToString());
                     }
 
+                    Hyper(false);
+                    if (hyper > 1)
+                        ctx.Record(craft + ".speedup", Math.Round((Planetarium.GetUniversalTime() - ut0) / (Time.realtimeSinceStartup - wall0), 2));
                     v = FlightGlobals.ActiveVessel;
                     if (broken)
                     {
@@ -279,11 +297,128 @@ namespace FerramAerospaceResearch.KspTests
             }
             finally
             {
+                Hyper(false);
                 rec?.Stop(true, ctx, "interrupted");
                 FarFlightProbe.ResumeOtherPredictors(trajectories);
                 File.WriteAllText(Path.Combine(ctx.ResultsDir, "ar-cruise.csv"), csv.ToString());
                 File.WriteAllText(Path.Combine(ctx.ResultsDir, "ar-parts.csv"), partsCsv.ToString());
                 File.WriteAllText(Path.Combine(ctx.ResultsDir, "ar-summary.csv"), summary.ToString());
+            }
+        }
+
+        /// <summary>
+        /// Flaps and spoilers in FAR's editor sim: each craft's AoA sweep (alphaMin to alphaMax by alphaStep, at the Mach)
+        /// in each configuration of configs, fN = flap level N (0 to 3; a flap deflects maxdeflectFlap x N / 3), sN = flap
+        /// level N with the spoilers out, dX = every flap deflected X deg (its maxdeflectFlap set to X at level 3; negative
+        /// is trailing edge up), put back after the craft. Per configuration: CL at 0 deg, the lift slope (per deg, least
+        /// squares over alphaMin..6 deg), the zero-lift AoA, CLmax and its AoA, CD at 0 deg, and the change in CL and CD at
+        /// 0 deg from f0 (or d0); per control surface its role, maximum flap deflection, chord fraction, area and effective
+        /// aspect ratio. Params: crafts ("+"-separated, default the Real Boeing 737-800 CS), facility (SPH), mach (0.2),
+        /// alphaMin (-4), alphaMax (24), alphaStep (1), configs (f0,f1,f2,f3,s0,s3). Writes highlift.csv (every point),
+        /// highlift-summary.csv and highlift-surfaces.csv.
+        /// </summary>
+        [UITest("Far_HighLift", Kind = "Measure", StartsAt = StartState.SpaceCenter, TimeoutSec = 3600)]
+        public static IEnumerator Far_HighLift(TestContext ctx)
+        {
+            ctx.Record("farBuild", FarSim.FarVersion());
+            string facility = (ctx.Param("facility") ?? "SPH").ToUpperInvariant();
+            StartState state = facility == "VAB" ? StartState.Vab : StartState.Sph;
+            string[] crafts = (ctx.Param("crafts") ?? "Real Boeing 737-800 CS").Split('+');
+            double mach = ctx.ParamDouble("mach", 0.2);
+            double aMin = ctx.ParamDouble("alphaMin", -4), aMax = ctx.ParamDouble("alphaMax", 24), aStep = ctx.ParamDouble("alphaStep", 1);
+            var configs = (ctx.Param("configs") ?? "f0,f1,f2,f3,s0,s3").Split(',').Select(s => s.Trim().ToLowerInvariant())
+                .Where(s => s.Length == 2 && (s[0] == 'f' || s[0] == 's') && s[1] >= '0' && s[1] <= '3' ||
+                            s.Length > 1 && s[0] == 'd' && double.TryParse(s.Substring(1), NumberStyles.Float, Inv, out _)).ToArray();
+            var alphas = new List<double>();
+            for (double a = aMin; a <= aMax + 1e-6; a += aStep) alphas.Add(Math.Round(a, 6));
+            var points = new StringBuilder("craft,config,flaps,spoilers,alpha,Cl,Cd,Cm\n");
+            var summary = new StringBuilder("craft,config,flaps,spoilers,Cl0,ClPerDeg,alphaZeroLift,ClMax,alphaClMax,Cd0,dCl0,dCd0\n");
+            var surfaces = new StringBuilder("craft,part,x,role,maxdeflectFlap,maxdeflect,ctrlSurfFrac,areaM2,effective_AR\n");
+            foreach (string craftRaw in crafts)
+            {
+                string craft = craftRaw.Trim();
+                ctx.Step("Craft " + craft);
+                string path = ctx.CraftPath(craft, facility);
+                if (!File.Exists(path))
+                    path = Path.GetFullPath(Path.Combine(KSPUtil.ApplicationRootPath, "Ships", facility, craft + ".craft"));
+                string missing = MissingParts(path);
+                if (missing.Length > 0)
+                {
+                    ctx.Record(craft + ".skipped", "missing parts: " + missing);
+                    continue;
+                }
+                yield return Nav.EnsureState(ctx, state, path);
+                Ugui.DismissPopups();
+                yield return Wait.Until(FarSim.Ready, 60, "FAR editor sim ready", shot: false);
+                yield return Wait.Seconds(8);   // voxelization settles after the craft loads
+
+                foreach (Part p in EditorLogic.fetch.ship.parts)
+                    foreach (PartModule m in p.Modules)
+                    {
+                        if (!IsFarWing(m)) continue;
+                        bool ctrl = m.GetType().Name == "FARControllableSurface";
+                        string role = !ctrl ? "wing"
+                            : Reflect.Get(m, "isFlap") is bool f && f ? "flap"
+                            : Reflect.Get(m, "isSpoiler") is bool sp && sp ? "spoiler" : "control";
+                        surfaces.Append(string.Join(",", Csv(craft), Csv(p.partInfo.title), F(p.transform.position.x, "F2"), role,
+                            ctrl ? F(Num(m, "maxdeflectFlap"), "F1") : "", ctrl ? F(Num(m, "maxdeflect"), "F1") : "",
+                            ctrl ? F(Num(m, "ctrlSurfFrac"), "F3") : "", F(Num(m, "S"), "F3"), F(Num(m, "effective_AR"), "F3"))).Append('\n');
+                    }
+
+                // the flaps and their own maximum deflection, put back after the craft
+                var flapTravel = new List<(PartModule m, object travel)>();
+                foreach (Part p in EditorLogic.fetch.ship.parts)
+                    foreach (PartModule m in p.Modules)
+                        if (m.GetType().Name == "FARControllableSurface" && Reflect.Get(m, "isFlap") is bool isFlap && isFlap)
+                            flapTravel.Add((m, Reflect.Get(m, "maxdeflectFlap")));
+
+                FarSim.Instant(5, 0, 0, mach, 0, 0, false);   // the sim carries state between calls: settle it first
+                double cl00 = double.NaN, cd00 = double.NaN;
+                foreach (string c in configs)
+                {
+                    int flaps;
+                    bool spoilers = c[0] == 's';
+                    if (c[0] == 'd')
+                    {
+                        float deg = float.Parse(c.Substring(1), NumberStyles.Float, Inv);
+                        foreach (var (m, _) in flapTravel)
+                            Reflect.Set(m, "maxdeflectFlap", deg);
+                        flaps = 3;
+                    }
+                    else
+                    {
+                        foreach (var (m, travel) in flapTravel)
+                            Reflect.Set(m, "maxdeflectFlap", travel);
+                        flaps = c[1] - '0';
+                    }
+                    var cl = new double[alphas.Count];
+                    var cd = new double[alphas.Count];
+                    for (int i = 0; i < alphas.Count; ++i)
+                    {
+                        var o = FarSim.Instant(alphas[i], 0, 0, mach, 0, flaps, spoilers);
+                        cl[i] = o["Cl"]; cd[i] = o["Cd"];
+                        points.Append(string.Join(",", Csv(craft), c, flaps.ToString(Inv), spoilers ? "1" : "0", F(alphas[i], "G6"),
+                            F(cl[i], "G9"), F(cd[i], "G9"), F(o["Cm"], "G9"))).Append('\n');
+                    }
+                    var lin = Enumerable.Range(0, alphas.Count).Where(i => alphas[i] <= 6).ToArray();
+                    double mx = lin.Average(i => alphas[i]), my = lin.Average(i => cl[i]);
+                    double slope = lin.Sum(i => (alphas[i] - mx) * (cl[i] - my)) / lin.Sum(i => (alphas[i] - mx) * (alphas[i] - mx));
+                    int i0 = alphas.FindIndex(a => Math.Abs(a) < 1e-6);
+                    double cl0 = i0 >= 0 ? cl[i0] : my - slope * mx, cd0 = i0 >= 0 ? cd[i0] : double.NaN;
+                    int iMax = Enumerable.Range(0, alphas.Count).OrderByDescending(i => cl[i]).First();
+                    if (c == "f0" || c == "d0") { cl00 = cl0; cd00 = cd0; }
+                    string k = $"{craft}.{c}.";
+                    ctx.Record(k + "Cl0", Math.Round(cl0, 4));
+                    ctx.Record(k + "ClPerDeg", Math.Round(slope, 5));
+                    ctx.Record(k + "ClMax", string.Format(Inv, "{0:F3} at {1:0.#} deg", cl[iMax], alphas[iMax]));
+                    summary.Append(string.Join(",", Csv(craft), c, flaps.ToString(Inv), spoilers ? "1" : "0", F(cl0, "F5"), F(slope, "F6"),
+                        F(-cl0 / slope, "F3"), F(cl[iMax], "F5"), F(alphas[iMax], "G6"), F(cd0, "F5"), F(cl0 - cl00, "F5"), F(cd0 - cd00, "F5"))).Append('\n');
+                }
+                foreach (var (m, travel) in flapTravel)
+                    Reflect.Set(m, "maxdeflectFlap", travel);
+                File.WriteAllText(Path.Combine(ctx.ResultsDir, "highlift.csv"), points.ToString());
+                File.WriteAllText(Path.Combine(ctx.ResultsDir, "highlift-summary.csv"), summary.ToString());
+                File.WriteAllText(Path.Combine(ctx.ResultsDir, "highlift-surfaces.csv"), surfaces.ToString());
             }
         }
 
@@ -301,10 +436,11 @@ namespace FerramAerospaceResearch.KspTests
         /// prediction API reads about 11 % more lift than its flight on the Gull, at every heading. Reaction wheels off.
         /// With ffmpeg given, a failing or broken craft's flight is kept on video. Params: crafts ("+"-separated; default
         /// the Gull, steady in every cruise run), point (altM:mach, 3000:0.5), turnRateDegS (3), sampleSec (0.5), steadySec
-        /// (8), settleTimeoutSec (120), ratioTol (0.03), arTol (0.005), offsetWarn (0.05), ffmpeg. Writes ar-circle.csv
-        /// (every sample) and ar-circle-summary.csv.
+        /// (8), settleTimeoutSec (120), ratioTol (0.03), arTol (0.005), offsetWarn (0.05), ffmpeg, hyperWarp (4; 1 for real time; above 1,
+        /// TimeControl hyper-warp at that rate from the air start to the end of the circle, physics step unchanged; the
+        /// speedup got is recorded per craft). Writes ar-circle.csv (every sample) and ar-circle-summary.csv.
         /// </summary>
-        [UITest("Far_ArCircle", StartsAt = StartState.SpaceCenter, TimeoutSec = 10800)]
+        [UITest("Far_ArCircle", Kind = "Check", Requires = "AtmosphereAutopilot", Mods = "AtmosphereAutopilot;TimeControl", StartsAt = StartState.SpaceCenter, TimeoutSec = 10800)]
         public static IEnumerator Far_ArCircle(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());
@@ -316,6 +452,8 @@ namespace FerramAerospaceResearch.KspTests
             double steadySec = ctx.ParamDouble("steadySec", 8), timeout = ctx.ParamDouble("settleTimeoutSec", 120);
             double ratioTol = ctx.ParamDouble("ratioTol", 0.03), arTol = ctx.ParamDouble("arTol", 0.005), offsetWarn = ctx.ParamDouble("offsetWarn", 0.05);
             string ffmpeg = ctx.Param("ffmpeg");
+            double hyper = ctx.ParamDouble("hyperWarp", 4);
+            ctx.Record("hyperWarp", hyper);
             var csv = new StringBuilder("craft,ut,headingDeg,bankDeg,aoaDeg,sideslipDeg,altM,srfSpeed,mach,qKPa,liftKN,predLiftKN,dragKN,predDragKN," +
                                         "pitchKNm,predPitchKNm,meanAR\n");
             var summary = new StringBuilder("craft,pass,samples,turnedDeg,bankMeanDeg,bankMaxDeg,aoaMeanDeg,liftOffset,liftBand,dragOffset,dragBand," +
@@ -362,6 +500,9 @@ namespace FerramAerospaceResearch.KspTests
                     Ctrl.SetThrottle(1f);
                     Aa.Cruise(FlightGlobals.ActiveVessel, altM, speed, 90);
                     int parts = FlightGlobals.ActiveVessel.parts.Count;
+                    double ut0 = Planetarium.GetUniversalTime(), wall0 = Time.realtimeSinceStartup;
+                    if (hyper > 1)
+                        Assert.True(Flight.HyperWarp(hyper, 1.0), "TimeControl hyper-warp on");
 
                     ctx.Step(craft + ": settle on course 90");
                     double since = double.NaN, deadline = Planetarium.GetUniversalTime() + timeout;
@@ -447,6 +588,11 @@ namespace FerramAerospaceResearch.KspTests
                             F(pm, "G6"), F(pmp, "G6"), F(ar, "F4"))).Append('\n');
                     }
 
+                    if (hyper > 1)
+                    {
+                        Flight.HyperWarpOff();
+                        ctx.Record(craft + ".speedup", Math.Round((Planetarium.GetUniversalTime() - ut0) / (Time.realtimeSinceStartup - wall0), 2));
+                    }
                     v = FlightGlobals.ActiveVessel;
                     if (v != null) Aa.Off(v);
                     double Mean(List<double> l, Func<double, double> f) => l.Count > 0 ? l.Select(f).Average() : double.NaN;
@@ -484,11 +630,153 @@ namespace FerramAerospaceResearch.KspTests
             }
             finally
             {
+                if (hyper > 1)
+                    Flight.HyperWarpOff();
                 rec?.Stop(true, ctx, "interrupted");
                 FarFlightProbe.ResumeOtherPredictors(trajectories);
                 File.WriteAllText(Path.Combine(ctx.ResultsDir, "ar-circle.csv"), csv.ToString());
                 File.WriteAllText(Path.Combine(ctx.ResultsDir, "ar-circle-summary.csv"), summary.ToString());
             }
+        }
+
+        /// <summary>
+        /// Whether FAR gives each wing part the same effective aspect ratio in flight as in the editor: per craft, every
+        /// FAR wing part's effective_AR in the SPH (after an editor sim at Mach 0.5, AoA 3), then the same craft air-started
+        /// at 3 km and Mach 0.5 and held at AoA 3 (wings level, FAR's shielding settled after the placement), read with the
+        /// controls neutral and again after 50 frames of full nose-up input (the control surfaces deflected). Parts pair up
+        /// by persistentId (else their order). Per part, whether its aspect ratio came from its wing group (1, with a FAR
+        /// build that has the ArFromGroup diagnostic) and whether it is shielded (s), in each scene. Params: crafts
+        /// ("+"-separated), facility (SPH), tol (0.01, relative). Writes ar-editor-flight.csv; records per craft the parts
+        /// compared and how many differ by more than tol, neutral and deflected.
+        /// </summary>
+        [UITest("Far_ArEditorFlight", Kind = "Check", StartsAt = StartState.SpaceCenter, TimeoutSec = 7200)]
+        public static IEnumerator Far_ArEditorFlight(TestContext ctx)
+        {
+            ctx.Record("farBuild", FarSim.FarVersion());
+            string facility = (ctx.Param("facility") ?? "SPH").ToUpperInvariant();
+            string[] crafts = (ctx.Param("crafts") ?? "Mallard").Split('+');
+            double tol = ctx.ParamDouble("tol", 0.01);
+            var csv = new StringBuilder("craft,index,persistentId,part,kind,areaM2,editorAR,flightAR,deflectedAR,deflectionDeg,editorGroup,flightGroup\n");
+            bool[] trajectories = FarFlightProbe.QuietOtherPredictors();
+            try
+            {
+                foreach (string craftRaw in crafts)
+                {
+                    string craft = craftRaw.Trim();
+                    string path = ctx.CraftPath(craft, facility);
+                    if (!File.Exists(path))
+                        path = Path.GetFullPath(Path.Combine(KSPUtil.ApplicationRootPath, "Ships", facility, craft + ".craft"));
+                    string missing = File.Exists(path) ? MissingParts(path) : "no craft file";
+                    if (missing.Length > 0)
+                    {
+                        ctx.Record(craft + ".skipped", missing);
+                        continue;
+                    }
+
+                    ctx.Step("Editor " + craft);
+                    yield return Nav.EnsureState(ctx, facility == "VAB" ? StartState.Vab : StartState.Sph, path);
+                    Ugui.DismissPopups();
+                    yield return Wait.Until(FarSim.Ready, 60, "FAR editor sim ready", shot: false);
+                    yield return Wait.Seconds(8);   // voxelization settles after the craft loads
+                    FarSim.Instant(3, 0, 0, 0.5, 0, 0, false);
+                    var editor = new List<(uint pid, string title, string kind, double area, double ar, string grp)>();
+                    foreach (Part p in EditorLogic.fetch.ship.parts)
+                        foreach (PartModule m in p.Modules)
+                            if (IsFarWing(m))
+                                editor.Add((p.persistentId, p.partInfo.title, m.GetType().Name == "FARControllableSurface" ? "control" : "wing",
+                                            Num(m, "S"), Num(m, "effective_AR"), FromGroup(m) + (IsShielded(m) ? "s" : "")));
+
+                    ctx.Step("Flight " + craft);
+                    yield return Nav.EnsureState(ctx, StartState.Flight, path, "Runway");
+                    yield return Wait.Seconds(5);   // FAR voxelizes the craft after load
+                    Vessel v = FlightGlobals.ActiveVessel;
+                    Flight.IgnoreMaxTemperature(true);
+                    Ctrl.Sas(false);
+                    // held at the editor sim's flow (AoA 3, wings level, not rotating), FAR's shielding settled after the
+                    // placement, as Far_WingSlots does
+                    var start = new FarFlightProbe.Condition { Name = "air start", AltM = 3000, Mach = 0.5, AoADeg = 3, Lat = 0, Lon = DaylightLon(v.mainBody, 3000) };
+                    var none = new List<FarFlightProbe.Sample>();
+                    Ctrl.Attach(true);
+                    Ctrl.Set(pitch: 0, yaw: 0, roll: 0);
+                    yield return FarFlightProbe.Place(start);
+                    yield return FarFlightProbe.Hold(start, 400, 0, none, predict: false);
+                    var settled = new bool[1];
+                    yield return FarApi.ResettleShielding(FlightGlobals.ActiveVessel, settled);
+                    ctx.Record(craft + ".shieldingSettled", settled[0]);
+                    yield return FarFlightProbe.Place(start);
+                    yield return FarFlightProbe.Hold(start, 75, 0, none, predict: false);
+                    // by persistentId (a launch keeps it); by the parts' order where it does not match
+                    Dictionary<uint, (double ar, double defl, string grp)> Read()
+                    {
+                        var r = new Dictionary<uint, (double ar, double defl, string grp)>();
+                        foreach (Part p in FlightGlobals.ActiveVessel.parts)
+                            foreach (PartModule m in p.Modules)
+                                if (IsFarWing(m))
+                                    r[p.persistentId] = (Num(m, "effective_AR"),
+                                                         m.GetType().Name == "FARControllableSurface" ? Num(m, "AoAoffset") : double.NaN,
+                                                         FromGroup(m) + (IsShielded(m) ? "s" : ""));
+                        return r;
+                    }
+                    var neutralBy = Read();
+                    Ctrl.Set(pitch: 1);
+                    yield return FarFlightProbe.Hold(start, 50, 0, none, predict: false);
+                    var deflectedBy = Read();
+                    Ctrl.Set(pitch: 0);
+                    Ctrl.Detach();
+                    bool byPid = editor.All(e => neutralBy.ContainsKey(e.pid));
+                    ctx.Record(craft + ".pairedBy", byPid ? "persistentId" : "order");
+                    var order = new List<uint>();
+                    foreach (Part p in FlightGlobals.ActiveVessel.parts)
+                        foreach (PartModule m in p.Modules)
+                            if (IsFarWing(m)) order.Add(p.persistentId);
+                    var neutral = new List<double>();
+                    var deflected = new List<double>();
+                    var deflDeg = new List<double>();
+                    var flightGrp = new List<string>();
+                    for (int i = 0; i < editor.Count && (byPid || i < order.Count); i++)
+                    {
+                        uint id = byPid ? editor[i].pid : order[i];
+                        flightGrp.Add(neutralBy.TryGetValue(id, out var g) ? g.grp : "");
+                        neutral.Add(neutralBy.TryGetValue(id, out var a) ? a.ar : double.NaN);
+                        deflected.Add(deflectedBy.TryGetValue(id, out var b) ? b.ar : double.NaN);
+                        deflDeg.Add(deflectedBy.TryGetValue(id, out var c) ? c.defl : double.NaN);
+                    }
+
+                    int n = neutral.Count, badN = 0, badD = 0;
+                    if (editor.Count != neutralBy.Count)
+                        ctx.Record(craft + ".partCountMismatch", $"editor {editor.Count}, flight {neutralBy.Count}");
+                    bool Differs(double a, double b) => double.IsNaN(a) != double.IsNaN(b) || Math.Abs(a - b) > tol * Math.Max(Math.Abs(a), 1e-6);
+                    for (int i = 0; i < n; i++)
+                    {
+                        var e = editor[i];
+                        if (Differs(e.ar, neutral[i])) badN++;
+                        if (Differs(e.ar, deflected[i])) badD++;
+                        csv.Append(string.Join(",", Csv(craft), i.ToString(Inv), e.pid.ToString(Inv), Csv(e.title), e.kind, F(e.area, "F3"), F(e.ar, "F4"),
+                            F(neutral[i], "F4"), F(deflected[i], "F4"), F(deflDeg[i], "F2"), e.grp, flightGrp[i])).Append('\n');
+                    }
+                    ctx.Record(craft + ".parts", n);
+                    ctx.Record(craft + ".differNeutral", badN);
+                    ctx.Record(craft + ".differDeflected", badD);
+                    File.WriteAllText(Path.Combine(ctx.ResultsDir, "ar-editor-flight.csv"), csv.ToString());
+                }
+            }
+            finally
+            {
+                FarFlightProbe.ResumeOtherPredictors(trajectories);
+                File.WriteAllText(Path.Combine(ctx.ResultsDir, "ar-editor-flight.csv"), csv.ToString());
+            }
+        }
+
+        // whether a wing part's aspect ratio came from its wing group (1) or its own (0): a diagnostic field some FAR
+        // builds have; "" without it
+        private static string FromGroup(PartModule m)
+        {
+            try
+            {
+                object wi = Reflect.Get(m, "WingInteraction");
+                return wi != null && Reflect.Get(wi, "ArFromGroup") is bool b ? (b ? "1" : "0") : "";
+            }
+            catch (Exception) { return ""; }
         }
 
         private static string F(double x, string fmt) => x.ToString(fmt, Inv);
@@ -508,6 +796,10 @@ namespace FerramAerospaceResearch.KspTests
         private static double Num(PartModule m, string field)
         {
             try { return Convert.ToDouble(Reflect.Get(m, field), Inv); }
+            catch (Exception) { }
+            // the reentry-tab fork keeps a wing's per-call state (effective_AR, effective_MAC, ...) in its _scratch
+            // (WingScratch, one per thread slot; the main thread's holds the flight's numbers)
+            try { return Convert.ToDouble(Reflect.Get(Reflect.Get(m, "_scratch"), field), Inv); }
             catch (Exception) { return double.NaN; }
         }
 
@@ -637,6 +929,7 @@ namespace FerramAerospaceResearch.KspTests
                 size = Math.Max(size, 2 * (p.transform.position - v.CoM).magnitude);
             GameEvents.onHideUI.Fire();
             TestRunner.HideOverlay = true;
+            var gui = ShotGui.HideOthers(imgui: false);     // Trajectories' window; the autopilot keeps running
             bool arrowsWas = PhysicsGlobals.AeroForceDisplay;
             PhysicsGlobals.AeroForceDisplay = arrows;
             try
@@ -674,6 +967,7 @@ namespace FerramAerospaceResearch.KspTests
                 }
                 PhysicsGlobals.AeroForceDisplay = arrowsWas;
                 TestRunner.HideOverlay = false;
+                gui.Dispose();
                 GameEvents.onShowUI.Fire();
             }
         }
@@ -685,6 +979,7 @@ namespace FerramAerospaceResearch.KspTests
         {
             private System.Diagnostics.Process proc;
             private string path;
+            private ShotGui gui;     // popup windows (Trajectories') hidden while recording
 
             [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
             private struct Rect { public int Left, Top, Right, Bottom; }
@@ -742,7 +1037,7 @@ namespace FerramAerospaceResearch.KspTests
                 };
                 try
                 {
-                    return new Recorder { proc = System.Diagnostics.Process.Start(psi), path = path };
+                    return new Recorder { proc = System.Diagnostics.Process.Start(psi), path = path, gui = ShotGui.HideOthers(imgui: false) };
                 }
                 catch (Exception e)
                 {
@@ -753,6 +1048,7 @@ namespace FerramAerospaceResearch.KspTests
 
             public void Stop(bool keep, TestContext ctx, string craft)
             {
+                gui?.Dispose();
                 try
                 {
                     if (!proc.HasExited)

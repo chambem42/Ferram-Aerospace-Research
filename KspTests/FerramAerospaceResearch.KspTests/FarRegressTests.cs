@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using KspTest;
 using KspTest.AtmosphereAutopilot;
@@ -28,9 +29,11 @@ namespace FerramAerospaceResearch.KspTests
         /// "0.3,0.8,1.3,2.5"), alphas (default "-5,0,5,10,20"), viscousToo (default 1: on a build with the viscous
         /// toggle, sample the sweeps a second time with it on, under the "visc." prefix), sweepMachs (default "0.6": an AoA
         /// sweep at each), sweepAlphas (default "5": a Mach sweep at each), sweepsOnly (default 0: 1 skips the instant grid
-        /// and the stability derivatives). The sweeps CSV's "at" column is the sweep's fixed Mach or AoA.
+        /// and the stability derivatives), serialVoxel (default 0: 1 voxelizes each craft on one thread, so the voxel,
+        /// and so everything sampled, is the same from session to session; FAR's threaded voxelization differs each time).
+        /// The sweeps CSV's "at" column is the sweep's fixed Mach or AoA.
         /// </summary>
-        [UITest("Far_Regress_Editor", StartsAt = StartState.Sph, Craft = "Aeris 4A", TimeoutSec = 1800)]
+        [UITest("Far_Regress_Editor", Kind = "Check", StartsAt = StartState.Sph, Craft = "Aeris 4A", TimeoutSec = 1800)]
         public static IEnumerator Far_Regress_Editor(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());
@@ -41,6 +44,10 @@ namespace FerramAerospaceResearch.KspTests
             double[] sweepMachs = (ctx.Param("sweepMachs") ?? "0.6").Split(',').Select(v => double.Parse(v.Trim(), Inv)).ToArray();
             double[] sweepAlphas = (ctx.Param("sweepAlphas") ?? "5").Split(',').Select(v => double.Parse(v.Trim(), Inv)).ToArray();
             bool sweepsOnly = ctx.ParamDouble("sweepsOnly", 0) != 0;
+            bool serialVoxel = ctx.ParamDouble("serialVoxel", 0) != 0;
+            if (serialVoxel) Assert.True(FarSerialVoxel.EnsurePatched(), "FAR's VehicleVoxel.CreateNewVoxel to patch");
+            ctx.Record("serialVoxel", serialVoxel);
+            Type editorGui = Reflect.FindType("FerramAerospaceResearch.FARGUI.FAREditorGUI.EditorGUI");
             var grid = new StringBuilder("craft,pass,alpha,beta,phi,mach,pitch,flaps,spoilers,Cl,Cd,Cm,Cy,Cn,C_roll\n");
             var sweeps = new StringBuilder("craft,sweep,viscous,at,x,series,value\n");
             var areas = new StringBuilder(FarApi.PartAreasHeader);
@@ -54,6 +61,15 @@ namespace FerramAerospaceResearch.KspTests
                 Ugui.DismissPopups();
                 yield return Wait.Until(FarSim.Ready, 60, "FAR editor sim ready", shot: false);
                 yield return Wait.Seconds(8);   // voxelization settles after the craft loads
+                if (serialVoxel)
+                {
+                    // the craft may have voxelized before the patch; voxelize it again, on one thread
+                    object gui = editorGui.GetProperty("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic).GetValue(null, null);
+                    PropertyInfo queued = editorGui.GetProperty("VoxelizationUpdateQueued");
+                    editorGui.GetMethod("RequestUpdateVoxel", BindingFlags.Static | BindingFlags.Public).Invoke(null, null);
+                    yield return Wait.Until(() => !(bool)queued.GetValue(gui, null), 60, "FAR revoxelization started", shot: false);
+                    yield return Wait.Seconds(8);
+                }
                 string k = craft + ".";
 
                 // the persisted toggle (branch only); forced off for the like-for-like pass, without touching the config
@@ -204,7 +220,7 @@ namespace FerramAerospaceResearch.KspTests
             return string.Join(" ", missing);
         }
 
-        [UITest("Far_ControlCamber_AB", StartsAt = StartState.SpaceCenter, TimeoutSec = 3600)]
+        [UITest("Far_ControlCamber_AB", Kind = "Measure", StartsAt = StartState.SpaceCenter, TimeoutSec = 3600)]
         public static IEnumerator Far_ControlCamber_AB(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());
@@ -406,7 +422,7 @@ namespace FerramAerospaceResearch.KspTests
         /// default Gull+Velociteze+Ravenspear Mk3+Stearwing A300), cond (mach@altM@aoaDeg, default 0.4@2000@3), u (0.5),
         /// settle (50), frames (12), reps (2). Writes camber-flight.csv (every pair) and records the means.
         /// </summary>
-        [UITest("Far_ControlCamber_Flight", StartsAt = StartState.SpaceCenter, TimeoutSec = 3600)]
+        [UITest("Far_ControlCamber_Flight", Kind = "Check", StartsAt = StartState.SpaceCenter, TimeoutSec = 3600)]
         public static IEnumerator Far_ControlCamber_Flight(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());
@@ -525,7 +541,7 @@ namespace FerramAerospaceResearch.KspTests
         /// one evaluation of FAR's simulation (Mach 0.7, 3 deg) so the upstream values are current. Params: crafts
         /// ("+"-separated), facility (SPH/VAB). Writes wing-interactions.txt.
         /// </summary>
-        [UITest("Far_WingInteractions", StartsAt = StartState.SpaceCenter, TimeoutSec = 1800)]
+        [UITest("Far_WingInteractions", Kind = "Measure", StartsAt = StartState.SpaceCenter, TimeoutSec = 1800)]
         public static IEnumerator Far_WingInteractions(TestContext ctx)
         {
             string facility = (ctx.Param("facility") ?? "SPH").ToUpperInvariant();
@@ -567,7 +583,7 @@ namespace FerramAerospaceResearch.KspTests
         /// part, whether it is a control surface, and the root part's axes. planform.csv, one row per vertex, and the axes
         /// and CoM as comment lines. Params: crafts ("+"-separated), facility (SPH).
         /// </summary>
-        [UITest("Far_Planform", StartsAt = StartState.SpaceCenter, TimeoutSec = 1800)]
+        [UITest("Far_Planform", Kind = "Measure", StartsAt = StartState.SpaceCenter, TimeoutSec = 1800)]
         public static IEnumerator Far_Planform(TestContext ctx)
         {
             string facility = (ctx.Param("facility") ?? "SPH").ToUpperInvariant();
@@ -652,7 +668,7 @@ namespace FerramAerospaceResearch.KspTests
         /// Params: crafts ("+"-separated stock SPH craft), point (altM:mach, default 3000:0.5), steadySec (8), windowSec
         /// (10), settleTimeoutSec (90). Writes camber-cruise.csv (every frame of every window) and records the means.
         /// </summary>
-        [UITest("Far_ControlCamber_Cruise", StartsAt = StartState.SpaceCenter, TimeoutSec = 5400)]
+        [UITest("Far_ControlCamber_Cruise", Kind = "Check", Requires = "AtmosphereAutopilot", Mods = "AtmosphereAutopilot", StartsAt = StartState.SpaceCenter, TimeoutSec = 5400)]
         public static IEnumerator Far_ControlCamber_Cruise(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());
@@ -821,7 +837,7 @@ namespace FerramAerospaceResearch.KspTests
         /// 1000:0.7:3), inputs (default -1,0,1), settleSteps (25), windowSteps (25), maxAngVel (rad/s on every part's
         /// rigidbody, 0 keeps KSP's).
         /// </summary>
-        [UITest("Far_CoupleBalance", StartsAt = StartState.SpaceCenter, TimeoutSec = 3600)]
+        [UITest("Far_CoupleBalance", Kind = "Measure", StartsAt = StartState.SpaceCenter, TimeoutSec = 3600)]
         public static IEnumerator Far_CoupleBalance(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());

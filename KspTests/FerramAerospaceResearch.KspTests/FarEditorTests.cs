@@ -13,7 +13,7 @@ namespace FerramAerospaceResearch.KspTests
         /// pitch input that zeroes Cm, for comparing FAR builds on a craft with a CoM-offset fuselage. Params:
         /// craft (default PoofySkirt), mach (default 0.5), alphas (default "0,5,10,15").
         /// </summary>
-        [UITest("Far_ComOffset_Editor", StartsAt = StartState.Sph, Craft = "PoofySkirt", TimeoutSec = 300)]
+        [UITest("Far_ComOffset_Editor", Kind = "Check", StartsAt = StartState.Sph, Craft = "PoofySkirt", TimeoutSec = 300)]
         public static IEnumerator Far_ComOffset_Editor(TestContext ctx)
         {
             Ugui.DismissPopups();
@@ -47,7 +47,7 @@ namespace FerramAerospaceResearch.KspTests
         /// Params: craft (default PoofySkirt) or crafts (a "+"-separated list, each loaded in turn and its values
         /// prefixed with the craft name), mach (default 0.5), alphas (default "0,5").
         /// </summary>
-        [UITest("Far_VoxelSize_Editor", StartsAt = StartState.Sph, Craft = "PoofySkirt", TimeoutSec = 900)]
+        [UITest("Far_VoxelSize_Editor", Kind = "Check", StartsAt = StartState.Sph, Craft = "PoofySkirt", TimeoutSec = 900)]
         public static IEnumerator Far_VoxelSize_Editor(TestContext ctx)
         {
             double mach = ctx.ParamDouble("mach", 0.5);
@@ -125,7 +125,7 @@ namespace FerramAerospaceResearch.KspTests
         /// the wingspan filling fill of the frame; also side, quarter, top), aboveDeg (default 10), fill (default 0.9),
         /// fov (camera vertical field of view in degrees, default 20), distance (m from the craft's center, overrides fill).
         /// </summary>
-        [UITest("Far_VoxelShot_Editor", StartsAt = StartState.Sph, Craft = "PoofySkirt", TimeoutSec = 900)]
+        [UITest("Far_VoxelShot_Editor", Kind = "Check", StartsAt = StartState.Sph, Craft = "PoofySkirt", TimeoutSec = 900)]
         public static IEnumerator Far_VoxelShot_Editor(TestContext ctx)
         {
             string[] crafts = ctx.Param("crafts") != null ? ctx.Param("crafts").Split('+') : new[] { (string)null };
