@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        FAR's in-game tests: [UITest]s the KspTest harness runs in a KSP session, each checking what FAR does in the
+        game (loading, voxels, aero, wings, heating, the GUI) against what it should. Loaded by KSP, so net48, built
+        against the install in KspDir (see ../Directory.Build.props) and against the FAR build the runs lay over the
+        instance (FarGameData, else this repository's GameData/FerramAerospaceResearch), whose internals it sees
+        (InternalsVisibleTo). FerramAerospaceResearch.InGameTests.Run runs them with dotnet test.
+    -->
+    <PropertyGroup>
+        <TargetFramework>net48</TargetFramework>
+        <LangVersion>9</LangVersion>
+        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+        <RootNamespace>FerramAerospaceResearch.InGameTests</RootNamespace>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>false</IsTestProject>
+        <FarPlugins Condition="'$(FarPlugins)' == '' and '$(FarGameData)' != ''">$(FarGameData)/Plugins</FarPlugins>
+        <FarPlugins Condition="'$(FarPlugins)' == ''">$(MSBuildThisFileDirectory)../../GameData/FerramAerospaceResearch/Plugins</FarPlugins>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <!-- the harness and its FAR helpers from the KspTest submodule, compile-time only: the runner deploys them -->
+        <KspTestModules>Far</KspTestModules>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- the game loads FAR from GameData: compiled against, never copied -->
+        <Reference Include="FerramAerospaceResearch" HintPath="$(FarPlugins)/FerramAerospaceResearch.dll" Private="false" />
+        <Reference Include="FerramAerospaceResearch.Base" HintPath="$(FarPlugins)/FerramAerospaceResearch.Base.dll" Private="false" />
+    </ItemGroup>
+
+    <Import Project="$(KspTestRoot)/build/KspTest.FromSource.targets" />
+
+</Project>
