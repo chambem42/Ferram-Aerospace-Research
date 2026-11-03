@@ -95,14 +95,14 @@ namespace FerramAerospaceResearch.InGameTests
                 Part p = ap.partPrefab;
                 if (p == null || ap.name.StartsWith("kerbalEVA") || p.Modules.Contains<LaunchClamp>())
                     continue;
-                string[] res = p.Resources.Cast<PartResource>().Select(r => r.resourceName).ToArray();
+                string[] res = Far.Resources(p);
                 string expected = null;
                 if (p.HasModuleImplementing<ModuleAblator>() || res.Contains("Ablator")) expected = "structural";
                 else if (p.CrewCapacity > 0) expected = "crewed";
                 else if (res.Length == 0) expected = "structural";
                 else if (res.All(r => r == "SolidFuel")) expected = "SRB";
                 else if (res.All(r => r == "LiquidFuel")) expected = "aircraftFuelTank";
-                else if (res.Length == 2 && res.Contains("LiquidFuel") && res.Contains("Oxidizer")) expected = "rocketFuelTank";
+                else if (Far.IsRocketTank(p)) expected = "rocketFuelTank";
                 if (expected == null) continue;
                 checkedParts++;
                 string got = FARAeroStress.DetermineStressTemplate(p).Name;

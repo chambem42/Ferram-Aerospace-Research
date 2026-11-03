@@ -11,6 +11,7 @@ using FerramAerospaceResearch.Geometry;
 using FerramAerospaceResearch.Settings;
 using KspTest;
 using UnityEngine;
+using static FerramAerospaceResearch.InGameTests.Refl;
 
 namespace FerramAerospaceResearch.InGameTests
 {
@@ -29,7 +30,6 @@ namespace FerramAerospaceResearch.InGameTests
     /// </summary>
     public static class SettingsTests
     {
-        private const string Plane = "Aeris 4A";
 
         // the window's title is "FAR Debug Options, " + the version; the model options window's is fixed
         private const string DebugWindow = "FAR Debug Options";
@@ -40,9 +40,6 @@ namespace FerramAerospaceResearch.InGameTests
 
         // the save the quicksave/quickload tests write in the save folder (deleted after)
         private const string SaveName = "far-settings-test";
-
-        private const BindingFlags Members =
-            BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
 
         // ------------------------------------------------------------------------------------------ Difficulty and Debug tab
 
@@ -155,7 +152,7 @@ namespace FerramAerospaceResearch.InGameTests
             bool crew = rocket.RequiresCrew;
             int count = templates.Count;
             Part tank = PartLoader.LoadedPartsList.Select(ap => ap.partPrefab)
-                                  .FirstOrDefault(p => p != null && p.CrewCapacity == 0 && IsRocketTank(p) &&
+                                  .FirstOrDefault(p => p != null && p.CrewCapacity == 0 && Far.IsRocketTank(p) &&
                                                        ReferenceEquals(FARAeroStress.DetermineStressTemplate(p), rocket));
             Assert.NotNull(tank, "a stock liquid fuel and oxidizer tank on the rocketFuelTank template");
             ctx.Record("tank", tank.partInfo?.name);
@@ -476,7 +473,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// half as many, while the craft's length and largest cross-section stay about what they were. Putting the count
         /// back gives the voxel size it had.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator Settings_VoxelCountSetsEditorResolution(TestContext ctx)
         {
             yield return Far.WaitForEditorVoxels();
@@ -522,7 +519,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// curvature (the sum of |A''|) - and its Mach 1 drag area and transonic drag are lower, over the same voxel
         /// model (same length, about the same volume).
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator Settings_LenientAreaRulingSmoothsCrossSections(TestContext ctx)
         {
             yield return Far.WaitForEditorVoxels();
@@ -589,19 +586,9 @@ namespace FerramAerospaceResearch.InGameTests
         private static FARDebugAndSettings DebugInstance =>
             UnityEngine.Object.FindObjectOfType<FARDebugAndSettings>() ?? throw new UITestFailure("FAR's FARDebugAndSettings is not there");
 
-        private static FieldInfo StaticField(Type t, string name) =>
-            t.GetField(name, BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public) ??
-            throw new UITestFailure($"{t.Name} has no static field {name}");
-
         private static bool DebugMenuOpen => (bool)StaticField(typeof(FARDebugAndSettings), "debugMenu").GetValue(null);
 
         private static bool ModelOptionsOpen => (bool)StaticField(typeof(FARDebugAndSettings), "modelOptions").GetValue(null);
-
-        private static bool EditorShown
-        {
-            get => (bool)StaticField(typeof(EditorGUI), "showGUI").GetValue(null);
-            set => StaticField(typeof(EditorGUI), "showGUI").SetValue(null, value);
-        }
 
         // what the toolbar button's toggle also flips (the editor's and flight's windows), and the tab, put back on close
         private static bool? editorShownAtStart, flightShownAtStart;
@@ -614,7 +601,7 @@ namespace FerramAerospaceResearch.InGameTests
                 tabAtStart = Get(DebugInstance, "activeTab");
             if (!DebugMenuOpen)
             {
-                editorShownAtStart = EditorShown;
+                editorShownAtStart = EditorWindow.WindowShown;
                 flightShownAtStart = Far.FlightGuiShown;
                 // what the button's click calls (ToggleGUI): the debug window's toggle, and the editor's and flight's
                 FARDebugAndSettings.Toggle();
@@ -634,7 +621,7 @@ namespace FerramAerospaceResearch.InGameTests
                 if (DebugMenuOpen)
                     FARDebugAndSettings.ForceCloseDebugWindow();
                 if (editorShownAtStart.HasValue)
-                    EditorShown = editorShownAtStart.Value;
+                    EditorWindow.WindowShown = editorShownAtStart.Value;
                 if (flightShownAtStart.HasValue)
                     Far.FlightGuiShown = flightShownAtStart.Value;
                 editorShownAtStart = flightShownAtStart = null;
@@ -660,12 +647,6 @@ namespace FerramAerospaceResearch.InGameTests
         // ------------------------------------------------------------------------------------------ helpers: settings
 
         private static bool NotFiveDecimals(double v) => Math.Abs(Math.Round(v, 5) - v) > 1e-6 * Math.Abs(v);
-
-        private static bool IsRocketTank(Part p)
-        {
-            string[] res = p.Resources.Cast<PartResource>().Select(r => r.resourceName).ToArray();
-            return res.Length == 2 && res.Contains("LiquidFuel") && res.Contains("Oxidizer");
-        }
 
         /// <summary>FARDifficultyPresets.cfg as shipped: name, transonic drag fraction, smoothing length, area and 2nd-derivative passes.</summary>
         private static readonly object[][] ShippedPresets =
@@ -950,24 +931,5 @@ namespace FerramAerospaceResearch.InGameTests
 
         private static double Volume(VehicleAerodynamics v) => v.GetCrossSectionAreas().Sum() * v.SectionThickness;
 
-        // ------------------------------------------------------------------------------------------ helpers: reflection
-
-        private static FieldInfo FieldOf(object o, string name)
-        {
-            if (o == null)
-                throw new UITestFailure($"no object to read {name} from");
-            for (Type t = o.GetType(); t != null; t = t.BaseType)
-            {
-                FieldInfo f = t.GetField(name, Members | BindingFlags.DeclaredOnly);
-                if (f != null)
-                    return f;
-            }
-
-            throw new UITestFailure($"{o.GetType().Name} has no field {name}");
-        }
-
-        private static object Get(object o, string name) => FieldOf(o, name).GetValue(o);
-
-        private static void Set(object o, string name, object value) => FieldOf(o, name).SetValue(o, value);
     }
 }

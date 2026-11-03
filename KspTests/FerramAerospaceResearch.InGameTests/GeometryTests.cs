@@ -25,9 +25,7 @@ namespace FerramAerospaceResearch.InGameTests
             Vessel v = FlightGlobals.ActiveVessel;
             Part fairingBase = v.parts.FirstOrDefault(p => p.Modules.Contains<ModuleProceduralFairing>());
             Assert.NotNull(fairingBase, "the ComSat Lx's fairing");
-            var below = new HashSet<Part>();
-            Collect(fairingBase, below);
-            List<Part> payload = v.parts.Where(p => !below.Contains(p)).ToList();
+            List<Part> payload = Far.PayloadOf(v, fairingBase);
             Part core = v.rootPart;
             Assert.True(payload.Contains(core), "the probe core is in the payload");
             int shielded = payload.Count(p => p.ShieldedFromAirstream);
@@ -44,13 +42,6 @@ namespace FerramAerospaceResearch.InGameTests
             ctx.Record("afterJettison", $"{stillShielded} payload parts still shielded");
             Assert.True(core.Modules.GetModule<FARAeroPartModule>().ProjectedAreas.totalArea > 0, "the exposed core has area in the airflow");
             Assert.True(stillShielded < shielded, $"fewer payload parts shielded after the jettison ({stillShielded}, from {shielded})");
-        }
-
-        private static void Collect(Part p, HashSet<Part> into)
-        {
-            into.Add(p);
-            foreach (Part c in p.children)
-                Collect(c, into);
         }
     }
 }

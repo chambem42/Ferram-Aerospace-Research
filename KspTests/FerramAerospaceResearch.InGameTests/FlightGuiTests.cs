@@ -20,13 +20,9 @@ namespace FerramAerospaceResearch.InGameTests
     /// </summary>
     public static class FlightGuiTests
     {
-        private const string Plane = "Aeris 4A";
 
         private static FarFlightProbe.Condition Cruise(double aoaDeg, double mach = 0.5, double altM = 3000) =>
-            new FarFlightProbe.Condition
-            {
-                Name = $"cruise M{mach} {aoaDeg}", Mach = mach, AltM = altM, AoADeg = aoaDeg, Lat = 0, Lon = -60, HeadingDeg = 90
-            };
+            Far.At(mach, altM, aoaDeg, $"cruise M{mach} {aoaDeg}");
 
         private static string Loc(string tag) => Localizer.Format(tag);
 
@@ -114,7 +110,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// the plane is held at 5 deg: the attitude, air data, forces and coefficients it shows against the flight
         /// itself, and against each other (Cl q S is the lift, the ballistic coefficient is m / (Cd S), ...).
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator FlightGui_DataWindowShowsTheFlight(TestContext ctx)
         {
             yield return Wait.Seconds(5);
@@ -136,8 +132,6 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.True(sections.All(s => s), "every flight data section is on after its toggle");
 
                 ctx.Step("held at Mach 0.5, 3 km, 5 deg");
-                Flight.IgnoreMaxTemperature(true);
-                Ctrl.SetThrottle(0f);
                 FarFlightProbe.Condition c = Cruise(5);
                 yield return FlightTests.Airborne(c);
                 var samples = new List<FarFlightProbe.Sample>();
@@ -233,7 +227,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// m/s, knots or km/h: each reading against the flight - EAS is TAS sqrt(rho / rho0), IAS is the pitot
         /// (compressible) speed from the impact pressure, below TAS and a little above EAS at altitude.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator FlightGui_AirspeedSettingChangesTheSpeedShown(TestContext ctx)
         {
             yield return Wait.Seconds(5);
@@ -253,8 +247,6 @@ namespace FerramAerospaceResearch.InGameTests
                 if (FlightGlobals.speedDisplayMode != FlightGlobals.SpeedDisplayModes.Surface)
                     FlightGlobals.SetSpeedMode(FlightGlobals.SpeedDisplayModes.Surface);
 
-                Flight.IgnoreMaxTemperature(true);
-                Ctrl.SetThrottle(0f);
                 FarFlightProbe.Condition c = Cruise(3);
                 yield return FlightTests.Airborne(c);
 
@@ -339,7 +331,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// The flight window's Roll toggle (the wing leveler): the plane banked 30 deg and let go keeps much of its
         /// bank on its own; with the leveler on, FAR rolls it back toward wings level. FAR's roll angle reads the bank.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator FlightGui_WingLevelerRightsTheBank(TestContext ctx)
         {
             const double bank = 30, seconds = 10;
@@ -353,8 +345,6 @@ namespace FerramAerospaceResearch.InGameTests
                 yield return OpenFlightWindow();
                 for (int i = 0; i < savedStab.Length; ++i)
                     Far.SetStabAug(gui, i, false);
-                Flight.IgnoreMaxTemperature(true);
-                Ctrl.SetThrottle(0f);
                 FarFlightProbe.Condition c = Cruise(3);
                 yield return FlightTests.Airborne(c);
 
@@ -400,7 +390,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// Tint Cl a wing turns blue by its lift (alpha 0.5), with Tint Cd red by its drag, and with neither the tint
         /// clears.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator FlightGui_AeroTintColoursTheParts(TestContext ctx)
         {
             yield return Wait.Seconds(5);
@@ -413,8 +403,6 @@ namespace FerramAerospaceResearch.InGameTests
             {
                 yield return OpenFlightWindow();
                 yield return OpenSettings(gui, Far.GroupAeroViz);
-                Flight.IgnoreMaxTemperature(true);
-                Ctrl.SetThrottle(0f);
                 FarFlightProbe.Condition c = Cruise(6);
                 yield return FlightTests.Airborne(c);
                 Vessel v = FlightGlobals.ActiveVessel;
@@ -462,7 +450,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// The flight window's Flt Log toggle, with the log period typed in its field: FAR writes a CSV of the flight
         /// (time, altitude, speed, forces, coefficients, angles) at that period, which matches the flight held.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator FlightGui_FlightLogRecordsTheFlight(TestContext ctx)
         {
             yield return Wait.Seconds(5);
@@ -480,11 +468,8 @@ namespace FerramAerospaceResearch.InGameTests
                 yield return null;
                 Assert.Equal(100, logger.Period, "the log period typed in the flight window");
 
-                Flight.IgnoreMaxTemperature(true);
-                Ctrl.SetThrottle(0f);
                 FarFlightProbe.Condition c = Cruise(4);
                 yield return FlightTests.Airborne(c);
-                yield return FarFlightProbe.Place(c);
 
                 ctx.Step("log 3 s held at 4 deg");
                 file = logger.FileName;

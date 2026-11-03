@@ -40,7 +40,6 @@ namespace FerramAerospaceResearch.InGameTests
     public static class ExposureTests
     {
         private const string Rocket = "ComSat Lx Unclamped";   // stock, its launch clamp taken off (crafts/)
-        private const string Plane = "Aeris 4A";
 
         // ------------------------------------------------------------------ the device switch
 
@@ -172,9 +171,7 @@ namespace FerramAerospaceResearch.InGameTests
             Vessel v = x.Vessel;
             Part fairing = v.parts.FirstOrDefault(p => p.Modules.Contains<ModuleProceduralFairing>());
             Assert.NotNull(fairing, "the ComSat Lx's fairing");
-            var below = new HashSet<Part>();
-            Collect(fairing, below);
-            List<Part> payload = v.parts.Where(p => !below.Contains(p)).ToList();
+            List<Part> payload = Far.PayloadOf(v, fairing);
             ctx.Record("payload", string.Join(", ", payload.Select(p => p.partInfo.name)));
             ctx.Record("fairingRenderers", $"part {fairing.FindModelRenderersCached().Count}, exposure {x.CachedRendererCount(fairing)}");
 
@@ -242,13 +239,6 @@ namespace FerramAerospaceResearch.InGameTests
             Assert.Near(ta, tb, 0.01 * Math.Max(ta, tb) + 20 * app, $"the vessel's area seen from {what}");
         }
 
-        private static void Collect(Part p, HashSet<Part> into)
-        {
-            into.Add(p);
-            foreach (Part c in p.children)
-                Collect(c, into);
-        }
-
         // ------------------------------------------------------------------ the render size
 
         /// <summary>
@@ -312,12 +302,12 @@ namespace FerramAerospaceResearch.InGameTests
         /// upstream-facing area of all its voxels (FARAeroPartModule.ProjectedAreas along the flow: every line along the
         /// flow through the vessel enters it through at least one such face).
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Flight_AirstreamAreaIsBracketedByTheVoxels(TestContext ctx)
         {
             Exposure.RequireReadback();
             yield return Wait.Seconds(5);   // FAR voxelizes the craft after it loads
-            var c = new FarFlightProbe.Condition { Name = "exposure", Mach = 0.5, AltM = 3000, AoADeg = 2, Lat = 0, Lon = -60, HeadingDeg = 90 };
+            FarFlightProbe.Condition c = Far.At(0.5, 3000, 2, "exposure");
             using var x = new Exposure(ctx, FlightGlobals.ActiveVessel);
             using var log = new ExceptionLog();
             x.Directions(airstream: true, sun: false, body: false);
@@ -435,7 +425,7 @@ namespace FerramAerospaceResearch.InGameTests
                 Vessel = v;
                 FARVesselAero aero = v.GetComponent<FARVesselAero>() ?? throw new UITestFailure("no FARVesselAero on the vessel");
                 X = aero.Exposure ?? throw new UITestFailure("FARVesselAero has no VehicleExposure");
-                renderer = Field(X, "exposureRenderer") ?? throw new UITestFailure("VehicleExposure has no exposureRenderer");
+                renderer = Refl.Get(X, "exposureRenderer") ?? throw new UITestFailure("VehicleExposure has no exposureRenderer");
                 debugInFlight0 = FARConfig.Voxelization.DebugInFlight;
                 airstream0 = FARConfig.Exposure.Airstream.Value;
                 sun0 = FARConfig.Exposure.Sun.Value;
@@ -504,9 +494,6 @@ namespace FerramAerospaceResearch.InGameTests
                 }
             }
 
-            private static object Field(object o, string name) =>
-                (o.GetType().GetField(name, Any) ?? throw new UITestFailure($"{o.GetType().Name} has no field {name}")).GetValue(o);
-
             private static PropertyInfo RenderSizeProperty =>
                 typeof(VehicleExposure).GetProperty("RenderSize", Any) ?? throw new UITestFailure("VehicleExposure has no RenderSize");
 
@@ -520,23 +507,23 @@ namespace FerramAerospaceResearch.InGameTests
             /// <summary>The RenderResult&lt;Part&gt; of VehicleExposure's airstream, sun or body request.</summary>
             public object Result(string direction)
             {
-                object request = Field(X, direction + "Request");
-                return Field(request, "result") ?? throw new UITestFailure($"VehicleExposure's {direction} request has no result");
+                object request = Refl.Get(X, direction + "Request");
+                return Refl.Get(request, "result") ?? throw new UITestFailure($"VehicleExposure's {direction} request has no result");
             }
 
             public string ActualDevice => renderer.GetType().GetProperty("ActualDevice", Any)?.GetValue(renderer)?.ToString();
             public int ActiveBatches => (int)renderer.GetType().GetProperty("ActiveBatches", Any).GetValue(renderer);
             public int ObjectCount => (int)renderer.GetType().GetProperty("Count", Any).GetValue(renderer);
-            public int RendererSetCount => ((IList)Field(renderer, "renderers")).Count;
+            public int RendererSetCount => ((IList)Refl.Get(renderer, "renderers")).Count;
 
             public int CachedRendererCount(Part p) =>
-                Field(X, "cachedRenderers") is IDictionary d && d.Contains(p) ? ((IList)d[p]).Count : -1;
+                Refl.Get(X, "cachedRenderers") is IDictionary d && d.Contains(p) ? ((IList)d[p]).Count : -1;
 
-            public static List<double> Areas(object result) => (List<double>)Field(result, "Areas");
+            public static List<double> Areas(object result) => (List<double>)Refl.Get(result, "Areas");
             public static IReadOnlyDictionary<Part, double> PerPart(object result) => (IReadOnlyDictionary<Part, double>)result;
-            public static double AreaPerPixel(object result) => (double)Field(result, "areaPerPixel");
-            public static Vector3 Forward(object result) => F3(Field(result, "forward"));
-            public static Vector3 Position(object result) => F3(Field(result, "position"));
+            public static double AreaPerPixel(object result) => (double)Refl.Get(result, "areaPerPixel");
+            public static Vector3 Forward(object result) => F3(Refl.Get(result, "forward"));
+            public static Vector3 Position(object result) => F3(Refl.Get(result, "position"));
             public static double Total(object result) => Areas(result).Sum();
 
             public static double Of(object result, IEnumerable<Part> parts)
@@ -558,7 +545,7 @@ namespace FerramAerospaceResearch.InGameTests
             }
 
             /// <summary>FAR's main axis (VehicleAerodynamics._vehicleMainAxis), along which it cuts the cross-sections.</summary>
-            public static Vector3 MainAxis(FARVesselAero aero) => (Vector3)Field(aero.VehicleAero, "_vehicleMainAxis");
+            public static Vector3 MainAxis(FARVesselAero aero) => (Vector3)Refl.Get(aero.VehicleAero, "_vehicleMainAxis");
 
             public string Describe(object result)
             {

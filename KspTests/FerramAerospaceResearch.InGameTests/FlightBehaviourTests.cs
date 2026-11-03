@@ -21,15 +21,6 @@ namespace FerramAerospaceResearch.InGameTests
     /// </summary>
     public static class FlightBehaviourTests
     {
-        private const string Plane = "Aeris 4A";
-
-        // over the sea east of KSC, heading east
-        private static FarFlightProbe.Condition At(double mach, double altM, double aoaDeg) =>
-            new FarFlightProbe.Condition
-            {
-                Name = $"M{mach} {altM / 1000:0.#} km {aoaDeg} deg", Mach = mach, AltM = altM, AoADeg = aoaDeg, Lat = 0, Lon = -60,
-                HeadingDeg = 90
-            };
 
         /// <summary>The aero force held at a condition, as areas: lift / q and drag / q (m^2), pitch moment / q (m^3).</summary>
         private sealed class Aero
@@ -103,13 +94,11 @@ namespace FerramAerospaceResearch.InGameTests
         /// then falls away with the stall; FAR's stall fraction is nil in cruise and most of the wing past the peak, and
         /// the flight window's status goes from Nominal to Large-Scale Stall.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Behaviour_WingsStallPastTheirMaxAngle(TestContext ctx)
         {
             yield return Wait.Seconds(5);
-            Flight.IgnoreMaxTemperature(true);
-            Ctrl.SetThrottle(0f);
-            yield return FlightTests.Airborne(At(0.25, 3000, 4));
+            yield return FlightTests.Airborne(Far.At(0.25, 3000, 4));
             Vessel v = FlightGlobals.ActiveVessel;
             FlightGUI gui = Far.FlightGui(v);
             List<FARWingAerodynamicModel> wings = v.parts.SelectMany(p => p.Modules.OfType<FARWingAerodynamicModel>()).ToList();
@@ -122,7 +111,7 @@ namespace FerramAerospaceResearch.InGameTests
             {
                 ctx.Step($"held at {alphas[i]} deg");
                 var a = new Aero();
-                yield return Measure(At(0.25, 3000, alphas[i]), a);
+                yield return Measure(Far.At(0.25, 3000, alphas[i]), a);
                 liftS[i] = a.LiftS;
                 stall[i] = FARAPI.VesselStallFrac(v);
                 status[i] = Far.FlightStatus(gui);
@@ -150,13 +139,11 @@ namespace FerramAerospaceResearch.InGameTests
         /// Full nose-up and nose-down stick, held at 3 deg at Mach 0.5: every elevon deflects most of its travel, opposite
         /// ways for the two, and the pitching moment FAR applies moves nose-up and nose-down of the neutral one.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Behaviour_PitchInputMovesTheElevons(TestContext ctx)
         {
             yield return Wait.Seconds(5);
-            Flight.IgnoreMaxTemperature(true);
-            Ctrl.SetThrottle(0f);
-            FarFlightProbe.Condition c = At(0.5, 3000, 3);
+            FarFlightProbe.Condition c = Far.At(0.5, 3000, 3);
             yield return FlightTests.Airborne(c);
             Vessel v = FlightGlobals.ActiveVessel;
             List<FARControllableSurface> elevons = HorizontalSurfaces(v).Where(s => s.pitchaxis > 0).ToList();
@@ -207,13 +194,11 @@ namespace FerramAerospaceResearch.InGameTests
         /// Full flap (FARAPI's flap setting, which stops at 3) at 4 deg and Mach 0.3: the flaps go down their full travel
         /// and the plane makes more lift, and more drag, at the same angle of attack; flaps up again puts the setting back.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Behaviour_FlapsAddLift(TestContext ctx)
         {
             yield return Wait.Seconds(5);
-            Flight.IgnoreMaxTemperature(true);
-            Ctrl.SetThrottle(0f);
-            FarFlightProbe.Condition c = At(0.3, 2000, 4);
+            FarFlightProbe.Condition c = Far.At(0.3, 2000, 4);
             yield return FlightTests.Airborne(c);
             Vessel v = FlightGlobals.ActiveVessel;
             List<FARControllableSurface> flaps = HorizontalSurfaces(v);
@@ -267,13 +252,11 @@ namespace FerramAerospaceResearch.InGameTests
         /// Spoilers (FARAPI's spoiler switch) at 4 deg and Mach 0.3: the surfaces go trailing edge up, the plane loses
         /// lift and gains drag at the same angle of attack, and the switch reads back.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Behaviour_SpoilersDumpLift(TestContext ctx)
         {
             yield return Wait.Seconds(5);
-            Flight.IgnoreMaxTemperature(true);
-            Ctrl.SetThrottle(0f);
-            FarFlightProbe.Condition c = At(0.3, 2000, 4);
+            FarFlightProbe.Condition c = Far.At(0.3, 2000, 4);
             yield return FlightTests.Airborne(c);
             Vessel v = FlightGlobals.ActiveVessel;
             List<FARControllableSurface> spoilers = HorizontalSurfaces(v);
@@ -321,13 +304,11 @@ namespace FerramAerospaceResearch.InGameTests
         /// The same plane at Mach 0.5 (3 km) and Mach 2 (12 km), at 0 and 4 deg: wave drag raises the drag area well
         /// above the subsonic one, the lift slope falls (as 1 / sqrt(M^2 - 1) does), and FAR's Mach number is the game's.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Behaviour_SupersonicDragRiseAndLiftSlope(TestContext ctx)
         {
             yield return Wait.Seconds(5);
-            Flight.IgnoreMaxTemperature(true);
-            Ctrl.SetThrottle(0f);
-            yield return FlightTests.Airborne(At(0.5, 3000, 0));
+            yield return FlightTests.Airborne(Far.At(0.5, 3000, 0));
             Vessel v = FlightGlobals.ActiveVessel;
             FARVesselAero vesselAero = v.GetComponent<FARVesselAero>();
             Assert.NotNull(vesselAero, "the vessel's FARVesselAero");
@@ -337,12 +318,12 @@ namespace FerramAerospaceResearch.InGameTests
             var sup0 = new Aero();
             var sup4 = new Aero();
             ctx.Step("Mach 0.5");
-            yield return Measure(At(0.5, 3000, 0), sub0);
-            yield return Measure(At(0.5, 3000, 4), sub4);
+            yield return Measure(Far.At(0.5, 3000, 0), sub0);
+            yield return Measure(Far.At(0.5, 3000, 4), sub4);
             double subMachFar = vesselAero.MachNumber, subMach = v.mach;
             ctx.Step("Mach 2");
-            yield return Measure(At(2, 12000, 0), sup0);
-            yield return Measure(At(2, 12000, 4), sup4);
+            yield return Measure(Far.At(2, 12000, 0), sup0);
+            yield return Measure(Far.At(2, 12000, 4), sup4);
             double supMachFar = vesselAero.MachNumber, supMach = v.mach;
             ctx.Record("sub", $"0 deg {sub0}; 4 deg {sub4}; Mach {subMach:F3} (FAR {subMachFar:F3})");
             ctx.Record("sup", $"0 deg {sup0}; 4 deg {sup4}; Mach {supMach:F3} (FAR {supMachFar:F3})");
@@ -384,7 +365,7 @@ namespace FerramAerospaceResearch.InGameTests
             ctx.Record("capsule", $"{v.parts.Count} parts, {v.GetTotalMass():F3} t");
 
             ctx.Step("falling stowed");
-            var c = new FarFlightProbe.Condition { Name = "drop", SpeedMs = 60, AltM = 3000, AoADeg = 0, Lat = 0, Lon = -60, HeadingDeg = 90 };
+            FarFlightProbe.Condition c = Far.At(0, 3000, 0, "drop", speedMs: 60);
             yield return FarFlightProbe.Place(c);
             yield return Wait.GameSeconds(6);
             v = FlightGlobals.ActiveVessel;
@@ -461,8 +442,7 @@ namespace FerramAerospaceResearch.InGameTests
             {
                 chute.deployAltitude = savedAltitude;
                 // close the info window if a failure left it open
-                typeof(RealChuteFAR).GetField("visible", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
-                                    ?.SetValue(chute, false);
+                Refl.Find(typeof(RealChuteFAR), "visible")?.SetValue(chute, false);
             }
         }
     }

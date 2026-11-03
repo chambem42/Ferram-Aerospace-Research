@@ -13,11 +13,9 @@ namespace FerramAerospaceResearch.InGameTests
     /// </summary>
     public static class FlightTests
     {
-        private const string Plane = "Aeris 4A";
 
         // over the sea east of KSC, heading east
-        private static FarFlightProbe.Condition Cruise(double aoaDeg) =>
-            new FarFlightProbe.Condition { Name = $"cruise {aoaDeg}", Mach = 0.5, AltM = 3000, AoADeg = aoaDeg, Lat = 0, Lon = -60, HeadingDeg = 90 };
+        private static FarFlightProbe.Condition Cruise(double aoaDeg) => Far.At(0.5, 3000, aoaDeg, $"cruise {aoaDeg}");
 
         /// <summary>
         /// The craft in the air at the condition, SAS off (it would move the control surfaces) and gear up: placed once
@@ -40,7 +38,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// Held at an angle of attack: the drag and lift FAR applies are what accelerate the vessel (its kinematic force:
         /// at zero throttle with the gear up, the aero force is the only one but gravity).
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Flight_AppliedForceIsTheAeroForce(TestContext ctx)
         {
             yield return Wait.Seconds(5);   // FAR voxelizes the craft after it loads
@@ -66,7 +64,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// 137.9 against 127.3 kN); the place-and-time API of the prediction-accuracy work
         /// (CalculateVesselAeroForcesAt) agrees to 0.04%.
         /// </summary>
-        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Flight_PredictionIsTheAppliedForce(TestContext ctx)
         {
             yield return Wait.Seconds(5);
@@ -88,7 +86,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// time, from a copy of the vessel's aero model) at the state the vessel flies in: the same answer on a worker
         /// thread as on the main thread, and full pitch input changes the pitching moment.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Flight_SnapshotIsThreadSafeAndTakesControls(TestContext ctx) => Snapshot(ctx, againstApplied: false);
 
         /// <summary>
@@ -96,7 +94,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// snapshot path predicts like the altitude-only API, the Aeris 4A at Mach 0.5, 3 km, 4 deg with 8.6 kN of drag against
         /// 14.2 kN applied and 138.0 kN of total force against 128.1 (measured).
         /// </summary>
-        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Flight_SnapshotPredictsTheAppliedForce(TestContext ctx) => Snapshot(ctx, againstApplied: true);
 
         private static IEnumerator Snapshot(TestContext ctx, bool againstApplied)
@@ -147,12 +145,10 @@ namespace FerramAerospaceResearch.InGameTests
         }
 
         /// <summary>FARAPI's flight numbers: dynamic pressure from the air and speed, the angle of attack held, Cl and Cd signs.</summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Flight_ApiReportsTheConditions(TestContext ctx)
         {
             yield return Wait.Seconds(5);
-            Flight.IgnoreMaxTemperature(true);
-            Ctrl.SetThrottle(0f);
             FarFlightProbe.Condition c = Cruise(5);
             yield return Airborne(c);
             var samples = new List<FarFlightProbe.Sample>();

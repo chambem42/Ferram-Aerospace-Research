@@ -11,6 +11,8 @@ using FerramAerospaceResearch.FARGUI.FAREditorGUI.Simulation;
 using KSP.Localization;
 using KspTest;
 using UnityEngine;
+using static FerramAerospaceResearch.InGameTests.Refl;
+using static FerramAerospaceResearch.InGameTests.EditorWindow;
 
 namespace FerramAerospaceResearch.InGameTests
 {
@@ -28,17 +30,6 @@ namespace FerramAerospaceResearch.InGameTests
     /// </summary>
     public static class EditorGuiTests
     {
-        private const string Plane = "Aeris 4A";
-
-        // the shared "More accurate aerodynamics" toggle (not localized in FAR)
-        private const string ViscousToggle = "More accurate aerodynamics";
-
-        private const BindingFlags Members =
-            BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-
-        private static string L(string key) => Localizer.Format(key).Trim();
-
-        private static string Window => L("FAREditorTitle");
 
         // ------------------------------------------------------------------------------------------ Static Analysis
 
@@ -48,7 +39,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// (induced drag), L/D peaks at a moderate angle, the plane is stable in pitch; the plotted points are the instant
         /// sim's at the same condition, and the return sweep retraces the outbound one below the stall.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator EditorGui_AoASweep(TestContext ctx)
         {
             ctx.Step("Open FAR Analysis on Static Analysis");
@@ -82,7 +73,7 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.Near(24, alpha[n - 1], 1e-9, "the sweep's last angle (a step short of the upper bound)");
                 Assert.True(cd.All(c => c > 0), "drag is positive at every angle");
 
-                int i0 = IndexNear(alpha, 0), i4 = IndexNear(alpha, 4), i5 = IndexNear(alpha, 5), i10 = IndexNear(alpha, 10);
+                int i0 = Far.IndexNear(alpha, 0), i4 = Far.IndexNear(alpha, 4), i5 = Far.IndexNear(alpha, 5), i10 = Far.IndexNear(alpha, 10);
                 for (int i = 0; i < i10; i++)
                     Assert.True(cl[i + 1] > cl[i], $"Cl rises with alpha up to 10 deg: {cl[i + 1]:F4} at {alpha[i + 1]} after {cl[i]:F4}");
                 Assert.True(cl[0] < 0 && cl[i5] > 0, $"lift crosses zero between -5 and 5 deg (Cl {cl[0]:F4} at -5, {cl[i5]:F4} at 5)");
@@ -122,7 +113,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// rise Mach to a peak near Mach 1 and falling again supersonic; lift at fixed incidence grows with subsonic Mach
         /// (compressibility); the plotted points are the instant sim's.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator EditorGui_MachSweep(TestContext ctx)
         {
             ctx.Step("Open FAR Analysis on Static Analysis, Mach sweep");
@@ -152,7 +143,7 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.Near(1.95, mach[n - 1], 1e-9, "the sweep's last Mach (a step short of the upper bound)");
                 Assert.True(cd.All(c => c > 0), "drag is positive at every Mach");
 
-                int iSub = IndexNear(mach, 0.3), i07 = IndexNear(mach, 0.7), i12 = IndexNear(mach, 1.2);
+                int iSub = Far.IndexNear(mach, 0.3), i07 = Far.IndexNear(mach, 0.7), i12 = Far.IndexNear(mach, 1.2);
                 double cdSub = cd[iSub];
                 int iPeak = ArgMax(cd);
                 ctx.Record("CdPeak", $"{cd[iPeak]:F4} at Mach {mach[iPeak]:F2}");
@@ -193,7 +184,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// derivatives of a stable plane have their stable signs. The result is what the tab shows, and the velocity
         /// indicator follows its show/hide button.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator EditorGui_StabilityDerivatives(TestContext ctx)
         {
             try
@@ -277,7 +268,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// 2 deg sideslip yaws the nose into the wind (Nbeta &gt; 0), couples into roll and yaw, and the Dutch roll decays.
         /// Both run their full 10 s without diverging.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator EditorGui_LinearSimulations(TestContext ctx)
         {
             try
@@ -339,7 +330,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// equal lift, the wings carry most of it, and the table shows. Coloring by Cl tints parts, and leaving the tab
         /// takes the tints off.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator EditorGui_ComponentsAddUpToTheCraft(TestContext ctx)
         {
             ctx.Step("Open FAR Analysis on Components");
@@ -450,50 +441,30 @@ namespace FerramAerospaceResearch.InGameTests
         /// and sea level flags exactly the derivatives the stability tab's own result there has out of range, and the
         /// subsonic cells are statically stable in pitch and yaw. Works with or without AJE (stability-only without).
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 1200)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 1200)]
         public static IEnumerator EditorGui_HeatmapAgreesWithStabilityTab(TestContext ctx)
         {
-            HeatmapsGUI heatmaps = null;
+            string cachePath = null;
             try
             {
                 ctx.Step("Stability derivatives at sea level, Mach 0.35");
                 var holder = new StabilityDerivOutput[1];
                 yield return CalculateStability("0", "0.35", holder);
                 StabilityDerivOutput tab = holder[0];
-                var checks = (ValueTuple<int, int, string>[])typeof(HeatmapsGUI)
-                                                              .GetField("CheckedDerivs", BindingFlags.Static | BindingFlags.NonPublic)
-                                                              .GetValue(null);
+                var checks = (ValueTuple<int, int, string>[])GetStatic(typeof(HeatmapsGUI), "CheckedDerivs");
                 List<string> tabOut = checks.Where(c => double.IsNaN(tab.stabDerivs[c.Item1]) || Math.Sign(tab.stabDerivs[c.Item1]) != c.Item2)
                                             .Select(c => c.Item3).OrderBy(x => x).ToList();
                 string mw = checks.First(c => c.Item1 == 5).Item3, nBeta = checks.First(c => c.Item1 == 17).Item3;
                 ctx.Record("tabOutOfRange", string.Join(" ", tabOut));
 
                 ctx.Step("Heatmaps: Mach 0.35-0.95 x 0-6 km, 3 x 3, with stability");
-                SelectTab("FAREditorModeHeatmaps");
-                yield return Wait.Frames(2);
-                heatmaps = (HeatmapsGUI)Get(Far.Editor, "_heatmaps");
-                Remember(heatmaps, "_machMin", "_machMax", "_altMinKm", "_altMaxKm", "_nMach", "_nAlt", "_spoilers",
-                         "_includeStability", "_autoRecalc", "_speedInMS", "_autoMaxAlt", "_autoMaxSpeed");
-                Set(heatmaps, "_spoilers", false);   // no control for it on the tab; the stability tab's spoilers are in
-                if (Get<bool>(heatmaps, "_speedInMS"))
-                    yield return Imgui.Click("m/s", Window, exact: true);
-                yield return Imgui.Toggle("Max altitude", false, Window);
-                yield return Imgui.Toggle("Max Mach", false, Window);
-                yield return Imgui.Toggle(L("FARHeatmapsAutoRecalc"), false, Window);
-                yield return Imgui.Toggle(L("FARHeatmapsIncludeStab"), true, Window);
-                // the range fields in order: Mach min, max, altitude min, max (km), cells along each
-                string[] fields = { "0.35", "0.95", "0", "6", "3", "3" };
-                for (int i = 0; i < fields.Length; i++)
-                    yield return Imgui.SetTextNth(i, fields[i], Window);
-                yield return Imgui.Click(L("FARStabHeatmapRun"), Window);
-                HeatmapsGUI hm = heatmaps;
-                yield return Wait.Until(() => !hm.IsSweepRunning, 900, "the heatmap sweep", shot: false);
-
-                bool stabilityOnly = Get<bool>(heatmaps, "_stabilityOnly");
+                var sw = new SweepOut();
+                yield return Sweep(new[] { "0.35", "0.95", "0", "6", "3", "3" }, true, true, sw);
+                cachePath = sw.CachePath;
+                bool stabilityOnly = sw.StabilityOnly;
                 ctx.Record("stabilityOnly", stabilityOnly);
-                ctx.Record("status", Get<string>(heatmaps, "_statusMessage"));
-                var results = Get<List<HeatmapResult>>(heatmaps, "_results");
-                Assert.True(results != null && results.Count > 0, "the sweep has a result");
+                ctx.Record("status", sw.Status);
+                List<HeatmapResult> results = sw.Results;
                 HeatmapResult r0 = results[0];
                 double[] machs = { 0.35, 0.65, 0.95 }, alts = { 0, 3000, 6000 };
                 Assert.Equal(3, r0.MachAxis.Length, "Mach columns");
@@ -523,16 +494,13 @@ namespace FerramAerospaceResearch.InGameTests
                              "the heatmap at Mach 0.35, sea level flags what the stability tab has out of range there");
 
                 if (!stabilityOnly)
-                {
                     Assert.NotNull(r0.Envelope, "the performance envelope (AJE present)");
-                    // the sweep saved itself to the craft's history: take this one back out
-                    yield return Imgui.Click("Remove", Window, exact: true);
-                }
             }
             finally
             {
+                // the sweep saved itself to the craft's history: take this one back out
+                DeleteCache(cachePath);
                 CloseWindow();
-                heatmaps?.SaveSettings();   // the fields as they were, back into FAR's config
             }
         }
 
@@ -544,7 +512,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// for the length and section) would have; each overlay curve toggle shows and hides its curve, and the debug
         /// voxel button shows and hides the voxels.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator EditorGui_TransonicDesign(TestContext ctx)
         {
             ctx.Step("Open FAR Analysis on Transonic Design");
@@ -621,7 +589,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// The window's Raise Gear button: the gear comes up, FAR re-voxelizes the craft, and its drag at Mach 0.3 and
         /// 2 deg drops; Lower Gear puts it back and the drag returns to what it was.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator EditorGui_RaisingTheGearCutsDrag(TestContext ctx)
         {
             ctx.Step("Open FAR Analysis");
@@ -677,89 +645,7 @@ namespace FerramAerospaceResearch.InGameTests
 
         // ------------------------------------------------------------------------------------------ helpers: window
 
-        private static bool WindowShown =>
-            (bool)typeof(EditorGUI).GetField("showGUI", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
-
         private static EditorSimManager SimManager => (EditorSimManager)Get(Far.Editor, "_simManager");
-
-        /// <summary>The window shown on a tab (its localization key), once the craft is voxelized.</summary>
-        private static IEnumerator OpenWindow(string tabKey)
-        {
-            yield return Far.WaitForEditorVoxels();
-            SelectTab(tabKey);
-            if (!WindowShown)
-            {
-                // what FAR's toolbar button does in the editor; the button shown pressed to match
-                EditorGUI.onAppLaunchToggle();
-                if (FARDebugAndSettings.FARDebugButtonStock)
-                    FARDebugAndSettings.FARDebugButtonStock.SetTrue(false);
-            }
-
-            yield return Imgui.WaitWindow(Window);
-            yield return Wait.Frames(2);
-        }
-
-        /// <summary>Everything the test changed put back, and the window closed.</summary>
-        private static void CloseWindow()
-        {
-            RestoreRemembered();
-            try
-            {
-                if (viscousAtStart.HasValue && EditorSimManager.UseAccurateViscousCalc != viscousAtStart.Value)
-                    EditorSimManager.UseAccurateViscousCalc = viscousAtStart.Value;
-                viscousAtStart = null;
-                if (EditorGUI.Instance != null && WindowShown)
-                {
-                    EditorGUI.onAppLaunchToggle();
-                    if (FARDebugAndSettings.FARDebugButtonStock)
-                        FARDebugAndSettings.FARDebugButtonStock.SetFalse(false);
-                }
-            }
-            catch (Exception e)
-            {
-                Log.Warn("EditorGuiTests: closing FAR's window: " + e.Message);
-            }
-        }
-
-        private static void SelectTab(string tabKey)
-        {
-            object modes = Get(Far.Editor, "modeDropdown");
-            Remember(modes, "selectedOption");
-            SelectOption(modes, L(tabKey));
-        }
-
-        /// <summary>A FAR dropdown's option chosen by its label, as a click in its list would.</summary>
-        private static void SelectOption(object dropdown, string label)
-        {
-            var options = (string[])Get(dropdown, "stringOptions");
-            int i = Array.FindIndex(options, o => string.Equals(o.Trim(), label, StringComparison.OrdinalIgnoreCase));
-            if (i < 0)
-                throw new UITestFailure($"no option '{label}' in FAR's dropdown ({string.Join(", ", options)})");
-            Set(dropdown, "selectedOption", i);
-        }
-
-        /// <summary>The planet (home body) and flap setting (up) every tab shares.</summary>
-        private static void ResetConditions()
-        {
-            object graphGui = Get(Far.Editor, "_editorGraph");
-            object bodies = Get(graphGui, "bodySettingDropdown"), flaps = Get(graphGui, "flapSettingDropdown");
-            Remember(bodies, "selectedOption");
-            Remember(flaps, "selectedOption");
-            SelectOption(bodies, FlightGlobals.GetHomeBody().bodyName);
-            SelectOption(flaps, L("FARFlapSetting0"));
-        }
-
-        private static bool? viscousAtStart;
-
-        /// <summary>The shared viscous option off (through its toggle on the tab shown), for FAR's default conditions.</summary>
-        private static IEnumerator Inviscid()
-        {
-            if (!viscousAtStart.HasValue)
-                viscousAtStart = EditorSimManager.UseAccurateViscousCalc;
-            if (EditorSimManager.UseAccurateViscousCalc)
-                yield return Imgui.Toggle(ViscousToggle, false, Window);
-            Assert.False(EditorSimManager.UseAccurateViscousCalc, "the viscous option is off");
-        }
 
         /// <summary>Static Analysis in AoA or Mach mode, inviscid, spoilers in, no pitch input.</summary>
         private static IEnumerator StaticSetup(object graphGui, object inputs, bool machMode)
@@ -814,72 +700,6 @@ namespace FerramAerospaceResearch.InGameTests
             yield return Far.WaitForEditorVoxels();
         }
 
-        // ------------------------------------------------------------------------------------------ helpers: state
-
-        private static readonly List<KeyValuePair<object, Dictionary<string, object>>> Remembered =
-            new List<KeyValuePair<object, Dictionary<string, object>>>();
-
-        /// <summary>Fields' values kept (the first time in a test) to put back when the window closes.</summary>
-        private static void Remember(object o, params string[] fields)
-        {
-            Dictionary<string, object> saved = null;
-            foreach (KeyValuePair<object, Dictionary<string, object>> e in Remembered)
-                if (ReferenceEquals(e.Key, o))
-                    saved = e.Value;
-            if (saved == null)
-            {
-                saved = new Dictionary<string, object>();
-                Remembered.Add(new KeyValuePair<object, Dictionary<string, object>>(o, saved));
-            }
-
-            foreach (string f in fields)
-                if (!saved.ContainsKey(f))
-                {
-                    object v = Get(o, f);
-                    saved[f] = v is Array a ? a.Clone() : v;
-                }
-        }
-
-        private static void RestoreRemembered()
-        {
-            foreach (KeyValuePair<object, Dictionary<string, object>> e in Remembered)
-                foreach (KeyValuePair<string, object> f in e.Value)
-                    try
-                    {
-                        // an array field (readonly) gets its elements back
-                        if (f.Value is Array saved && Get(e.Key, f.Key) is Array current && current.Length == saved.Length)
-                            Array.Copy(saved, current, saved.Length);
-                        else
-                            Set(e.Key, f.Key, f.Value);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Warn($"EditorGuiTests: restoring {e.Key.GetType().Name}.{f.Key}: {ex.Message}");
-                    }
-
-            Remembered.Clear();
-        }
-
-        private static FieldInfo FieldOf(object o, string name)
-        {
-            if (o == null)
-                throw new UITestFailure($"no object to read {name} from");
-            for (Type t = o.GetType(); t != null; t = t.BaseType)
-            {
-                FieldInfo f = t.GetField(name, Members | BindingFlags.DeclaredOnly);
-                if (f != null)
-                    return f;
-            }
-
-            throw new UITestFailure($"{o.GetType().Name} has no field {name}");
-        }
-
-        private static object Get(object o, string name) => FieldOf(o, name).GetValue(o);
-
-        private static T Get<T>(object o, string name) => (T)Get(o, name);
-
-        private static void Set(object o, string name, object value) => FieldOf(o, name).SetValue(o, value);
-
         // ------------------------------------------------------------------------------------------ helpers: data
 
         private sealed class Line
@@ -931,16 +751,7 @@ namespace FerramAerospaceResearch.InGameTests
             return max;
         }
 
-        private static double At(Line l, double t) => l.Y[IndexNear(l.X, t)];
-
-        private static int IndexNear(double[] x, double v)
-        {
-            int best = 0;
-            for (int i = 1; i < x.Length; i++)
-                if (Math.Abs(x[i] - v) < Math.Abs(x[best] - v))
-                    best = i;
-            return best;
-        }
+        private static double At(Line l, double t) => l.Y[Far.IndexNear(l.X, t)];
 
         private static int ArgMax(double[] y)
         {

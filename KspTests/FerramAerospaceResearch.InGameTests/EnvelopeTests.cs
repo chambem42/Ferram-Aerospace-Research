@@ -13,6 +13,8 @@ using KSP.Localization;
 using KspTest;
 using UnityEngine;
 using Cell = FerramAerospaceResearch.FARGUI.FAREditorGUI.Simulation.PerformanceEnvelopeCalculator.CellResult;
+using static FerramAerospaceResearch.InGameTests.Refl;
+using static FerramAerospaceResearch.InGameTests.EditorWindow;
 
 namespace FerramAerospaceResearch.InGameTests
 {
@@ -35,20 +37,12 @@ namespace FerramAerospaceResearch.InGameTests
     /// </summary>
     public static class EnvelopeTests
     {
-        private const string Plane = "Aeris 4A";
 
         // CKAN identifier of AJE (pulls in SolverEngines), and the assembly the test needs loaded
         private const string AjeMods = "AdvancedJetEngine";
         private const string AjeRequires = "AJE";
 
         private const double G0 = 9.80665;
-
-        private const BindingFlags Members =
-            BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-
-        private static string L(string key) => Localizer.Format(key).Trim();
-
-        private static string Window => L("FAREditorTitle");
 
         private static string Inv(double v, string fmt) => v.ToString(fmt, CultureInfo.InvariantCulture);
 
@@ -65,7 +59,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// exactly where the envelope is not flyable; the sweep counted every cell; and the static analysis is the
         /// same after the sweep as before.
         /// </summary>
-        [UITest(Kind = "Check", Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator Envelope_AerisFliesWhereAJetShould(TestContext ctx)
         {
             string cachePath = null;
@@ -276,7 +270,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// (T0 (1 + 0.2 M^2)), half throttle makes less thrust and burns less fuel, the fuel-flow toggle switches the
         /// table, and the engines are left at zero throttle after sampling.
         /// </summary>
-        [UITest(Kind = "Check", Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator Envelope_EngineDeckThrustLapsesWithAltitude(TestContext ctx)
         {
             try
@@ -398,7 +392,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// path's map (its stand-alone stability pass is the stability-only fallback's loop): the same cells trim
         /// and fly, at the same angle of attack, drag and thrust, with the same stability flags.
         /// </summary>
-        [UITest(Kind = "Check", Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator Envelope_MultithreadedSweepIsTheSerialOne(TestContext ctx)
         {
             string pathA = null, pathB = null;
@@ -489,7 +483,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// editor's; it reads back the vessel's Mach and altitude, and names the nearest cell and that cell's verdict,
         /// which for a jet at Mach 0.8, 3 km is sustainable level flight.
         /// </summary>
-        [UITest(Kind = "Check", Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Plane, CraftDir = "SPH",
+        [UITest(Kind = "Check", Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Far.Plane, CraftDir = "SPH",
                 LaunchSite = "Runway", TimeoutSec = 1200)]
         public static IEnumerator Envelope_FlightWindowShowsTheVesselsEnvelope(TestContext ctx)
         {
@@ -520,7 +514,7 @@ namespace FerramAerospaceResearch.InGameTests
             EditorLogic.fetch.launchSiteName = "Runway";
             yield return Nav.Launch(ctx);
             yield return Wait.Seconds(5);   // FAR voxelizes the craft after it loads
-            var cruise = new FarFlightProbe.Condition { Name = "cruise M0.8 3km", Mach = 0.8, AltM = 3000, AoADeg = 2, Lat = 0, Lon = -60, HeadingDeg = 90 };
+            FarFlightProbe.Condition cruise = Far.At(0.8, 3000, 2, "cruise M0.8 3km");
             yield return FlightTests.Airborne(cruise);
 
             Vessel v = FlightGlobals.ActiveVessel;
@@ -581,7 +575,7 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.Near(v.mach, double.Parse(nums[0].Value, CultureInfo.InvariantCulture), 0.05, "the Mach the window reads back");
                 Assert.Near(v.altitude / 1000, double.Parse(nums[1].Value, CultureInfo.InvariantCulture), 0.3, "the altitude the window reads back (km)");
 
-                int ci = IndexNear(flight.MachAxis, v.mach), cj = IndexNear(flight.AltAxis, v.altitude);
+                int ci = Far.IndexNear(flight.MachAxis, v.mach), cj = Far.IndexNear(flight.AltAxis, v.altitude);
                 Cell here = flight.Envelope[ci, cj];
                 string verdict = !here.Trimmed ? L("FARFlightHeatmapPredLift") : here.Feasible ? L("FARFlightHeatmapPredOk") : L("FARFlightHeatmapPredThrust");
                 string predicted = Localizer.Format("FARFlightHeatmapPred", Inv(here.Mach, "F2"), Inv(flight.AltAxis[cj] / 1000, "F1"), verdict);
@@ -613,7 +607,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// stability-only map (3 x 3, Mach 0.4-1.2 x 0-6 km) with no envelope, says so, and neither hands it to the
         /// flight scene nor files it in the craft's history. With SolverEngines the Engine Deck tab is there.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator Envelope_WithoutSolverEnginesTheMapIsStabilityOnly(TestContext ctx)
         {
             try
@@ -641,7 +635,7 @@ namespace FerramAerospaceResearch.InGameTests
                 ctx.Step("Stability off: nothing to sweep");
                 object before = Get(hm, "_results");
                 List<HeatmapResult> cachedBefore = HeatmapResult.Cached;
-                int historyBefore = HeatmapPersistence.ListForVessel(Plane).Count;
+                int historyBefore = HeatmapPersistence.ListForVessel(Far.Plane).Count;
                 yield return Imgui.Click(L("FARStabHeatmapRun"), Window);
                 Assert.False(hm.IsSweepRunning, "no sweep runs without engines or stability");
                 Assert.True(ReferenceEquals(before, Get(hm, "_results")), "the maps shown are left alone");
@@ -671,7 +665,7 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.True(Imgui.IsVisible("stability map only", Window), "the tab says so");
                 Assert.True(Imgui.IsVisible("Stability derivatives", Window), "the tab draws the stability map");
                 Assert.True(ReferenceEquals(cachedBefore, HeatmapResult.Cached), "a stability-only map is not handed to the flight scene");
-                Assert.Equal(historyBefore, HeatmapPersistence.ListForVessel(Plane).Count, "nor filed in the craft's sweep history");
+                Assert.Equal(historyBefore, HeatmapPersistence.ListForVessel(Far.Plane).Count, "nor filed in the craft's sweep history");
             }
             finally
             {
@@ -708,92 +702,6 @@ namespace FerramAerospaceResearch.InGameTests
             var deck = (EditorEngineDeck)Get(deckGui, "_deck");
             o.Engines = deck.EngineCount;
             o.Inlets = deck.InletCount;
-        }
-
-        private sealed class SweepOut
-        {
-            public List<HeatmapResult> Results;
-            public string Status, CachePath;
-            public int CellsDone, CellsTotal;
-            public bool StabilityOnly;
-        }
-
-        private static HeatmapsGUI Heatmaps => (HeatmapsGUI)Get(Far.Editor, "_heatmaps");
-
-        private static HeatmapsGUI heatmapsUsed;
-        private static bool? cleanupAtStart;
-
-        /// <summary>The Heatmaps tab's state remembered, spoilers in, the fuel slider at full.</summary>
-        private static void PrepareHeatmaps(HeatmapsGUI hm)
-        {
-            heatmapsUsed = hm;
-            if (!cleanupAtStart.HasValue)
-                cleanupAtStart = HeatmapResult.CleanupDisplay;
-            Remember(hm, "_machMin", "_machMax", "_altMinKm", "_altMaxKm", "_nMach", "_nAlt", "_spoilers", "_includeStability",
-                     "_autoRecalc", "_speedInMS", "_autoMaxAlt", "_autoMaxSpeed", "_multithread", "_fuelPos");
-            Set(hm, "_spoilers", false);   // no control for it on the tab
-            Set(hm, "_fuelPos", 2f);       // the slider at full (the last of the 3 mass samples)
-        }
-
-        /// <summary>Mach axis, no auto-fit or auto-recalc, cleanup on, stability and multithreading as asked, through the tab's controls.</summary>
-        private static IEnumerator SetHeatmapToggles(bool stability, bool multithread)
-        {
-            if (Get<bool>(Heatmaps, "_speedInMS"))
-                yield return Imgui.Click("m/s", Window, exact: true);
-            yield return Imgui.Toggle("Max altitude", false, Window);
-            yield return Imgui.Toggle("Max Mach", false, Window);
-            yield return Imgui.Toggle(L("FARHeatmapsAutoRecalc"), false, Window);
-            yield return Imgui.Toggle("Cleanup", true, Window);
-            yield return Imgui.Toggle("Multithread", multithread, Window);
-            yield return Imgui.Toggle(L("FARHeatmapsIncludeStab"), stability, Window);
-        }
-
-        /// <summary>
-        /// A sweep through the Heatmaps tab: its range fields typed in (Mach min, max, altitude min, max km, cells along
-        /// each), Run pressed, the sweep waited out. Records the history file it saved, for the test to delete.
-        /// </summary>
-        private static IEnumerator Sweep(string[] fields, bool stability, bool multithread, SweepOut o)
-        {
-            SelectTab("FAREditorModeHeatmaps");
-            yield return Wait.Frames(2);
-            HeatmapsGUI hm = Heatmaps;
-            PrepareHeatmaps(hm);
-            yield return SetHeatmapToggles(stability, multithread);
-            for (int i = 0; i < fields.Length; i++)
-                yield return Imgui.SetTextNth(i, fields[i], Window);
-            Assert.Equal(multithread, Get<bool>(hm, "_multithread"), "the Multithread toggle");
-            Assert.Equal(stability, Get<bool>(hm, "_includeStability"), "the Include stability toggle");
-
-            object before = Get(hm, "_results");
-            yield return Imgui.Click(L("FARStabHeatmapRun"), Window);
-            yield return Wait.Until(() => !hm.IsSweepRunning, 600, "the heatmap sweep", shot: false);
-
-            o.Results = Get<List<HeatmapResult>>(hm, "_results");
-            o.Status = Get<string>(hm, "_statusMessage");
-            o.CellsDone = Get<int>(hm, "_cellsDone");
-            o.CellsTotal = Get<int>(hm, "_cellsTotal");
-            o.StabilityOnly = Get<bool>(hm, "_stabilityOnly");
-            Assert.True(o.Results != null && o.Results.Count > 0 && !ReferenceEquals(o.Results, before),
-                        "the Run button swept a new map: " + o.Status);
-
-            var history = Get<List<HeatmapPersistence.CacheEntry>>(hm, "_cachedSweeps");
-            int vi = Get<int>(hm, "_viewIndex");
-            if (!o.StabilityOnly && history != null && vi >= 0 && vi < history.Count)
-                o.CachePath = history[vi].Path;
-        }
-
-        private static void DeleteCache(string path)
-        {
-            if (path == null)
-                return;
-            try
-            {
-                HeatmapPersistence.DeletePath(path);
-            }
-            catch (Exception e)
-            {
-                KspTest.Log.Warn("EnvelopeTests: deleting the sweep's history file: " + e.Message);
-            }
         }
 
         /// <summary>The static analysis' Cd at Mach 0.5, 2 deg, after a few calls (the wings' stall state settles).</summary>
@@ -906,152 +814,5 @@ namespace FerramAerospaceResearch.InGameTests
             ctx.Record("grid." + name, sb.ToString());
         }
 
-        private static int IndexNear(double[] x, double v)
-        {
-            int best = 0;
-            for (int i = 1; i < x.Length; i++)
-                if (Math.Abs(x[i] - v) < Math.Abs(x[best] - v))
-                    best = i;
-            return best;
-        }
-
-        // ------------------------------------------------------------------------------------------ helpers: window
-
-        private static bool WindowShown =>
-            (bool)typeof(EditorGUI).GetField("showGUI", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
-
-        /// <summary>The window shown on a tab (its localization key), once the craft is voxelized.</summary>
-        private static IEnumerator OpenWindow(string tabKey)
-        {
-            yield return Far.WaitForEditorVoxels();
-            SelectTab(tabKey);
-            if (!WindowShown)
-            {
-                // what FAR's toolbar button does in the editor; the button shown pressed to match
-                EditorGUI.onAppLaunchToggle();
-                if (FARDebugAndSettings.FARDebugButtonStock)
-                    FARDebugAndSettings.FARDebugButtonStock.SetTrue(false);
-            }
-
-            yield return Imgui.WaitWindow(Window);
-            yield return Wait.Frames(2);
-        }
-
-        /// <summary>Everything the test changed put back (and the heatmap fields saved back to FAR's config), and the window closed.</summary>
-        private static void CloseWindow()
-        {
-            RestoreRemembered();
-            try
-            {
-                if (cleanupAtStart.HasValue)
-                    HeatmapResult.CleanupDisplay = cleanupAtStart.Value;
-                cleanupAtStart = null;
-                heatmapsUsed?.SaveSettings();
-                heatmapsUsed = null;
-                if (EditorGUI.Instance != null && WindowShown)
-                {
-                    EditorGUI.onAppLaunchToggle();
-                    if (FARDebugAndSettings.FARDebugButtonStock)
-                        FARDebugAndSettings.FARDebugButtonStock.SetFalse(false);
-                }
-            }
-            catch (Exception e)
-            {
-                KspTest.Log.Warn("EnvelopeTests: closing FAR's window: " + e.Message);
-            }
-        }
-
-        private static void SelectTab(string tabKey)
-        {
-            object modes = Get(Far.Editor, "modeDropdown");
-            Remember(modes, "selectedOption");
-            SelectOption(modes, L(tabKey));
-        }
-
-        /// <summary>A FAR dropdown's option chosen by its label, as a click in its list would.</summary>
-        private static void SelectOption(object dropdown, string label)
-        {
-            var options = (string[])Get(dropdown, "stringOptions");
-            int i = Array.FindIndex(options, o => string.Equals(o.Trim(), label, StringComparison.OrdinalIgnoreCase));
-            if (i < 0)
-                throw new UITestFailure($"no option '{label}' in FAR's dropdown ({string.Join(", ", options)})");
-            Set(dropdown, "selectedOption", i);
-        }
-
-        /// <summary>The planet (home body) and flap setting (up) every tab shares.</summary>
-        private static void ResetConditions()
-        {
-            object graphGui = Get(Far.Editor, "_editorGraph");
-            object bodies = Get(graphGui, "bodySettingDropdown"), flaps = Get(graphGui, "flapSettingDropdown");
-            Remember(bodies, "selectedOption");
-            Remember(flaps, "selectedOption");
-            SelectOption(bodies, FlightGlobals.GetHomeBody().bodyName);
-            SelectOption(flaps, L("FARFlapSetting0"));
-        }
-
-        // ------------------------------------------------------------------------------------------ helpers: state
-
-        private static readonly List<KeyValuePair<object, Dictionary<string, object>>> Remembered =
-            new List<KeyValuePair<object, Dictionary<string, object>>>();
-
-        /// <summary>Fields' values kept (the first time in a test) to put back when the window closes.</summary>
-        private static void Remember(object o, params string[] fields)
-        {
-            Dictionary<string, object> saved = null;
-            foreach (KeyValuePair<object, Dictionary<string, object>> e in Remembered)
-                if (ReferenceEquals(e.Key, o))
-                    saved = e.Value;
-            if (saved == null)
-            {
-                saved = new Dictionary<string, object>();
-                Remembered.Add(new KeyValuePair<object, Dictionary<string, object>>(o, saved));
-            }
-
-            foreach (string f in fields)
-                if (!saved.ContainsKey(f))
-                {
-                    object v = Get(o, f);
-                    saved[f] = v is Array a ? a.Clone() : v;
-                }
-        }
-
-        private static void RestoreRemembered()
-        {
-            foreach (KeyValuePair<object, Dictionary<string, object>> e in Remembered)
-                foreach (KeyValuePair<string, object> f in e.Value)
-                    try
-                    {
-                        if (f.Value is Array saved && Get(e.Key, f.Key) is Array current && current.Length == saved.Length)
-                            Array.Copy(saved, current, saved.Length);
-                        else
-                            Set(e.Key, f.Key, f.Value);
-                    }
-                    catch (Exception ex)
-                    {
-                        KspTest.Log.Warn($"EnvelopeTests: restoring {e.Key.GetType().Name}.{f.Key}: {ex.Message}");
-                    }
-
-            Remembered.Clear();
-        }
-
-        private static FieldInfo FieldOf(object o, string name)
-        {
-            if (o == null)
-                throw new UITestFailure($"no object to read {name} from");
-            for (Type t = o.GetType(); t != null; t = t.BaseType)
-            {
-                FieldInfo f = t.GetField(name, Members | BindingFlags.DeclaredOnly);
-                if (f != null)
-                    return f;
-            }
-
-            throw new UITestFailure($"{o.GetType().Name} has no field {name}");
-        }
-
-        private static object Get(object o, string name) => FieldOf(o, name).GetValue(o);
-
-        private static T Get<T>(object o, string name) => (T)Get(o, name);
-
-        private static void Set(object o, string name, object value) => FieldOf(o, name).SetValue(o, value);
     }
 }

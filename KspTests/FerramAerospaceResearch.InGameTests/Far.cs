@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
-using System.Reflection;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using FerramAerospaceResearch.FARAeroComponents;
 using FerramAerospaceResearch.FARGUI.FAREditorGUI;
@@ -18,10 +19,65 @@ namespace FerramAerospaceResearch.InGameTests
     /// </summary>
     internal static class Far
     {
-        private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+        /// <summary>The stock plane most tests fly or analyse.</summary>
+        public const string Plane = "Aeris 4A";
 
-        private static T Field<T>(object o, string name) where T : class =>
-            o?.GetType().GetField(name, Instance)?.GetValue(o) as T;
+        private static T Field<T>(object o, string name) where T : class => Refl.TryGet<T>(o, name);
+
+        // ------------------------------------------------------------------ flight conditions
+
+        /// <summary>
+        /// A condition over the sea east of KSC (0 N, 60 W), heading east: the site every flight test is placed at.
+        /// A positive speed (m/s) is flown instead of the Mach.
+        /// </summary>
+        public static FarFlightProbe.Condition At(double mach, double altM, double aoaDeg, string name = null, double speedMs = 0) =>
+            new FarFlightProbe.Condition
+            {
+                Name = name ?? $"M{mach} {altM / 1000:0.#} km {aoaDeg} deg", Mach = mach, SpeedMs = speedMs, AltM = altM,
+                AoADeg = aoaDeg, Lat = 0, Lon = -60, HeadingDeg = 90
+            };
+
+        // ------------------------------------------------------------------ parts
+
+        /// <summary>The vessel's parts not under the fairing (in its part tree): what it carries, and the rest of the stack above.</summary>
+        public static List<Part> PayloadOf(Vessel v, Part fairing)
+        {
+            var below = new HashSet<Part>();
+            var stack = new Stack<Part>();
+            stack.Push(fairing);
+            while (stack.Count > 0)
+            {
+                Part p = stack.Pop();
+                if (!below.Add(p))
+                    continue;
+                foreach (Part c in p.children)
+                    stack.Push(c);
+            }
+
+            return v.parts.Where(p => !below.Contains(p)).ToList();
+        }
+
+        /// <summary>The names of the resources a part holds.</summary>
+        public static string[] Resources(Part p) => p.Resources.Cast<PartResource>().Select(r => r.resourceName).ToArray();
+
+        /// <summary>Holds liquid fuel and oxidizer, and nothing else: what FAR's stress templates call a rocket fuel tank.</summary>
+        public static bool IsRocketTank(Part p)
+        {
+            string[] res = Resources(p);
+            return res.Length == 2 && res.Contains("LiquidFuel") && res.Contains("Oxidizer");
+        }
+
+        /// <summary>The index of the value nearest v.</summary>
+        public static int IndexNear(double[] x, double v)
+        {
+            int best = 0;
+            for (int i = 1; i < x.Length; i++)
+                if (Math.Abs(x[i] - v) < Math.Abs(x[best] - v))
+                    best = i;
+            return best;
+        }
+
+        // ------------------------------------------------------------------ editor
 
         public static EditorGUI Editor => EditorGUI.Instance ?? throw new UITestFailure("FAR's editor window is not there");
 
@@ -67,13 +123,9 @@ namespace FerramAerospaceResearch.InGameTests
         /// <summary>The settings window's groups, in FlightGUI's drop-down order.</summary>
         public const int GroupFlightData = 0, GroupStabilityAugmentation = 1, GroupAirspeed = 2, GroupAeroViz = 3;
 
-        private const BindingFlags Static = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
+        private static object Get(object o, string name) => Refl.Get(o, name);
 
-        private static object Get(object o, string name) =>
-            (o?.GetType().GetField(name, Instance) ?? throw new UITestFailure($"{o?.GetType().Name} has no field {name}")).GetValue(o);
-
-        private static void Set(object o, string name, object value) =>
-            (o?.GetType().GetField(name, Instance) ?? throw new UITestFailure($"{o?.GetType().Name} has no field {name}")).SetValue(o, value);
+        private static void Set(object o, string name, object value) => Refl.Set(o, name, value);
 
         /// <summary>The active vessel's FAR flight GUI (a VesselModule).</summary>
         public static FlightGUI FlightGui(Vessel v = null) =>
@@ -82,8 +134,8 @@ namespace FerramAerospaceResearch.InGameTests
         /// <summary>FAR's flight window shown (FlightGUI.showGUI, what its toolbar button toggles).</summary>
         public static bool FlightGuiShown
         {
-            get => (bool)typeof(FlightGUI).GetField("showGUI", Static).GetValue(null);
-            set => typeof(FlightGUI).GetField("showGUI", Static).SetValue(null, value);
+            get => (bool)Refl.GetStatic(typeof(FlightGUI), "showGUI");
+            set => Refl.SetStatic(typeof(FlightGUI), "showGUI", value);
         }
 
         /// <summary>Whether one of the flight window's sub-windows is open: showFlightDataWindow, showSettingsWindow, ...</summary>
@@ -146,7 +198,7 @@ namespace FerramAerospaceResearch.InGameTests
             FARAeroPartModule aero = p.Modules.GetModule<FARAeroPartModule>();
             MaterialColorUpdater updater = aero != null ? Field<MaterialColorUpdater>(aero, "materialColorUpdater") : null;
             // the colour it was last given (stock keeps it in a non-public field)
-            if (updater?.GetType().GetField("setColor", Instance)?.GetValue(updater) is Color set)
+            if (updater != null && Refl.Find(updater.GetType(), "setColor")?.GetValue(updater) is Color set)
                 return set;
             Color best = new Color(0, 0, 0, 0);
             var block = new MaterialPropertyBlock();

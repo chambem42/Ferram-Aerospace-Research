@@ -15,10 +15,9 @@ namespace FerramAerospaceResearch.InGameTests
     /// </summary>
     public static class EditorTests
     {
-        private const string Plane = "Aeris 4A";
 
         /// <summary>The voxel model's length and largest cross-section against the craft's bounds.</summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator Editor_VoxelModelMatchesTheCraft(TestContext ctx)
         {
             yield return Far.WaitForEditorVoxels();
@@ -42,7 +41,7 @@ namespace FerramAerospaceResearch.InGameTests
         }
 
         /// <summary>Lift against angle of attack at Mach 0.4: rising, with a plausible slope, and drag always positive.</summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator Editor_LiftRisesWithAngleOfAttack(TestContext ctx)
         {
             yield return Far.WaitForEditorVoxels();
@@ -63,7 +62,7 @@ namespace FerramAerospaceResearch.InGameTests
         }
 
         /// <summary>Nose-down pitching moment rises with angle of attack: the stock plane is stable in pitch.</summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator Editor_StableInPitch(TestContext ctx)
         {
             yield return Far.WaitForEditorVoxels();
@@ -74,7 +73,7 @@ namespace FerramAerospaceResearch.InGameTests
         }
 
         /// <summary>A symmetric craft: no side force, yaw or roll without sideslip, and equal and opposite ones with it.</summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator Editor_SymmetricInSideslip(TestContext ctx)
         {
             yield return Far.WaitForEditorVoxels();
@@ -91,7 +90,7 @@ namespace FerramAerospaceResearch.InGameTests
         }
 
         /// <summary>Drag rises through the transonic: wave drag at Mach 1.1 on top of the subsonic drag at Mach 0.5.</summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator Editor_TransonicDragRise(TestContext ctx)
         {
             yield return Far.WaitForEditorVoxels();
