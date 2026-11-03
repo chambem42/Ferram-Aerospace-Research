@@ -1,7 +1,9 @@
 name: In-game tests (spike)
 
-# A trial of FAR's in-game tests on GitHub's own runners: does KSP load, reach an editor and fly on Windows (Microsoft's
-# software Direct3D) and on Linux (Xvfb, -batchmode), and how long does it take. KSP 1.12.5 comes from encrypted 7z
+# A trial of FAR's in-game tests on GitHub's own runners: does KSP load, reach an editor and fly in -batchmode on Windows
+# and Linux (Xvfb), and how long does it take. Drawing frames to the window is too slow in software (Windows WARP is
+# under 2 fps and misses real-time waits; Mesa hangs in a flight scene), so both run -batchmode, where KspTest's
+# screenshots render the cameras into a texture instead. KSP 1.12.5 comes from encrypted 7z
 # volumes in a private repo's release (KspTest/ci/Pack-KspGame.ps1). Pushes to this branch and manual runs only: fork
 # PRs get no secrets, and nothing here may run a PR's code. The game folder is never cached or uploaded.
 #
@@ -75,10 +77,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: windows, os: windows-2022, platform: windows, ksp-args: "" }
-          - { name: windows-batchmode, os: windows-2022, platform: windows, ksp-args: "-batchmode" }
-          # drawing with Mesa hangs in the first frame of a flight scene (KspTest/docker/README.md)
-          - { name: linux-batchmode, os: ubuntu-24.04, platform: linux, ksp-args: "-batchmode" }
+          - { name: windows, os: windows-2022, platform: windows }
+          - { name: linux, os: ubuntu-24.04, platform: linux }
     name: test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 150
@@ -104,7 +104,7 @@ jobs:
           echo "KSPTEST_INSTANCES=$w/instances" >> "$GITHUB_ENV"
           echo "KSPTEST_RESULTS=$w/results" >> "$GITHUB_ENV"
           echo "KSPTEST_CKAN=$w/ckan/ckan.exe" >> "$GITHUB_ENV"
-          echo "KSPTEST_KSP_ARGS=${{ matrix.ksp-args }}" >> "$GITHUB_ENV"
+          echo "KSPTEST_KSP_ARGS=-batchmode" >> "$GITHUB_ENV"
           echo "KSPTEST_TEXTURES=low" >> "$GITHUB_ENV"
           echo "FarGameData=$w/far/FerramAerospaceResearch" >> "$GITHUB_ENV"
           if [ "${{ matrix.platform }}" = windows ]; then
