@@ -1,0 +1,188 @@
+name: Tests
+
+# FAR's test suite (KspTests/): unit tests outside the game, and in-game tests in KSP 1.12.5 on GitHub's runners.
+#
+# Unit tests run for every push and pull request, against KSPBuildTools' stripped KSP assemblies (no secrets; the tests
+# that need Unity's own code skip there). In-game tests need the game: KSP comes from encrypted 7z volumes in a private
+# repo's release (KspTest/ci/Pack-KspGame.ps1), so they run only where the secrets are: pushes, manual runs and pull
+# requests from branches of this repository. A pull request from a fork never gets the secrets, and nothing here runs
+# a fork's code with them (no pull_request_target). The game folder is never cached or uploaded.
+#
+# Secrets: KSP_GAME_KEY (the archive key), KSP_GAME_TOKEN (fine-grained, Contents: read-only on the game repo alone).
+# Variables: KSP_GAME_REPO (owner/name of the repo with the game releases).
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: dotnet test --filter for the in-game tests (default all but the Explicit ones)
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  GAME_RELEASE: ksp-1.12.5
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      KSP_ROOT: /tmp/ksp
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: git submodule update --init buildtools
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.x
+      - uses: KSPModdingLibs/KSPBuildTools/.github/actions/setup-ckan@1.1.1
+        with:
+          ckan-filters: ""
+      - uses: KSPModdingLibs/KSPBuildTools/.github/actions/install-dependencies@1.1.1
+        with:
+          dependency-identifiers: ModularFlightIntegrator KSPCommunityFixes KSPBurst ModuleManager
+      - name: Stamp commit SHA
+        run: |
+          cp .github/package.config.json config.json.user
+          python -m buildtools replace
+      - uses: KSPModdingLibs/KSPBuildTools/.github/actions/compile@1.1.1
+        with:
+          solution-file-path: FerramAerospaceResearch.sln
+      - uses: actions/upload-artifact@v6
+        with:
+          name: far-gamedata
+          path: GameData/FerramAerospaceResearch
+
+  unit:
+    # .NET Framework 4.8 tests: Windows
+    needs: build
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.x
+      - uses: actions/download-artifact@v6
+        with:
+          name: far-gamedata
+          path: ${{ runner.temp }}/far
+      - name: Stripped KSP assemblies
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/ksp.zip" https://github.com/KSPModdingLibs/KSPLibs/raw/main/KSP-1.12.5.zip
+          7z x -y -bso0 -bsp0 "-o$RUNNER_TEMP/ksplibs" "$RUNNER_TEMP/ksp.zip"
+      - name: Unit tests
+        run: |
+          w=$(cygpath -m "$RUNNER_TEMP")
+          dotnet test KspTests/FerramAerospaceResearch.UnitTests "-p:KspDir=$w/ksplibs" "-p:FarBin=$w/far/Plugins" \
+            --logger "console;verbosity=normal" --logger "trx;LogFileName=unit.trx" --results-directory "$w/trx"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: unit-results
+          path: ${{ runner.temp }}/trx
+
+  ingame:
+    needs: build
+    # only where the secrets are: never for a fork's pull request
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows, os: windows-2022, platform: windows }
+          - { name: linux, os: ubuntu-24.04, platform: linux }
+    name: in-game (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    env:
+      TEST_FILTER: ${{ inputs.filter }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.x
+      - name: Paths
+        run: |
+          w="$RUNNER_TEMP"
+          command -v cygpath >/dev/null && w=$(cygpath -m "$w")
+          echo "WORK=$w" >> "$GITHUB_ENV"
+          echo "KSPTEST_GAME=$w/ksp" >> "$GITHUB_ENV"
+          echo "KSPTEST_INSTANCES=$w/instances" >> "$GITHUB_ENV"
+          echo "KSPTEST_RESULTS=$w/results" >> "$GITHUB_ENV"
+          echo "KSPTEST_CKAN=$w/ckan/ckan.exe" >> "$GITHUB_ENV"
+          echo "KSPTEST_KSP_ARGS=-batchmode" >> "$GITHUB_ENV"
+          echo "KSPTEST_TEXTURES=low" >> "$GITHUB_ENV"
+          # 4:3 like Linux batchmode's fixed 640x480 screen, which KspTest's shots draw at twice the size
+          echo "KSPTEST_WINDOW=1280x960" >> "$GITHUB_ENV"
+          echo "FarGameData=$w/far/FerramAerospaceResearch" >> "$GITHUB_ENV"
+      - name: Linux packages
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            xvfb xauth x11-utils libgl1 libgl1-mesa-dri libglu1-mesa libegl1 \
+            libxcursor1 libxrandr2 libxi6 libxinerama1 libxss1 libxext6 libx11-6 libgtk-3-0 \
+            libpulse0 libasound2t64 libudev1 mono-runtime mono-devel ca-certificates-mono p7zip-full
+      - uses: actions/download-artifact@v6
+        with:
+          name: far-gamedata
+          path: ${{ runner.temp }}/far/FerramAerospaceResearch
+      - name: Download the game
+        env:
+          GH_TOKEN: ${{ secrets.KSP_GAME_TOKEN }}
+          GAME_REPO: ${{ vars.KSP_GAME_REPO }}
+        run: gh release download "$GAME_RELEASE-${{ matrix.platform }}" -R "$GAME_REPO" -p '*.7z.*' -D "$WORK/game-archive"
+      - name: Extract the game
+        env:
+          KSP_GAME_KEY: ${{ secrets.KSP_GAME_KEY }}
+        run: |
+          7z x -y -bso0 -bsp0 "-p$KSP_GAME_KEY" "-o$KSPTEST_GAME" "$WORK/game-archive/$GAME_RELEASE-${{ matrix.platform }}.7z.001"
+          rm -rf "$WORK/game-archive"
+          if [ -f "$KSPTEST_GAME/KSP.x86_64" ]; then chmod +x "$KSPTEST_GAME/KSP.x86_64"; fi
+      - name: CKAN
+        run: |
+          mkdir -p "$WORK/ckan"
+          curl -fsSL -o "$KSPTEST_CKAN" https://github.com/KSP-CKAN/CKAN/releases/latest/download/ckan.exe
+      - name: Virtual display
+        if: matrix.platform == 'linux'
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp >"$WORK/xvfb.log" 2>&1 &
+          for i in $(seq 50); do xdpyinfo -display :99 >/dev/null 2>&1 && break; sleep 0.2; done
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+      - name: In-game tests
+        run: |
+          args=(test KspTests/FerramAerospaceResearch.InGameTests.Run -p:KspDir="$KSPTEST_GAME"
+                --logger "console;verbosity=normal" --logger "trx;LogFileName=ingame.trx" --results-directory "$WORK/trx")
+          [ -n "$TEST_FILTER" ] && args+=(--filter "$TEST_FILTER")
+          dotnet "${args[@]}"
+      # results, logs and the test report only: never the game or an instance
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: ingame-results-${{ matrix.name }}
+          path: |
+            ${{ runner.temp }}/results
+            ${{ runner.temp }}/trx
+          if-no-files-found: warn
