@@ -315,6 +315,7 @@ namespace FerramAerospaceResearch.InGameTests
         [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Flight_AirstreamAreaIsBracketedByTheVoxels(TestContext ctx)
         {
+            Exposure.RequireReadback();
             yield return Wait.Seconds(5);   // FAR voxelizes the craft after it loads
             var c = new FarFlightProbe.Condition { Name = "exposure", Mach = 0.5, AltM = 3000, AoADeg = 2, Lat = 0, Lon = -60, HeadingDeg = 90 };
             using var x = new Exposure(ctx, FlightGlobals.ActiveVessel);
@@ -445,6 +446,13 @@ namespace FerramAerospaceResearch.InGameTests
                 customExisted = File.Exists(customConfig);
             }
 
+            /// <summary>
+            /// Skips the test where the graphics device cannot read back (both exposure devices read their render back through
+            /// AsyncGPUReadback; Mesa's software OpenGL on a Linux runner has none).
+            /// </summary>
+            public static void RequireReadback() =>
+                Assert.SkipUnless(SystemInfo.supportsAsyncGPUReadback, $"{SystemInfo.graphicsDeviceVersion} has no AsyncGPUReadback, which the exposure reads back through");
+
             /// <summary>The rocket on the pad, voxelized, and the graphics device able to read back. Changes nothing.</summary>
             public static IEnumerator OnPad(TestContext ctx)
             {
@@ -453,7 +461,7 @@ namespace FerramAerospaceResearch.InGameTests
                 yield return Wait.Until(() => FARAPI.VesselVoxelizationCompletedEver(v), 60, "the vessel voxelized", shot: false);
                 yield return Wait.Frames(5);   // FARVesselAero hands the voxel bounds to the exposure in FixedUpdate
                 ctx.Record("graphics", $"{SystemInfo.graphicsDeviceType} {SystemInfo.graphicsDeviceVersion}, compute shaders {SystemInfo.supportsComputeShaders}, async readback {SystemInfo.supportsAsyncGPUReadback}");
-                Assert.True(SystemInfo.supportsAsyncGPUReadback, "the graphics device supports AsyncGPUReadback (both exposure devices read back through it)");
+                RequireReadback();
             }
 
             /// <summary>
