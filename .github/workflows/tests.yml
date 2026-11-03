@@ -177,6 +177,20 @@ jobs:
                 --logger "console;verbosity=normal" --logger "trx;LogFileName=ingame.trx" --results-directory "$WORK/trx")
           [ -n "$TEST_FILTER" ] && args+=(--filter "$TEST_FILTER")
           dotnet "${args[@]}"
+      # a crashed KSP leaves its native stack in Unity's Player.log and the crash folder, outside the results
+      - name: Crash reports
+        if: failure()
+        run: |
+          d="$KSPTEST_RESULTS/unity"; mkdir -p "$d"
+          if [ "${{ matrix.platform }}" = windows ]; then
+            p="$(cygpath -u "$USERPROFILE")/AppData/LocalLow/Squad/Kerbal Space Program"
+            c="$(cygpath -u "$LOCALAPPDATA")/Temp/Squad/Kerbal Space Program/Crashes"
+          else
+            p="$HOME/.config/unity3d/Squad/Kerbal Space Program"; c=""
+          fi
+          cp "$p"/Player*.log "$d/" 2>/dev/null || echo "no Player.log in $p"
+          if [ -n "$c" ] && [ -d "$c" ]; then cp -r "$c" "$d/"; fi
+          ls -laR "$d"
       # results, logs and the test report only: never the game or an instance
       - uses: actions/upload-artifact@v6
         if: always()
