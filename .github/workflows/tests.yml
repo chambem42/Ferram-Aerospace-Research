@@ -105,8 +105,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: windows, os: windows-2022, platform: windows }
-          - { name: linux, os: ubuntu-24.04, platform: linux }
+          # the game's window, and so the shots: Windows' largest desktop mode; Linux batchmode's screen is 640x480
+          # whatever is asked, so its shots are that drawn at twice the size
+          - { name: windows, os: windows-2022, platform: windows, window: 1920x1080 }
+          - { name: linux, os: ubuntu-24.04, platform: linux, window: 1280x960 }
     name: in-game (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 150
@@ -134,8 +136,7 @@ jobs:
           echo "KSPTEST_CKAN=$w/ckan/ckan.exe" >> "$GITHUB_ENV"
           echo "KSPTEST_KSP_ARGS=-batchmode" >> "$GITHUB_ENV"
           echo "KSPTEST_TEXTURES=low" >> "$GITHUB_ENV"
-          # 4:3 like Linux batchmode's fixed 640x480 screen, which KspTest's shots draw at twice the size
-          echo "KSPTEST_WINDOW=1280x960" >> "$GITHUB_ENV"
+          echo "KSPTEST_WINDOW=${{ matrix.window }}" >> "$GITHUB_ENV"
           echo "FarGameData=$w/far/FerramAerospaceResearch" >> "$GITHUB_ENV"
       - name: Linux packages
         if: matrix.platform == 'linux'
@@ -165,6 +166,48 @@ jobs:
         run: |
           mkdir -p "$WORK/ckan"
           curl -fsSL -o "$KSPTEST_CKAN" https://github.com/KSP-CKAN/CKAN/releases/latest/download/ckan.exe
+      # batchmode's screen on Windows is no bigger than the desktop (the runner's is 1024x768, with modes up to
+      # 1920x1080); without the change FAR's windows run off its edges
+      - name: Desktop size
+        if: matrix.platform == 'windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Add-Type @'
+          using System.Runtime.InteropServices;
+          public static class Desktop
+          {
+              [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+              public struct DEVMODE
+              {
+                  [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+                  public short dmSpecVersion, dmDriverVersion, dmSize, dmDriverExtra;
+                  public int dmFields, dmPositionX, dmPositionY, dmDisplayOrientation, dmDisplayFixedOutput;
+                  public short dmColor, dmDuplex, dmYResolution, dmTTOption, dmCollate;
+                  [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+                  public short dmLogPixels;
+                  public int dmBitsPerPel, dmPelsWidth, dmPelsHeight, dmDisplayFlags, dmDisplayFrequency;
+                  public int dmICMMethod, dmICMIntent, dmMediaType, dmDitherType, dmReserved1, dmReserved2, dmPanningWidth, dmPanningHeight;
+              }
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool EnumDisplaySettings(string device, int mode, ref DEVMODE dm);
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int ChangeDisplaySettings(ref DEVMODE dm, int flags);
+          }
+          '@
+          function Mode([int]$i) { $dm = New-Object Desktop+DEVMODE; $dm.dmSize = [Runtime.InteropServices.Marshal]::SizeOf($dm); if ([Desktop]::EnumDisplaySettings([NullString]::Value, $i, [ref]$dm)) { $dm } }
+          $cur = Mode -1
+          "desktop $($cur.dmPelsWidth)x$($cur.dmPelsHeight)"
+          $modes = for ($i = 0; ($m = Mode $i); $i++) { $m }
+          "modes: " + (($modes | ForEach-Object { "$($_.dmPelsWidth)x$($_.dmPelsHeight)" } | Select-Object -Unique) -join ' ')
+          # the smallest that holds the window
+          $w, $h = $env:KSPTEST_WINDOW -split 'x' | ForEach-Object { [int]$_ }
+          $fit = $modes | Where-Object { $_.dmPelsWidth -ge $w -and $_.dmPelsHeight -ge $h } |
+            Sort-Object { $_.dmPelsWidth * $_.dmPelsHeight } | Select-Object -First 1
+          if (-not $fit) { "no mode holds ${w}x${h}"; exit 0 }
+          $cur.dmPelsWidth = $fit.dmPelsWidth; $cur.dmPelsHeight = $fit.dmPelsHeight; $cur.dmFields = 0x80000 -bor 0x100000
+          "setting $($fit.dmPelsWidth)x$($fit.dmPelsHeight)"
+          "ChangeDisplaySettings: $([Desktop]::ChangeDisplaySettings([ref]$cur, 0)) (0 is success)"
+          $now = Mode -1
+          "desktop now $($now.dmPelsWidth)x$($now.dmPelsHeight)"
       - name: Virtual display
         if: matrix.platform == 'linux'
         run: |
