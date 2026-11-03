@@ -383,7 +383,7 @@ namespace FerramAerospaceResearch.InGameTests
             {
                 CloseDebugWindow();
                 RestoreScenario(saved, customAtStart);
-                SavePersistent();
+                RestorePersistent();
                 DeleteSave();
                 files.Restore();
             }
@@ -460,7 +460,7 @@ namespace FerramAerospaceResearch.InGameTests
             {
                 CloseDebugWindow();
                 RestoreScenario(saved, customAtStart);
-                SavePersistent();
+                RestorePersistent();
                 for (int i = 0; i < presets.Count && i < presetsAtStart.Count; i++)
                     CopyValues(presetsAtStart[i], presets[i]);
                 DeleteSave();
@@ -808,6 +808,9 @@ namespace FerramAerospaceResearch.InGameTests
             Assert.NotNull(game, "the quicksave loaded as a game");
             GamePersistence.UpdateScenarioModules(game);
             GameEvents.onGameStatePostLoad.Fire(node);
+            string persistent = Path.Combine(SaveDir, "persistent.sfs");
+            if (persistentBefore == null && File.Exists(persistent))
+                persistentBefore = File.ReadAllBytes(persistent);
             GamePersistence.SaveGame(game, "persistent", folder, SaveMode.OVERWRITE);
             HighLogic.LoadScene(GameScenes.SPACECENTER);
             InputLockManager.ClearControlLocks();
@@ -821,16 +824,28 @@ namespace FerramAerospaceResearch.InGameTests
             Ugui.DismissPopups();
         }
 
-        /// <summary>The persistent save written again from the game as it is: after QuickLoad wrote the test's settings into it.</summary>
-        private static void SavePersistent()
+        // the persistent save as it was before QuickLoad wrote the test's save over it
+        private static byte[] persistentBefore;
+
+        /// <summary>
+        ///     The persistent save put back as it was before QuickLoad, from its bytes: saving the game again instead would
+        ///     have FAR's OnSave start its config saver on a thread, racing the config files' restore that follows.
+        /// </summary>
+        private static void RestorePersistent()
         {
+            if (persistentBefore == null)
+                return;
             try
             {
-                GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE);
+                File.WriteAllBytes(Path.Combine(SaveDir, "persistent.sfs"), persistentBefore);
             }
             catch (Exception e)
             {
-                Log.Warn("SettingsTests: saving the persistent save again: " + e.Message);
+                Log.Warn("SettingsTests: putting the persistent save back: " + e.Message);
+            }
+            finally
+            {
+                persistentBefore = null;
             }
         }
 
