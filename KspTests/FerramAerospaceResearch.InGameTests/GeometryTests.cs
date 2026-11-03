@@ -16,7 +16,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// The stock ComSat Lx (its launch clamp taken off: crafts/) carries its satellite in a procedural fairing: FAR shields the satellite's parts (no exposed
         /// area, no force) while the fairing is closed, and exposes them once it is jettisoned and the vessel revoxelized.
         /// </summary>
-        [UITest(Kind = "Check", Isolated = true, StartsAt = StartState.Flight, Craft = "ComSat Lx Unclamped", CraftDir = "VAB", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = "ComSat Lx Unclamped", CraftDir = "VAB", TimeoutSec = 900)]
         public static IEnumerator Flight_FairingShieldsItsPayloadUntilJettisoned(TestContext ctx)
         {
             yield return Wait.Seconds(3);

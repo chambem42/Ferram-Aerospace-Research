@@ -27,7 +27,8 @@ namespace FerramAerospaceResearch.InGameTests
     /// FARVesselAero adds it, and does not follow the config afterwards; the debug window's drop-down sets
     /// VehicleExposure.ComputeDevice, and that is what the tests set. The directions are read from FARConfig every
     /// frame. FAR's shipped FARConfig.cfg has every direction off and the device None, so each test switches what it
-    /// needs and puts it all back in a finally (and removes a Custom_FARConfig.cfg the test may have made FAR write).
+    /// needs and Exposure.Dispose puts it all back when the test ends (and removes a Custom_FARConfig.cfg the test may
+    /// have made FAR write).
     ///
     /// The tests use the CPU device (it needs only AsyncGPUReadback of a render texture, which a -batchmode player with a
     /// graphics device has) and compare the GPU device against it where SystemInfo.supportsComputeShaders.
@@ -49,102 +50,95 @@ namespace FerramAerospaceResearch.InGameTests
         /// some positive), the sun camera looks from the sun and the body camera from the planet. The GPU device counts
         /// the same pixels as the CPU one (where compute shaders are supported), and the device None stops it again.
         /// </summary>
-        [UITest(Kind = "Check", Isolated = true, StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
         public static IEnumerator Pad_ExposureRendersOnlyWithADevice(TestContext ctx)
         {
-            Exposure x = null;
-            yield return Exposure.OnPad(ctx, e => x = e);
-            var log = new ExceptionLog();
-            try
+            yield return Exposure.OnPad(ctx);
+            using var x = new Exposure(ctx, FlightGlobals.ActiveVessel);
+            using var log = new ExceptionLog();
+            yield return x.KeepVoxel();
+            Vessel v = x.Vessel;
+            object sun = x.Result("sun"), body = x.Result("body");
+
+            ctx.Step("Directions on, device None");
+            Assert.Equal(FARConfig.Exposure.Device.Value, x.X.ComputeDevice, "a new vessel's exposure device is the config's");
+            x.X.ComputeDevice = Device.None;
+            x.Directions(airstream: false, sun: true, body: true);
+            yield return Wait.Frames(10);
+            Exposure.Areas(sun).Clear();
+            Exposure.Areas(body).Clear();
+            int maxBatches = 0;
+            for (int i = 0; i < 30; ++i)
             {
-                Vessel v = x.Vessel;
-                object sun = x.Result("sun"), body = x.Result("body");
-
-                ctx.Step("Directions on, device None");
-                Assert.Equal(FARConfig.Exposure.Device.Value, x.X.ComputeDevice, "a new vessel's exposure device is the config's");
-                x.X.ComputeDevice = Device.None;
-                x.Directions(airstream: false, sun: true, body: true);
-                yield return Wait.Frames(10);
-                Exposure.Areas(sun).Clear();
-                Exposure.Areas(body).Clear();
-                int maxBatches = 0;
-                for (int i = 0; i < 30; ++i)
-                {
-                    yield return null;
-                    maxBatches = Math.Max(maxBatches, x.ActiveBatches);
-                }
-                ctx.Record("none", $"Enabled {x.X.Enabled}, max batches {maxBatches}, results sun {Exposure.Areas(sun).Count} body {Exposure.Areas(body).Count}");
-                Assert.False(x.X.Enabled, "exposure disabled with the device None");
-                Assert.True(maxBatches == 0 && Exposure.Areas(sun).Count == 0 && Exposure.Areas(body).Count == 0,
-                            "nothing rendered with the device None and the directions on");
-
-                ctx.Step("Device CPU");
-                x.X.ComputeDevice = Device.CPU;
-                yield return Exposure.Fresh("sun and body exposure on the CPU device", sun, body);
-                ctx.Record("cpuActualDevice", x.ActualDevice);
-                Assert.Equal("CPU", x.ActualDevice, "the renderer counts on the CPU");
-                ctx.Record("cpuSun", x.Describe(sun));
-                ctx.Record("cpuBody", x.Describe(body));
-                foreach (object r in new[] { sun, body })
-                {
-                    IReadOnlyDictionary<Part, double> perPart = Exposure.PerPart(r);
-                    foreach (Part p in v.parts)
-                    {
-                        Assert.True(perPart.TryGetValue(p, out double a), $"{p.partInfo.name} has an exposed area");
-                        Assert.True(!double.IsNaN(a) && !double.IsInfinity(a) && a >= 0, $"{p.partInfo.name}'s exposed area ({a}) is finite and not negative");
-                    }
-                    Assert.True(v.parts.Sum(p => perPart[p]) > 0, "the vessel has exposed area");
-                }
-
-                // the cameras: VehicleExposure looks along (vessel - sun) and (vessel - body), from the sun's and the
-                // body's side of the vessel (Renderer.ProjectToCameraRender puts the camera at center - extent * lookDir)
-                Vector3 center = v.transform.TransformPoint(x.X.VesselBounds.center);
-                Vector3 fromSun = ((Vector3)((Vector3d)center - FlightGlobals.Bodies[0].position)).normalized;
-                Vector3 fromBody = ((Vector3)((Vector3d)center - v.mainBody.position)).normalized;
-                double sunDot = Vector3.Dot(Exposure.Forward(sun).normalized, fromSun);
-                double bodyDot = Vector3.Dot(Exposure.Forward(body).normalized, fromBody);
-                ctx.Record("cameras", $"sun look . (vessel - sun) {sunDot:F5}, body look . (vessel - body) {bodyDot:F5}");
-                Assert.True(sunDot > 0.999, $"the sun camera looks from the sun at the vessel ({sunDot:F5})");
-                Assert.True(bodyDot > 0.999, $"the body camera looks from the planet at the vessel ({bodyDot:F5})");
-                Assert.True(Vector3.Dot(Exposure.Position(sun) - center, fromSun) < 0, "the sun camera is on the sun's side of the vessel");
-                Assert.True(Vector3.Dot(Exposure.Position(body) - center, fromBody) < 0, "the body camera is on the planet's side of the vessel");
-
-                if (SystemInfo.supportsComputeShaders)
-                {
-                    ctx.Step("Device GPU against CPU");
-                    Dictionary<Part, double> cpuSun = Exposure.Snapshot(sun, v), cpuBody = Exposure.Snapshot(body, v);
-                    x.X.ComputeDevice = Device.GPU;
-                    yield return Exposure.Fresh("sun and body exposure on the GPU device", sun, body);
-                    ctx.Record("gpuActualDevice", x.ActualDevice);
-                    Assert.Equal("GPU", x.ActualDevice, "the renderer counts on the GPU");
-                    ctx.Record("gpuSun", x.Describe(sun));
-                    ctx.Record("gpuBody", x.Describe(body));
-                    // recorded, not asserted: two counts of the same scene were expected to agree, but GPU and CPU differ from
-                    // run to run (4.4% on the whole fairing once, 0.045 against 0.018 m2 on a tank another time), which fits
-                    // batches sharing one RenderResult (RenderBatch writes areaPerPixel/pixelCounts into it at submission)
-                    ctx.Record("gpuVsCpuBody", $"{Exposure.Snapshot(body, v).Values.Sum():F4} against {cpuBody.Values.Sum():F4} m2");
-                    double cpuSunTotal = cpuSun.Values.Sum(), gpuSunTotal = Exposure.Snapshot(sun, v).Values.Sum();
-                    ctx.Record("gpuVsCpuSun", $"{gpuSunTotal:F4} against {cpuSunTotal:F4} m2");
-                }
-                else
-                {
-                    ctx.Record("gpu", "no compute shaders on this device: GPU counting not compared");
-                }
-
-                ctx.Step("Device None again");
-                x.X.ComputeDevice = Device.None;
-                yield return Wait.Frames(10);   // batches already submitted finish
-                Exposure.Areas(sun).Clear();
-                Exposure.Areas(body).Clear();
-                yield return Wait.Frames(30);
-                Assert.True(Exposure.Areas(sun).Count == 0 && Exposure.Areas(body).Count == 0 && x.ActiveBatches == 0,
-                            "nothing rendered after the device is None again");
+                yield return null;
+                maxBatches = Math.Max(maxBatches, x.ActiveBatches);
             }
-            finally
+            ctx.Record("none", $"Enabled {x.X.Enabled}, max batches {maxBatches}, results sun {Exposure.Areas(sun).Count} body {Exposure.Areas(body).Count}");
+            Assert.False(x.X.Enabled, "exposure disabled with the device None");
+            Assert.True(maxBatches == 0 && Exposure.Areas(sun).Count == 0 && Exposure.Areas(body).Count == 0,
+                        "nothing rendered with the device None and the directions on");
+
+            ctx.Step("Device CPU");
+            x.X.ComputeDevice = Device.CPU;
+            yield return Exposure.Fresh("sun and body exposure on the CPU device", sun, body);
+            ctx.Record("cpuActualDevice", x.ActualDevice);
+            Assert.Equal("CPU", x.ActualDevice, "the renderer counts on the CPU");
+            ctx.Record("cpuSun", x.Describe(sun));
+            ctx.Record("cpuBody", x.Describe(body));
+            foreach (object r in new[] { sun, body })
             {
-                x.Restore(ctx);
-                log.Dispose();
+                IReadOnlyDictionary<Part, double> perPart = Exposure.PerPart(r);
+                foreach (Part p in v.parts)
+                {
+                    Assert.True(perPart.TryGetValue(p, out double a), $"{p.partInfo.name} has an exposed area");
+                    Assert.True(!double.IsNaN(a) && !double.IsInfinity(a) && a >= 0, $"{p.partInfo.name}'s exposed area ({a}) is finite and not negative");
+                }
+                Assert.True(v.parts.Sum(p => perPart[p]) > 0, "the vessel has exposed area");
             }
+
+            // the cameras: VehicleExposure looks along (vessel - sun) and (vessel - body), from the sun's and the
+            // body's side of the vessel (Renderer.ProjectToCameraRender puts the camera at center - extent * lookDir)
+            Vector3 center = v.transform.TransformPoint(x.X.VesselBounds.center);
+            Vector3 fromSun = ((Vector3)((Vector3d)center - FlightGlobals.Bodies[0].position)).normalized;
+            Vector3 fromBody = ((Vector3)((Vector3d)center - v.mainBody.position)).normalized;
+            double sunDot = Vector3.Dot(Exposure.Forward(sun).normalized, fromSun);
+            double bodyDot = Vector3.Dot(Exposure.Forward(body).normalized, fromBody);
+            ctx.Record("cameras", $"sun look . (vessel - sun) {sunDot:F5}, body look . (vessel - body) {bodyDot:F5}");
+            Assert.True(sunDot > 0.999, $"the sun camera looks from the sun at the vessel ({sunDot:F5})");
+            Assert.True(bodyDot > 0.999, $"the body camera looks from the planet at the vessel ({bodyDot:F5})");
+            Assert.True(Vector3.Dot(Exposure.Position(sun) - center, fromSun) < 0, "the sun camera is on the sun's side of the vessel");
+            Assert.True(Vector3.Dot(Exposure.Position(body) - center, fromBody) < 0, "the body camera is on the planet's side of the vessel");
+
+            if (SystemInfo.supportsComputeShaders)
+            {
+                ctx.Step("Device GPU against CPU");
+                Dictionary<Part, double> cpuSun = Exposure.Snapshot(sun, v), cpuBody = Exposure.Snapshot(body, v);
+                x.X.ComputeDevice = Device.GPU;
+                yield return Exposure.Fresh("sun and body exposure on the GPU device", sun, body);
+                ctx.Record("gpuActualDevice", x.ActualDevice);
+                Assert.Equal("GPU", x.ActualDevice, "the renderer counts on the GPU");
+                ctx.Record("gpuSun", x.Describe(sun));
+                ctx.Record("gpuBody", x.Describe(body));
+                // recorded, not asserted: two counts of the same scene were expected to agree, but GPU and CPU differ from
+                // run to run (4.4% on the whole fairing once, 0.045 against 0.018 m2 on a tank another time), which fits
+                // batches sharing one RenderResult (RenderBatch writes areaPerPixel/pixelCounts into it at submission)
+                ctx.Record("gpuVsCpuBody", $"{Exposure.Snapshot(body, v).Values.Sum():F4} against {cpuBody.Values.Sum():F4} m2");
+                double cpuSunTotal = cpuSun.Values.Sum(), gpuSunTotal = Exposure.Snapshot(sun, v).Values.Sum();
+                ctx.Record("gpuVsCpuSun", $"{gpuSunTotal:F4} against {cpuSunTotal:F4} m2");
+            }
+            else
+            {
+                ctx.Record("gpu", "no compute shaders on this device: GPU counting not compared");
+            }
+
+            ctx.Step("Device None again");
+            x.X.ComputeDevice = Device.None;
+            yield return Wait.Frames(10);   // batches already submitted finish
+            Exposure.Areas(sun).Clear();
+            Exposure.Areas(body).Clear();
+            yield return Wait.Frames(30);
+            Assert.True(Exposure.Areas(sun).Count == 0 && Exposure.Areas(body).Count == 0 && x.ActiveBatches == 0,
+                        "nothing rendered after the device is None again");
 
             log.AssertNone("exposure on and off");
         }
@@ -158,7 +152,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// (what staging or docking fires) rebuilds the part list without changing what is seen, and leaves one renderer
         /// set per part. Once the fairing is jettisoned the satellite is seen from the side and from above.
         /// </summary>
-        [UITest(Kind = "Check", Isolated = true, StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
         public static IEnumerator Pad_FairingHidesItsPayload(TestContext ctx) => FairingAndPayload(ctx, jettison: false);
 
         /// <summary>
@@ -166,82 +160,75 @@ namespace FerramAerospaceResearch.InGameTests
         /// Explicit: on master the payload stays unseen (0 m2 from above after the jettison, every run), which fits
         /// Renderer<T>.Reset() releasing its renderer sets without clearing the list (they pile up and stale ones are drawn).
         /// </summary>
-        [UITest(Kind = "Check", Explicit = true, Isolated = true, StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
+        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
         public static IEnumerator Pad_JettisonedFairingUncoversThePayload(TestContext ctx) => FairingAndPayload(ctx, jettison: true);
 
         private static IEnumerator FairingAndPayload(TestContext ctx, bool jettison)
         {
-            Exposure x = null;
-            yield return Exposure.OnPad(ctx, e => x = e);
-            var log = new ExceptionLog();
-            try
+            yield return Exposure.OnPad(ctx);
+            using var x = new Exposure(ctx, FlightGlobals.ActiveVessel);
+            using var log = new ExceptionLog();
+            yield return x.KeepVoxel();
+            Vessel v = x.Vessel;
+            Part fairing = v.parts.FirstOrDefault(p => p.Modules.Contains<ModuleProceduralFairing>());
+            Assert.NotNull(fairing, "the ComSat Lx's fairing");
+            var below = new HashSet<Part>();
+            Collect(fairing, below);
+            List<Part> payload = v.parts.Where(p => !below.Contains(p)).ToList();
+            ctx.Record("payload", string.Join(", ", payload.Select(p => p.partInfo.name)));
+            ctx.Record("fairingRenderers", $"part {fairing.FindModelRenderersCached().Count}, exposure {x.CachedRendererCount(fairing)}");
+
+            // only these renders: VehicleExposure's own directions off, its device CPU
+            x.Directions(airstream: false, sun: false, body: false);
+            x.X.ComputeDevice = Device.CPU;
+
+            ctx.Step("Closed fairing: above, below, two sides");
+            object[] views = null;
+            yield return x.RenderViews(ctx, "closed", r => views = r);
+            for (int i = 0; i < 4; i += 2)
+                AssertOpposite(views[i], views[i + 1], i == 0 ? "above and below" : "the two sides");
+            foreach (int i in new[] { 0, 2 })
             {
-                Vessel v = x.Vessel;
-                Part fairing = v.parts.FirstOrDefault(p => p.Modules.Contains<ModuleProceduralFairing>());
-                Assert.NotNull(fairing, "the ComSat Lx's fairing");
-                var below = new HashSet<Part>();
-                Collect(fairing, below);
-                List<Part> payload = v.parts.Where(p => !below.Contains(p)).ToList();
-                ctx.Record("payload", string.Join(", ", payload.Select(p => p.partInfo.name)));
-                ctx.Record("fairingRenderers", $"part {fairing.FindModelRenderersCached().Count}, exposure {x.CachedRendererCount(fairing)}");
-
-                // only these renders: VehicleExposure's own directions off, its device CPU
-                x.Directions(airstream: false, sun: false, body: false);
-                x.X.ComputeDevice = Device.CPU;
-
-                ctx.Step("Closed fairing: above, below, two sides");
-                object[] views = null;
-                yield return x.RenderViews(ctx, "closed", r => views = r);
-                for (int i = 0; i < 4; i += 2)
-                    AssertOpposite(views[i], views[i + 1], i == 0 ? "above and below" : "the two sides");
-                foreach (int i in new[] { 0, 2 })
-                {
-                    string name = i == 0 ? "above" : "the side";
-                    double all = Exposure.Total(views[i]), seen = Exposure.Of(views[i], payload), shell = Exposure.Of(views[i], new[] { fairing });
-                    double a = Exposure.AreaPerPixel(views[i]);
-                    Assert.True(shell > 100 * a, $"the fairing is seen from {name} ({shell:F3} m2)");
-                    // a closed fairing hides what it carries: at most a few pixels through the seams between its panels
-                    Assert.True(seen <= 0.01 * all + 20 * a, $"the payload inside the fairing is hidden from {name} ({seen:F4} m2 of {all:F3})");
-                }
-
-                ctx.Step("Vessel modification");
-                Dictionary<Part, double> side = Exposure.Snapshot(views[2], v);
-                for (int k = 0; k < 3; ++k)
-                {
-                    GameEvents.onVesselStandardModification.Fire(v);
-                    yield return Wait.Frames(2);
-                }
-                yield return Wait.Seconds(3);   // FAR revoxelizes on the event too; the bounds come back the same
-                yield return x.RenderViews(ctx, "modified", r => views = r);
-                Exposure.AssertSameAreas(side, Exposure.Snapshot(views[2], v), Exposure.AreaPerPixel(views[2]), "from the side, before and after a vessel modification");
-                ctx.Record("rendererSets", $"{x.RendererSetCount} renderer sets for {x.ObjectCount} parts ({v.parts.Count} in the vessel) after 3 modifications");
-                Assert.Equal(v.parts.Count, x.ObjectCount, "one exposure object per part after a vessel modification");
-
-                if (!jettison)
-                    yield break;
-                ctx.Step("Jettison the fairing");
-                Part core = v.rootPart;
-                fairing.Modules.GetModule<ModuleProceduralFairing>().DeployFairing();
-                yield return Wait.Until(() => !core.ShieldedFromAirstream, 30, "the probe core exposed after the fairing goes", shot: false);
-                yield return Wait.Seconds(10);   // the panels fly clear of the vessel's bounds, and it is revoxelized
-                v = FlightGlobals.ActiveVessel;
-                yield return x.RenderViews(ctx, "open", r => views = r);
-                foreach (int i in new[] { 0, 2 })
-                {
-                    string name = i == 0 ? "above" : "the side";
-                    double seen = Exposure.Of(views[i], payload.Where(p => p != null && p.vessel == v));
-                    Assert.True(seen > 20 * Exposure.AreaPerPixel(views[i]), $"the payload is seen from {name} after the jettison ({seen:F4} m2)");
-                }
-
-                // Renderer<T>.Reset releases its renderer sets to the pool but keeps them in its list, so each
-                // modification appends another set per part and every renderer is drawn once more per batch
-                Assert.Equal(x.ObjectCount, x.RendererSetCount, "renderer sets drawn per batch: one per part, however often the vessel was modified");
+                string name = i == 0 ? "above" : "the side";
+                double all = Exposure.Total(views[i]), seen = Exposure.Of(views[i], payload), shell = Exposure.Of(views[i], new[] { fairing });
+                double a = Exposure.AreaPerPixel(views[i]);
+                Assert.True(shell > 100 * a, $"the fairing is seen from {name} ({shell:F3} m2)");
+                // a closed fairing hides what it carries: at most a few pixels through the seams between its panels
+                Assert.True(seen <= 0.01 * all + 20 * a, $"the payload inside the fairing is hidden from {name} ({seen:F4} m2 of {all:F3})");
             }
-            finally
+
+            ctx.Step("Vessel modification");
+            Dictionary<Part, double> side = Exposure.Snapshot(views[2], v);
+            for (int k = 0; k < 3; ++k)
             {
-                x.Restore(ctx);
-                log.Dispose();
+                GameEvents.onVesselStandardModification.Fire(v);
+                yield return Wait.Frames(2);
             }
+            yield return Wait.Seconds(3);   // FAR revoxelizes on the event too; the bounds come back the same
+            yield return x.RenderViews(ctx, "modified", r => views = r);
+            Exposure.AssertSameAreas(side, Exposure.Snapshot(views[2], v), Exposure.AreaPerPixel(views[2]), "from the side, before and after a vessel modification");
+            ctx.Record("rendererSets", $"{x.RendererSetCount} renderer sets for {x.ObjectCount} parts ({v.parts.Count} in the vessel) after 3 modifications");
+            Assert.Equal(v.parts.Count, x.ObjectCount, "one exposure object per part after a vessel modification");
+
+            if (!jettison)
+                yield break;
+            ctx.Step("Jettison the fairing");
+            Part core = v.rootPart;
+            fairing.Modules.GetModule<ModuleProceduralFairing>().DeployFairing();
+            yield return Wait.Until(() => !core.ShieldedFromAirstream, 30, "the probe core exposed after the fairing goes", shot: false);
+            yield return Wait.Seconds(10);   // the panels fly clear of the vessel's bounds, and it is revoxelized
+            v = FlightGlobals.ActiveVessel;
+            yield return x.RenderViews(ctx, "open", r => views = r);
+            foreach (int i in new[] { 0, 2 })
+            {
+                string name = i == 0 ? "above" : "the side";
+                double seen = Exposure.Of(views[i], payload.Where(p => p != null && p.vessel == v));
+                Assert.True(seen > 20 * Exposure.AreaPerPixel(views[i]), $"the payload is seen from {name} after the jettison ({seen:F4} m2)");
+            }
+
+            // Renderer<T>.Reset releases its renderer sets to the pool but keeps them in its list, so each
+            // modification appends another set per part and every renderer is drawn once more per batch
+            Assert.Equal(x.ObjectCount, x.RendererSetCount, "renderer sets drawn per batch: one per part, however often the vessel was modified");
 
             log.AssertNone("rendering the ComSat Lx");
         }
@@ -274,48 +261,41 @@ namespace FerramAerospaceResearch.InGameTests
         // Explicit: fails on master. RenderBatch.Device's setter does isDirty = (value != device), wiping the dirty flag a size
         // change set, so the next GUI pass's device assignment leaves the batches unrebuilt: the GPU path keeps counting the
         // old 512x512 image at the 256x256 pixel area (body area 7.54 m2 against 1.75 m2, measured).
-        [UITest(Kind = "Check", Explicit = true, Isolated = true, StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
+        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
         public static IEnumerator Pad_RenderSizeChangesResolutionNotArea(TestContext ctx)
         {
-            Exposure x = null;
-            yield return Exposure.OnPad(ctx, e => x = e);
-            var log = new ExceptionLog();
+            yield return Exposure.OnPad(ctx);
+            using var x = new Exposure(ctx, FlightGlobals.ActiveVessel);
+            using var log = new ExceptionLog();
+            yield return x.KeepVoxel();
             var failures = new List<string>();
-            try
+            object body = x.Result("body");
+            x.Directions(airstream: false, sun: false, body: true);
+            var devices = new List<Device> { Device.CPU };
+            if (SystemInfo.supportsComputeShaders)
+                devices.Add(Device.GPU);
+            foreach (Device device in devices)
             {
-                object body = x.Result("body");
-                x.Directions(airstream: false, sun: false, body: true);
-                var devices = new List<Device> { Device.CPU };
-                if (SystemInfo.supportsComputeShaders)
-                    devices.Add(Device.GPU);
-                foreach (Device device in devices)
-                {
-                    ctx.Step($"{device}: 512x512 then 256x256");
-                    x.SetRenderSize(512, 512);
-                    x.X.ComputeDevice = device;
-                    yield return Exposure.Fresh($"body exposure at 512x512 ({device})", body);
-                    double a512 = Exposure.Total(body), app512 = Exposure.AreaPerPixel(body);
+                ctx.Step($"{device}: 512x512 then 256x256");
+                x.SetRenderSize(512, 512);
+                x.X.ComputeDevice = device;
+                yield return Exposure.Fresh($"body exposure at 512x512 ({device})", body);
+                double a512 = Exposure.Total(body), app512 = Exposure.AreaPerPixel(body);
 
-                    x.SetRenderSize(256, 256);
-                    x.X.ComputeDevice = device;   // the next VehicleExposure.Display pass
-                    yield return Wait.Frames(20);
-                    yield return Exposure.Fresh($"body exposure at 256x256 ({device})", body);
-                    double a256 = Exposure.Total(body), app256 = Exposure.AreaPerPixel(body);
-                    ctx.Record($"size{device}", $"512: {a512:F4} m2 ({app512:E3} m2/px), 256: {a256:F4} m2 ({app256:E3} m2/px)");
-                    if (Math.Abs(app256 / app512 - 4) > 0.04)
-                        failures.Add($"{device}: pixel area at 256 is {app256 / app512:F3} times the one at 512, not 4");
-                    // outline pixels: a 256 pixel is twice as wide, an outline of perimeter L moves the area by up to
-                    // L * width / 2; the rocket seen end-on is a disc with fins, outline about 4 times its diameter
-                    double outline = 4 * 2 * Math.Sqrt(a512 / Math.PI);
-                    double tol = 0.05 * a512 + outline * Math.Sqrt(app256);
-                    if (double.IsNaN(a256) || Math.Abs(a256 - a512) > tol)
-                        failures.Add($"{device}: body area {a256:F4} m2 at 256x256 against {a512:F4} at 512x512 (tolerance {tol:F4})");
-                }
-            }
-            finally
-            {
-                x.Restore(ctx);
-                log.Dispose();
+                x.SetRenderSize(256, 256);
+                x.X.ComputeDevice = device;   // the next VehicleExposure.Display pass
+                yield return Wait.Frames(20);
+                yield return Exposure.Fresh($"body exposure at 256x256 ({device})", body);
+                double a256 = Exposure.Total(body), app256 = Exposure.AreaPerPixel(body);
+                ctx.Record($"size{device}", $"512: {a512:F4} m2 ({app512:E3} m2/px), 256: {a256:F4} m2 ({app256:E3} m2/px)");
+                if (Math.Abs(app256 / app512 - 4) > 0.04)
+                    failures.Add($"{device}: pixel area at 256 is {app256 / app512:F3} times the one at 512, not 4");
+                // outline pixels: a 256 pixel is twice as wide, an outline of perimeter L moves the area by up to
+                // L * width / 2; the rocket seen end-on is a disc with fins, outline about 4 times its diameter
+                double outline = 4 * 2 * Math.Sqrt(a512 / Math.PI);
+                double tol = 0.05 * a512 + outline * Math.Sqrt(app256);
+                if (double.IsNaN(a256) || Math.Abs(a256 - a512) > tol)
+                    failures.Add($"{device}: body area {a256:F4} m2 at 256x256 against {a512:F4} at 512x512 (tolerance {tol:F4})");
             }
 
             Assert.True(failures.Count == 0, string.Join("; ", failures));
@@ -332,72 +312,63 @@ namespace FerramAerospaceResearch.InGameTests
         /// upstream-facing area of all its voxels (FARAeroPartModule.ProjectedAreas along the flow: every line along the
         /// flow through the vessel enters it through at least one such face).
         /// </summary>
-        [UITest(Kind = "Check", Isolated = true, StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Flight_AirstreamAreaIsBracketedByTheVoxels(TestContext ctx)
         {
             yield return Wait.Seconds(5);   // FAR voxelizes the craft after it loads
             var c = new FarFlightProbe.Condition { Name = "exposure", Mach = 0.5, AltM = 3000, AoADeg = 2, Lat = 0, Lon = -60, HeadingDeg = 90 };
-            Exposure x = null;
-            var log = new ExceptionLog();
-            try
-            {
-                x = new Exposure(FlightGlobals.ActiveVessel);
-                x.Directions(airstream: true, sun: false, body: false);
-                x.X.ComputeDevice = Device.CPU;
-                yield return FlightTests.Airborne(c);
-                yield return Exposure.KeepVoxel(ctx, FlightGlobals.ActiveVessel, x);
-                yield return FarFlightProbe.Place(c);
-                var samples = new List<FarFlightProbe.Sample>();
-                yield return FarFlightProbe.Hold(c, 25, 10, samples, predict: false);
-                Vessel v = FlightGlobals.ActiveVessel;
-                Assert.True(x.X.InAtmosphere, "the vessel is in the atmosphere");
-                object air = x.Result("airstream");
-                Exposure.Areas(air).Clear();
-                yield return FarFlightProbe.Hold(c, 0, 50, samples, predict: false);
-                if (Exposure.Areas(air).Count == 0)
-                    yield return Wait.Until(() => Exposure.Areas(air).Count > 0, 10, "airstream exposure in flight", shot: false);
+            using var x = new Exposure(ctx, FlightGlobals.ActiveVessel);
+            using var log = new ExceptionLog();
+            x.Directions(airstream: true, sun: false, body: false);
+            x.X.ComputeDevice = Device.CPU;
+            yield return FlightTests.Airborne(c);
+            yield return x.KeepVoxel();
+            yield return FarFlightProbe.Place(c);
+            var samples = new List<FarFlightProbe.Sample>();
+            yield return FarFlightProbe.Hold(c, 25, 10, samples, predict: false);
+            Vessel v = FlightGlobals.ActiveVessel;
+            Assert.True(x.X.InAtmosphere, "the vessel is in the atmosphere");
+            object air = x.Result("airstream");
+            Exposure.Areas(air).Clear();
+            yield return FarFlightProbe.Hold(c, 0, 50, samples, predict: false);
+            if (Exposure.Areas(air).Count == 0)
+                yield return Wait.Until(() => Exposure.Areas(air).Count > 0, 10, "airstream exposure in flight", shot: false);
 
-                Vector3 flow = v.srf_velocity.normalized;   // world, the direction the vessel moves
-                ctx.Record("airstream", x.Describe(air));
-                double look = Vector3.Dot(Exposure.Forward(air).normalized, -flow);
-                ctx.Record("camera", $"airstream look . -velocity {look:F5}");
-                Assert.True(look > 0.995, $"the airstream camera looks downstream ({look:F5})");
+            Vector3 flow = v.srf_velocity.normalized;   // world, the direction the vessel moves
+            ctx.Record("airstream", x.Describe(air));
+            double look = Vector3.Dot(Exposure.Forward(air).normalized, -flow);
+            ctx.Record("camera", $"airstream look . -velocity {look:F5}");
+            Assert.True(look > 0.995, $"the airstream camera looks downstream ({look:F5})");
 
-                IReadOnlyDictionary<Part, double> perPart = Exposure.PerPart(air);
-                // the frontmost of the parts FAR's own voxels say face the flow (a small part tucked into the nose, an RCS
-                // block, can have no area of its own upstream)
-                Part front = v.parts.Where(p => p.Modules.GetModule<FARAeroPartModule>()?.ProjectedAreaWorld(flow) > 0.05)
-                              .OrderByDescending(p => Vector3.Dot(p.transform.position, flow)).First();
-                ctx.Record("front", $"{front.partInfo.name}: {perPart[front]:F4} m2");
-                Assert.True(perPart[front] > 0, $"the frontmost part ({front.partInfo.name}) is seen from upstream");
+            IReadOnlyDictionary<Part, double> perPart = Exposure.PerPart(air);
+            // the frontmost of the parts FAR's own voxels say face the flow (a small part tucked into the nose, an RCS
+            // block, can have no area of its own upstream)
+            Part front = v.parts.Where(p => p.Modules.GetModule<FARAeroPartModule>()?.ProjectedAreaWorld(flow) > 0.05)
+                          .OrderByDescending(p => Vector3.Dot(p.transform.position, flow)).First();
+            ctx.Record("front", $"{front.partInfo.name}: {perPart[front]:F4} m2");
+            Assert.True(perPart[front] > 0, $"the frontmost part ({front.partInfo.name}) is seen from upstream");
 
-                double seen = v.parts.Sum(p => perPart[p]);
-                FARVesselAero aero = v.GetComponent<FARVesselAero>();
-                double maxSection = aero.MaxCrossSectionArea;
-                Vector3 mainAxis = Exposure.MainAxis(aero);   // vessel (vesselTransform) frame
-                double cos = Math.Abs(Vector3.Dot(mainAxis.normalized, v.vesselTransform.InverseTransformDirection(flow)));
-                double upstream = v.parts.Select(p => p.Modules.GetModule<FARAeroPartModule>()).Where(m => m != null)
-                                   .Sum(m => m.ProjectedAreaWorld(flow));
-                // pixels on the outline: the camera box spans the voxel bounds across the flow, the outline is taken
-                // as twice the box's perimeter (a wing's outline runs its span twice), each outline pixel half in error
-                Bounds b = x.X.VesselBounds;
-                double span = Math.Max(b.size.x, Math.Max(b.size.y, b.size.z));
-                double pixel = Math.Sqrt(Exposure.AreaPerPixel(air));
-                double outlineTol = 0.5 * (2 * 4 * span) * pixel;
-                ctx.Record("bracket", $"max section {maxSection:F3} m2 x cos {cos:F4}, seen {seen:F3} m2, voxel upstream faces {upstream:F3} m2; outline tolerance {outlineTol:F3}");
-                Assert.True(maxSection > 0 && upstream > 0, "FAR's voxel model has areas");
-                // 5%: the voxels are cut from the part meshes FAR picks (some from colliders), the render draws the
-                // part's model renderers
-                Assert.True(seen >= 0.95 * cos * maxSection - outlineTol,
-                            $"the frontal silhouette ({seen:F3} m2) is at least the largest cross-section ({cos * maxSection:F3} m2)");
-                Assert.True(seen <= 1.05 * upstream + outlineTol,
-                            $"the frontal silhouette ({seen:F3} m2) is at most the voxels' upstream faces ({upstream:F3} m2)");
-            }
-            finally
-            {
-                x?.Restore(ctx);
-                log.Dispose();
-            }
+            double seen = v.parts.Sum(p => perPart[p]);
+            FARVesselAero aero = v.GetComponent<FARVesselAero>();
+            double maxSection = aero.MaxCrossSectionArea;
+            Vector3 mainAxis = Exposure.MainAxis(aero);   // vessel (vesselTransform) frame
+            double cos = Math.Abs(Vector3.Dot(mainAxis.normalized, v.vesselTransform.InverseTransformDirection(flow)));
+            double upstream = v.parts.Select(p => p.Modules.GetModule<FARAeroPartModule>()).Where(m => m != null)
+                               .Sum(m => m.ProjectedAreaWorld(flow));
+            // pixels on the outline: the camera box spans the voxel bounds across the flow, the outline is taken
+            // as twice the box's perimeter (a wing's outline runs its span twice), each outline pixel half in error
+            Bounds b = x.X.VesselBounds;
+            double span = Math.Max(b.size.x, Math.Max(b.size.y, b.size.z));
+            double pixel = Math.Sqrt(Exposure.AreaPerPixel(air));
+            double outlineTol = 0.5 * (2 * 4 * span) * pixel;
+            ctx.Record("bracket", $"max section {maxSection:F3} m2 x cos {cos:F4}, seen {seen:F3} m2, voxel upstream faces {upstream:F3} m2; outline tolerance {outlineTol:F3}");
+            Assert.True(maxSection > 0 && upstream > 0, "FAR's voxel model has areas");
+            // 5%: the voxels are cut from the part meshes FAR picks (some from colliders), the render draws the
+            // part's model renderers
+            Assert.True(seen >= 0.95 * cos * maxSection - outlineTol,
+                        $"the frontal silhouette ({seen:F3} m2) is at least the largest cross-section ({cos * maxSection:F3} m2)");
+            Assert.True(seen <= 1.05 * upstream + outlineTol,
+                        $"the frontal silhouette ({seen:F3} m2) is at most the voxels' upstream faces ({upstream:F3} m2)");
 
             log.AssertNone("airstream exposure in flight");
         }
@@ -408,7 +379,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// FARVesselAero.FixedUpdate passes VoxelBounds = _voxel?.Bounds ?? new Bounds(): an empty box, which every exposure
         /// camera is fitted to. The other exposure tests keep the voxel (Exposure.KeepVoxel) to test the rest.
         /// </summary>
-        [UITest(Kind = "Check", Explicit = true, Isolated = true, StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
+        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
         public static IEnumerator Exposure_GetsTheVoxelBoundsAsShipped(TestContext ctx)
         {
             yield return Wait.Seconds(6);
@@ -442,7 +413,7 @@ namespace FerramAerospaceResearch.InGameTests
         }
 
         /// <summary>The active vessel's VehicleExposure, its renderer and results, and the settings a test changes.</summary>
-        private sealed class Exposure
+        private sealed class Exposure : IDisposable
         {
             private const BindingFlags Any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
 
@@ -450,18 +421,21 @@ namespace FerramAerospaceResearch.InGameTests
             public readonly VehicleExposure X;
             private readonly object renderer;   // Geometry.Exposure.Renderer<Part>
 
-            private readonly bool airstream0, sun0, body0;
+            private readonly TestContext ctx;
+            private readonly bool airstream0, sun0, body0, debugInFlight0;
             private readonly Device device0;
             private readonly object size0;
             private readonly string customConfig;
             private readonly bool customExisted;
 
-            public Exposure(Vessel v)
+            public Exposure(TestContext ctx, Vessel v)
             {
+                this.ctx = ctx;
                 Vessel = v;
                 FARVesselAero aero = v.GetComponent<FARVesselAero>() ?? throw new UITestFailure("no FARVesselAero on the vessel");
                 X = aero.Exposure ?? throw new UITestFailure("FARVesselAero has no VehicleExposure");
                 renderer = Field(X, "exposureRenderer") ?? throw new UITestFailure("VehicleExposure has no exposureRenderer");
+                debugInFlight0 = FARConfig.Voxelization.DebugInFlight;
                 airstream0 = FARConfig.Exposure.Airstream.Value;
                 sun0 = FARConfig.Exposure.Sun.Value;
                 body0 = FARConfig.Exposure.Body.Value;
@@ -471,8 +445,8 @@ namespace FerramAerospaceResearch.InGameTests
                 customExisted = File.Exists(customConfig);
             }
 
-            /// <summary>The rocket on the pad, voxelized, and the graphics device able to read back.</summary>
-            public static IEnumerator OnPad(TestContext ctx, Action<Exposure> got)
+            /// <summary>The rocket on the pad, voxelized, and the graphics device able to read back. Changes nothing.</summary>
+            public static IEnumerator OnPad(TestContext ctx)
             {
                 yield return Wait.Seconds(6);   // FAR voxelizes the vessel once it is on the pad
                 Vessel v = FlightGlobals.ActiveVessel;
@@ -480,26 +454,22 @@ namespace FerramAerospaceResearch.InGameTests
                 yield return Wait.Frames(5);   // FARVesselAero hands the voxel bounds to the exposure in FixedUpdate
                 ctx.Record("graphics", $"{SystemInfo.graphicsDeviceType} {SystemInfo.graphicsDeviceVersion}, compute shaders {SystemInfo.supportsComputeShaders}, async readback {SystemInfo.supportsAsyncGPUReadback}");
                 Assert.True(SystemInfo.supportsAsyncGPUReadback, "the graphics device supports AsyncGPUReadback (both exposure devices read back through it)");
-                var x = new Exposure(v);
-                yield return KeepVoxel(ctx, v, x);
-                got(x);
             }
 
             /// <summary>
             /// The voxel bounds into the exposure, the way FAR's debug setting gets them there: in flight FAR drops the voxel
             /// as soon as it is made (VehicleAerodynamics.CreateVoxel's finally, unless Voxelization.debugInFlight), before
             /// FARVesselAero.FixedUpdate hands VoxelBounds (_voxel?.Bounds, else empty) to the exposure, which so gets an
-            /// empty box (Exposure_GetsTheVoxelBoundsAsShipped). Kept on for the rest of the test: the tests that call this
-            /// are Isolated, a KSP session of their own.
+            /// empty box (Exposure_GetsTheVoxelBoundsAsShipped). On until the Exposure is disposed.
             /// </summary>
-            public static IEnumerator KeepVoxel(TestContext ctx, Vessel v, Exposure x)
+            public IEnumerator KeepVoxel()
             {
-                ctx.Record("boundsAsShipped", $"{x.X.VesselBounds}");
+                ctx.Record("boundsAsShipped", $"{X.VesselBounds}");
                 FARConfig.Voxelization.DebugInFlight = true;
-                v.GetComponent<FARVesselAero>().VesselUpdateEvent(v);
-                yield return Wait.Until(() => x.X.VesselBounds.size.sqrMagnitude > 0, 60, "the exposure given the vessel's voxel bounds", shot: false);
+                Vessel.GetComponent<FARVesselAero>().VesselUpdateEvent(Vessel);
+                yield return Wait.Until(() => X.VesselBounds.size.sqrMagnitude > 0, 60, "the exposure given the vessel's voxel bounds", shot: false);
                 yield return Wait.Frames(5);
-                ctx.Record("bounds", $"{x.X.VesselBounds}");
+                ctx.Record("bounds", $"{X.VesselBounds}");
             }
 
             public void Directions(bool airstream, bool sun, bool body)
@@ -509,8 +479,10 @@ namespace FerramAerospaceResearch.InGameTests
                 FARConfig.Exposure.Body.Value = body;
             }
 
-            public void Restore(TestContext ctx)
+            /// <summary>Everything the test changed back as it was.</summary>
+            public void Dispose()
             {
+                FARConfig.Voxelization.DebugInFlight = debugInFlight0;
                 if (X != null)
                 {
                     X.ComputeDevice = device0;
