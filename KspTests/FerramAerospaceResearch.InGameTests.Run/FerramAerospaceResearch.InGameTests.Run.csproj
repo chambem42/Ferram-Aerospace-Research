@@ -30,8 +30,10 @@
     </ItemGroup>
 
     <ItemGroup>
-        <!-- the instance's mods (CKAN identifiers): FAR and what it needs; a test adds its own with [UITest(Mods)] -->
-        <KspMod Include="FerramAerospaceResearchContinued;KSPBurst" />
+        <!-- the instance's mods (CKAN identifiers): FAR and what it needs, and the small mods FAR talks to (procedural
+             parts and wings rebuild FAR's geometry and wing model, AtmosphereAutopilot takes the flight heatmap's
+             cruise targets); a test adds its own with [UITest(Mods)] -->
+        <KspMod Include="FerramAerospaceResearchContinued;KSPBurst;ProceduralParts;B9-PWings-Fork;AtmosphereAutopilot" />
         <!-- this repository's FAR build over CKAN's: FarGameData (a property, or the environment), else GameData/ -->
         <KspOverlay Include="$(FarGameData)" Condition="'$(FarGameData)' != ''" />
         <KspOverlay Include="..\..\GameData\FerramAerospaceResearch" Condition="'$(FarGameData)' == ''" />
