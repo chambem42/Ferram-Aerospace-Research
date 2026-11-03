@@ -1,0 +1,1049 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+using System.Text.RegularExpressions;
+using FerramAerospaceResearch.FARGUI.FAREditorGUI;
+using FerramAerospaceResearch.FARGUI.FAREditorGUI.Simulation;
+using FerramAerospaceResearch.FARGUI.FARFlightGUI;
+using KSP.Localization;
+using KspTest;
+using UnityEngine;
+using Cell = FerramAerospaceResearch.FARGUI.FAREditorGUI.Simulation.PerformanceEnvelopeCalculator.CellResult;
+
+namespace FerramAerospaceResearch.InGameTests
+{
+    /// <summary>
+    /// FAR's level-flight performance envelope (the Heatmaps tab), its Engine Deck tab and the flight scene's
+    /// heatmap window, on the stock Aeris 4A, driven through the editor window's own fields and buttons.
+    ///
+    /// The envelope needs thrust, and FAR gets thrust only from SolverEngines engines (EditorEngineDeck asks AJE's
+    /// own solver; a stock ModuleEnginesFX is not sampled at all). So the envelope tests run with AJE
+    /// (CKAN AdvancedJetEngine), which turns the Aeris 4A's two Whiplashes into AJE J58 turbojets and its shock
+    /// cones into AJE inlets: one engine type, so one envelope map. Without AJE the Heatmaps tab falls back to a
+    /// stability-only map, which the last test checks.
+    ///
+    /// The checks are what any jet does: it flies at moderate Mach low down, runs out of lift slow and high, has a
+    /// finite ceiling, needs more angle of attack the thinner the air, flies higher when lighter, and its jet thrust
+    /// falls with altitude; and the tabs agree with each other (the envelope's thrust is the Engine Deck's, the
+    /// multithreaded sweep is the serial one, the flight window shows the editor's map at the vessel's mass).
+    /// Sweeps are kept to a few cells. Each sweep's on-disk history entry is deleted again, and the window's fields
+    /// and toggles are put back.
+    /// </summary>
+    public static class EnvelopeTests
+    {
+        private const string Plane = "Aeris 4A";
+
+        // CKAN identifier of AJE (pulls in SolverEngines), and the assembly the test needs loaded
+        private const string AjeMods = "AdvancedJetEngine";
+        private const string AjeRequires = "AJE";
+
+        private const double G0 = 9.80665;
+
+        private const BindingFlags Members =
+            BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+
+        private static string L(string key) => Localizer.Format(key).Trim();
+
+        private static string Window => L("FAREditorTitle");
+
+        private static string Inv(double v, string fmt) => v.ToString(fmt, CultureInfo.InvariantCulture);
+
+        // ------------------------------------------------------------------------------------------ envelope
+
+        /// <summary>
+        /// Engine Deck then Heatmaps on the same grid (Mach 0.3-2.7 x 0-40 km, 5 x 5, with stability). The envelope is
+        /// flyable at Mach 0.9 at sea level, closes below 40 km with a ceiling of at least 10 km (shown in the tab's
+        /// summary), needs more angle of attack the higher it flies at a Mach, its slowest flyable Mach does not fall
+        /// with altitude, and its lightest mass sample flies at least as high with less incidence. Every trimmed cell's
+        /// lift carries the weight, its full-throttle thrust is the Engine Deck's at that condition, and its cruise
+        /// Isp is a jet's. The 3 mass samples are dry + 1%, dry + 50% and full of the fuel the jets burn (liquid fuel,
+        /// not the aerospike's oxidizer); the fuel slider at full shows the full-tank map; the stability map is dimmed
+        /// exactly where the envelope is not flyable; the sweep counted every cell; and the static analysis is the
+        /// same after the sweep as before.
+        /// </summary>
+        [UITest(Kind = "Check", Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        public static IEnumerator Envelope_AerisFliesWhereAJetShould(TestContext ctx)
+        {
+            string cachePath = null;
+            try
+            {
+                ctx.Step("Open FAR Analysis; static analysis at Mach 0.5, 2 deg");
+                yield return OpenWindow("FAREditorModeHeatmaps");
+                ResetConditions();
+                yield return Wait.Frames(2);
+                double cdBefore = SteadyCd();
+                CelestialBody body = FlightGlobals.GetHomeBody();
+
+                ctx.Step("Engine Deck: full throttle, Mach 0.3-2.7 x 0-40 km, 5 x 5");
+                var deckOut = new DeckOut();
+                yield return SampleDeck(new[] { "1", "0.3", "2.7", "0", "40", "5", "5" }, deckOut);
+                EditorEngineDeck.Sample[,] deck = deckOut.Samples;
+
+                ctx.Step("Heatmaps: Mach 0.3-2.7 x 0-40 km, 5 x 5, with stability, multithreaded");
+                var sw = new SweepOut();
+                yield return Sweep(new[] { "0.3", "2.7", "0", "40", "5", "5" }, true, true, sw);
+                cachePath = sw.CachePath;
+
+                Assert.False(sw.StabilityOnly, "with AJE the sweep is an envelope sweep, not stability-only");
+                Assert.Equal(1, sw.Results.Count, "one envelope map: both engines are the same kind (AJE turbojet)");
+                HeatmapResult r = sw.Results[0];
+                Assert.Equal("", r.EngineTypeLabel, "a single-type craft's map has no engine-type label");
+                Assert.Equal(sw.CellsTotal, sw.CellsDone, "the sweep counted every cell it promised");
+                Assert.Equal(Localizer.Format("FAREnvelopeDone", sw.CellsDone.ToString(CultureInfo.InvariantCulture)), sw.Status,
+                             "the status line after the sweep");
+
+                double[] machs = { 0.3, 0.9, 1.5, 2.1, 2.7 }, alts = { 0, 10000, 20000, 30000, 40000 };
+                AssertAxes(r, machs, alts);
+                for (int i = 0; i < machs.Length; i++)
+                    Assert.Near(machs[i], deckOut.Mach[i], 1e-9, $"the Engine Deck's Mach column {i} is the heatmap's");
+
+                int nM = machs.Length, nA = alts.Length;
+                Assert.NotNull(r.EnvelopeSamples, "the envelope's mass samples");
+                Assert.Equal(3, r.EnvelopeSamples.Length, "mass samples swept (dry, mid, full)");
+                Cell[,] dry = r.EnvelopeSamples[0], wet = r.EnvelopeSamples[2], shown = r.Envelope;
+                RecordGrid(ctx, "wet", wet, nM, nA);
+                RecordGrid(ctx, "dry", dry, nM, nA);
+                RecordGrid(ctx, "shown", shown, nM, nA);
+                ctx.Record("summary", $"ceiling {r.CeilingM:F0} m, best endurance {r.BestEnduranceHours:F2} h, best range {r.BestRangeKm:F0} km");
+
+                ctx.Step("Mass samples: dry + 1%, dry + 50%, full of the fuel the jets burn");
+                ShipConstruct ship = EditorLogic.fetch.ship;
+                double shipKg = ship.GetTotalMass() * 1000;
+                double lfKg = 0;
+                foreach (Part p in ship.parts)
+                    foreach (PartResource res in p.Resources)
+                        if (res.resourceName == "LiquidFuel")
+                            lfKg += res.amount * res.info.density * 1000;
+                ctx.Record("masses", $"samples {string.Join(", ", r.SampleMassesKg.Select(m => Inv(m, "F0")))} kg; dry {r.DryMassKg:F0}, ship {shipKg:F0}, liquid fuel {lfKg:F0}");
+                Assert.Near(r.SampleMassesKg[2], r.MassKg, 1e-6, "the map shown is swept at the full-tank mass");
+                Assert.InRange(0.9 * shipKg, shipKg + 1, r.MassKg, "the full-tank mass against the craft's (kg)");
+                Assert.Near(lfKg, r.MassKg - r.DryMassKg, 0.01 * lfKg + 1,
+                            "the usable fuel is the liquid fuel the jets burn (not the aerospike's oxidizer) (kg)");
+                Assert.Near(r.DryMassKg + 0.01 * lfKg, r.SampleMassesKg[0], 0.002 * lfKg + 1, "the lightest sample keeps 1% of the fuel (kg)");
+                Assert.Near(r.DryMassKg + 0.5 * lfKg, r.SampleMassesKg[1], 0.002 * lfKg + 1, "the middle sample is half full (kg)");
+                Assert.True(r.RefAreaM2 > 0, $"a reference area ({r.RefAreaM2:F2} m2)");
+
+                ctx.Step("Flyable at moderate Mach, low down");
+                Cell moderate = shown[1, 0];
+                Assert.True(moderate.Feasible, $"level flight is sustainable at Mach 0.9 at sea level ({Describe(moderate)})");
+                Assert.InRange(-3, 15, moderate.Alpha, "the trim angle of attack at Mach 0.9, sea level (deg)");
+
+                ctx.Step("Every trimmed cell: lift = weight, thrust = the Engine Deck's, a jet's Isp");
+                int cruiseCells = 0;
+                for (int i = 0; i < nM; i++)
+                    for (int j = 0; j < nA; j++)
+                    {
+                        Cell c = wet[i, j];
+                        if (!c.Trimmed || c.Extrapolated)
+                            continue;
+                        string at = $"at Mach {machs[i]}, {alts[j] / 1000} km";
+                        double effG = InstantConditionSim.CalculateAccelerationDueToGravity(body, alts[j]) -
+                                      c.SpeedMPerS * c.SpeedMPerS / (body.Radius + alts[j]);
+                        double weight = r.SampleMassesKg[2] * effG, lift = c.LiftToDrag * c.DragN;
+                        Assert.Near(weight, lift, 0.03 * weight + 50, $"the cruise lift (L/D x drag) carries the weight {at} (N)");
+
+                        double t = deck[i, j].ThrustMagnitude;
+                        double lo = t * Math.Cos((Math.Abs(c.Alpha) + 5) * Math.PI / 180) * 0.97 - 100, hi = t * 1.03 + 100;
+                        Assert.InRange(lo, hi, c.ThrustAvailableN,
+                                       $"the envelope's full-throttle thrust along the wind {at} against the Engine Deck's {t / 1000:F2} kN (N)");
+
+                        if (c.Feasible && c.Cruise == PerformanceEnvelopeCalculator.CruiseState.Ok)
+                        {
+                            cruiseCells++;
+                            double isp = c.DragN / (c.FuelFlowKgPerS * G0);
+                            Assert.InRange(1e-3, 1.0001, c.ThrottleRequired, $"the cruise throttle {at}");
+                            Assert.InRange(300, 12000, isp, $"the cruise Isp (drag over fuel flow) {at} is a jet's (s)");
+                            Assert.True(c.EnduranceHours > 0 && !double.IsInfinity(c.EnduranceHours), $"a cruise endurance {at} ({c.EnduranceHours:G4} h)");
+                            double breguet = isp * c.LiftToDrag * Math.Log(r.SampleMassesKg[2] / r.DryMassKg) / 3600;
+                            Assert.Near(breguet, c.EnduranceHours, 1e-6 * breguet + 1e-9, $"the endurance {at} is Breguet's on the cell's own numbers (h)");
+                        }
+                    }
+
+                Assert.True(cruiseCells > 0, "the envelope has cruise points (feasible, with a cruise throttle)");
+
+                ctx.Step("A finite ceiling, shown in the summary");
+                Assert.False(double.IsNaN(r.CeilingM), "the envelope has a ceiling");
+                Assert.InRange(10000, 30000, r.CeilingM, "the ceiling (m)");
+                Assert.Near(HighestFeasible(shown, alts), r.CeilingM, 1e-6, "the ceiling is the highest row with a flyable cell");
+                for (int k = 0; k < 3; k++)
+                    for (int i = 0; i < nM; i++)
+                        Assert.False(r.EnvelopeSamples[k][i, nA - 1].Feasible,
+                                     $"nothing flies level at 40 km (Mach {machs[i]}, mass sample {k}): the envelope closes in the swept range");
+                string ceilingText = "Ceiling: " + Inv(r.CeilingM / 1000, "F1") + " km";
+                yield return Wait.Frames(3);
+                Assert.True(Imgui.IsVisible(ceilingText, Window), $"the tab shows '{ceilingText}'");
+                Assert.False(Imgui.IsVisible("Ceiling clipped", Window), "the tab does not call the ceiling clipped");
+
+                ctx.Step("The envelope narrows with altitude");
+                int prevSlowest = -1;
+                for (int j = 0; j < nA; j++)
+                {
+                    int slowest = -1;
+                    for (int i = 0; i < nM; i++)
+                        if (shown[i, j].Feasible)
+                        {
+                            slowest = i;
+                            break;
+                        }
+
+                    if (slowest < 0)
+                        continue;
+                    Assert.True(slowest >= prevSlowest,
+                                $"the slowest flyable Mach does not fall with altitude: Mach {machs[slowest]} at {alts[j] / 1000} km, Mach {(prevSlowest < 0 ? 0 : machs[prevSlowest])} lower down");
+                    prevSlowest = slowest;
+                }
+
+                for (int i = 0; i < nM; i++)
+                    for (int j = 0; j + 1 < nA; j++)
+                        if (shown[i, j].Feasible && shown[i, j + 1].Feasible)
+                            Assert.True(shown[i, j + 1].Alpha > shown[i, j].Alpha - 0.05,
+                                        $"thinner air needs more incidence at Mach {machs[i]}: {shown[i, j + 1].Alpha:F2} deg at {alts[j + 1] / 1000} km, {shown[i, j].Alpha:F2} at {alts[j] / 1000}");
+
+                ctx.Step("Lighter flies higher, at less incidence");
+                Assert.True(HighestFeasible(dry, alts) >= HighestFeasible(wet, alts),
+                            $"the lightest sample's ceiling ({HighestFeasible(dry, alts)} m) is not under the full one's ({HighestFeasible(wet, alts)} m)");
+                Assert.True(CountFeasible(dry, nM, nA) >= CountFeasible(wet, nM, nA),
+                            $"the lightest sample flies in at least as many cells ({CountFeasible(dry, nM, nA)} against {CountFeasible(wet, nM, nA)})");
+                for (int i = 0; i < nM; i++)
+                    for (int j = 0; j < nA; j++)
+                        if (dry[i, j].Feasible && wet[i, j].Feasible)
+                            Assert.True(dry[i, j].Alpha < wet[i, j].Alpha + 0.05,
+                                        $"lighter trims at less incidence at Mach {machs[i]}, {alts[j] / 1000} km ({dry[i, j].Alpha:F2} against {wet[i, j].Alpha:F2} deg)");
+
+                ctx.Step("The stability map, dimmed outside the envelope");
+                Assert.True(r.HasStability && r.Stability != null, "the sweep has its stability map");
+                for (int i = 0; i < nM; i++)
+                    for (int j = 0; j < nA; j++)
+                    {
+                        HeatmapResult.StabilityCell s = r.Stability[i, j];
+                        Assert.NotNull(s, $"the stability cell at Mach {machs[i]}, {alts[j] / 1000} km");
+                        Assert.True(s.Score >= 0, $"the stability cell at Mach {machs[i]}, {alts[j] / 1000} km evaluated");
+                        Cell c = shown[i, j];
+                        int mask = !c.Trimmed || c.Suppressed ? 1 : !c.Feasible ? 2 : 0;
+                        Assert.Equal(mask, s.PerfMask, $"the stability cell at Mach {machs[i]}, {alts[j] / 1000} km is dimmed as its envelope cell ({Describe(c)})");
+                    }
+
+                ctx.Step("The fuel slider: full shows the full-tank map; between samples the drag lies between theirs");
+                HeatmapsGUI hm = Heatmaps;
+                var shownCopy = (Cell[,])shown.Clone();
+                try
+                {
+                    r.SetDisplayMass(r.SampleMassesKg[2]);
+                    AssertSameMap(shownCopy, r.Envelope, nM, nA, "the full-tank map interpolated to the full-tank mass");
+
+                    double midMass = 0.5 * (r.SampleMassesKg[1] + r.SampleMassesKg[2]);
+                    r.SetDisplayMass(midMass);
+                    Cell[,] mid = r.EnvelopeSamples[1];
+                    for (int i = 0; i < nM; i++)
+                        for (int j = 0; j < nA; j++)
+                        {
+                            Cell a = mid[i, j], b = wet[i, j], m = r.Envelope[i, j];
+                            if (!(a.Feasible && b.Feasible) || m.Suppressed)
+                                continue;
+                            Assert.True(m.Feasible, $"flyable half way between two flyable samples at Mach {machs[i]}, {alts[j] / 1000} km");
+                            Assert.InRange(Math.Min(a.DragN, b.DragN) - 1e-6, Math.Max(a.DragN, b.DragN) + 1e-6, m.DragN,
+                                           $"the drag half way between the samples at Mach {machs[i]}, {alts[j] / 1000} km (N)");
+                        }
+                }
+                finally
+                {
+                    // the tab's own display rebuild, at its fuel position (full)
+                    typeof(HeatmapsGUI).GetMethod("ApplyFuelSample", Members)?.Invoke(hm, null);
+                }
+
+                ctx.Step("The static analysis after the sweep is what it was");
+                double cdAfter = SteadyCd();
+                ctx.Record("Cd", $"before {cdBefore:G6}, after {cdAfter:G6}");
+                Assert.Near(cdBefore, cdAfter, 1e-6 * cdBefore + 1e-8, "the static analysis' Cd at Mach 0.5, 2 deg after an envelope sweep");
+            }
+            finally
+            {
+                DeleteCache(cachePath);
+                CloseWindow();
+            }
+        }
+
+        // ------------------------------------------------------------------------------------------ engine deck
+
+        /// <summary>
+        /// Engine Deck at full throttle, Mach 0-2 x 0-15 km: it samples the craft's two jets and two inlets (and says
+        /// so), its static sea-level thrust is the engines' tooltip static thrust, jet thrust falls with altitude at
+        /// every Mach, ram makes the engines stronger supersonic than subsonic up high, the inlet air is stagnated
+        /// (T0 (1 + 0.2 M^2)), half throttle makes less thrust and burns less fuel, the fuel-flow toggle switches the
+        /// table, and the engines are left at zero throttle after sampling.
+        /// </summary>
+        [UITest(Kind = "Check", Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        public static IEnumerator Envelope_EngineDeckThrustLapsesWithAltitude(TestContext ctx)
+        {
+            try
+            {
+                ctx.Step("Open FAR Analysis on the Engine Deck");
+                yield return OpenWindow("FAREditorModeStatic");
+                ResetConditions();
+                List<Part> jets = EditorLogic.fetch.ship.parts.Where(p => p.Modules.Cast<PartModule>().Any(SolverEnginesInterop.IsSolverEngine)).ToList();
+                int nJets = EditorLogic.fetch.ship.parts.Count(p => p.partInfo.name == "turboFanEngine");
+                int nInlets = EditorLogic.fetch.ship.parts.Count(p => p.partInfo.name == "shockConeIntake");
+                ctx.Record("craft", $"{jets.Count} solver engines ({nJets} Whiplash), {nInlets} shock cones");
+                Assert.Equal(nJets, jets.Count, "AJE made both Whiplashes solver engines (and nothing else)");
+
+                ctx.Step("Full throttle, Mach 0-2 x 0-15 km, 5 x 4");
+                var full = new DeckOut();
+                yield return SampleDeck(new[] { "1", "0", "2", "0", "15", "5", "4" }, full);
+                Assert.Equal(nJets, full.Engines, "the deck samples the craft's jets");
+                Assert.Equal(nInlets, full.Inlets, "the deck counts the craft's AJE inlets");
+                Assert.Equal(Localizer.Format("FAREngineDeckStatus", nJets.ToString(CultureInfo.InvariantCulture), nInlets.ToString(CultureInfo.InvariantCulture)),
+                             full.Status, "the deck's status line");
+                yield return Wait.Frames(3);
+                Assert.True(Imgui.IsVisible(full.Status, Window), "the tab shows its status line");
+                Assert.True(Imgui.IsVisible(L("FAREngineDeckThrustHeader"), Window), "the tab shows the thrust table");
+
+                double[] machs = { 0, 0.5, 1, 1.5, 2 }, alts = { 0, 5000, 10000, 15000 };
+                EditorEngineDeck.Sample[,] s = full.Samples;
+                for (int j = 0; j < alts.Length; j++)
+                    ctx.Record($"thrust {alts[j] / 1000} km",
+                               string.Join(" ", Enumerable.Range(0, machs.Length).Select(i => $"M{machs[i]}:{s[i, j].ThrustMagnitude / 1000:F1}kN/{s[i, j].FuelFlow:F3}kg/s{(s[i, j].ThermalLimited ? "(hot)" : "")}")));
+
+                EditorEngineDeck.Sample stat = s[0, 0];
+                Assert.True(stat.ThrustMagnitude > 0 && stat.FuelFlow > 0, $"the jets make thrust and burn fuel standing still at sea level ({stat.ThrustMagnitude / 1000:F1} kN)");
+                Assert.Equal(nJets, stat.RunningCount, "every jet runs at sea level, static");
+                Assert.InRange(1e-6, 1.000001, stat.AreaRatio, "the inlet-to-engine area ratio");
+                Assert.True(stat.InletArea > 0 && stat.EngineArea > 0, $"inlet ({stat.InletArea:F3} m2) and engine ({stat.EngineArea:F3} m2) areas");
+
+                double tooltipKN = 0;
+                bool haveTooltip = true;
+                foreach (Part p in jets)
+                {
+                    double kn = TooltipStaticThrustKN(p);
+                    if (double.IsNaN(kn))
+                        haveTooltip = false;
+                    tooltipKN += kn;
+                }
+
+                ctx.Record("staticThrust", $"deck {stat.ThrustMagnitude / 1000:F1} kN, tooltips {(haveTooltip ? Inv(tooltipKN, "F1") + " kN" : "n/a")}");
+                if (haveTooltip)
+                    Assert.Near(tooltipKN, stat.ThrustMagnitude / 1000, 0.2 * tooltipKN,
+                                "the Mach 0 / sea level cell against the engines' tooltip static thrust (kN)");
+
+                ctx.Step("Thrust lapses with altitude; ram helps up high; the inlet air is stagnated");
+                for (int i = 0; i < machs.Length; i++)
+                {
+                    for (int j = 0; j + 1 < alts.Length; j++)
+                    {
+                        EditorEngineDeck.Sample lo = s[i, j], up = s[i, j + 1];
+                        if (lo.ThermalLimited || up.ThermalLimited)
+                            continue;
+                        Assert.True(up.ThrustMagnitude < lo.ThrustMagnitude,
+                                    $"jet thrust falls with altitude at Mach {machs[i]}: {up.ThrustMagnitude / 1000:F1} kN at {alts[j + 1] / 1000} km, {lo.ThrustMagnitude / 1000:F1} at {alts[j] / 1000}");
+                        Assert.True(up.AmbientP < lo.AmbientP, $"the ambient pressure falls with altitude at Mach {machs[i]}");
+                    }
+
+                    for (int j = 0; j < alts.Length; j++)
+                    {
+                        EditorEngineDeck.Sample c = s[i, j];
+                        Assert.True(!double.IsNaN(c.ThrustMagnitude) && c.ThrustMagnitude >= 0, $"a thrust at Mach {machs[i]}, {alts[j] / 1000} km");
+                        double stagnation = c.AmbientT * (1 + 0.2 * machs[i] * machs[i]);
+                        Assert.Near(stagnation, c.InletT, 0.02 * stagnation,
+                                    $"the inlet temperature is the stagnation temperature at Mach {machs[i]}, {alts[j] / 1000} km (K)");
+                    }
+                }
+
+                Assert.True(s[3, 2].ThrustMagnitude > s[1, 2].ThrustMagnitude,
+                            $"ram: a Mach 3 jet makes more thrust at Mach 1.5 than at 0.5 at 10 km ({s[3, 2].ThrustMagnitude / 1000:F1} against {s[1, 2].ThrustMagnitude / 1000:F1} kN)");
+
+                ctx.Step("The engines are left at zero throttle");
+                foreach (Part p in jets)
+                    foreach (PartModule m in p.Modules)
+                        if (SolverEnginesInterop.IsSolverEngine(m) && m is ModuleEngines e)
+                            Assert.Equal(0f, e.currentThrottle, $"{p.partInfo.title}'s throttle after sampling");
+
+                ctx.Step("Half throttle: less thrust, less fuel");
+                var half = new DeckOut();
+                yield return SampleDeck(new[] { "0.5", "0", "2", "0", "15", "5", "4" }, half);
+                EditorEngineDeck.Sample[,] h = half.Samples;
+                for (int i = 0; i < machs.Length; i++)
+                    for (int j = 0; j < alts.Length; j++)
+                    {
+                        if (s[i, j].ThrustMagnitude <= 0)
+                            continue;
+                        Assert.True(h[i, j].ThrustMagnitude <= s[i, j].ThrustMagnitude * 1.001 + 1,
+                                    $"half throttle makes no more thrust than full at Mach {machs[i]}, {alts[j] / 1000} km ({h[i, j].ThrustMagnitude / 1000:F1} against {s[i, j].ThrustMagnitude / 1000:F1} kN)");
+                        Assert.True(h[i, j].FuelFlow <= s[i, j].FuelFlow * 1.001 + 1e-6,
+                                    $"half throttle burns no more fuel than full at Mach {machs[i]}, {alts[j] / 1000} km");
+                    }
+
+                Assert.True(h[0, 0].ThrustMagnitude < 0.9 * stat.ThrustMagnitude && h[0, 0].FuelFlow < 0.9 * stat.FuelFlow,
+                            $"half throttle, static at sea level: {h[0, 0].ThrustMagnitude / 1000:F1} kN and {h[0, 0].FuelFlow:F3} kg/s against {stat.ThrustMagnitude / 1000:F1} and {stat.FuelFlow:F3}");
+
+                ctx.Step("Show fuel flow");
+                yield return Imgui.Toggle(L("FAREngineDeckShowFlow"), true, Window);
+                yield return Wait.Frames(3);
+                Assert.True(Imgui.IsVisible(L("FAREngineDeckFlowHeader"), Window), "the fuel-flow toggle switches the table to fuel flow");
+                Assert.True(Imgui.IsVisible(Inv(h[0, 0].FuelFlow, "F3"), Window), "the table shows the static sea-level fuel flow");
+            }
+            finally
+            {
+                CloseWindow();
+            }
+        }
+
+        // ------------------------------------------------------------------------------------------ threads
+
+        /// <summary>
+        /// The same 4 x 4 sweep (Mach 0.5-2 x 0-15 km, with stability) multithreaded and on the main thread: the
+        /// worker threads (engine solver clones, frozen geometry, the stability map riding along) give the serial
+        /// path's map (its stand-alone stability pass is the stability-only fallback's loop): the same cells trim
+        /// and fly, at the same angle of attack, drag and thrust, with the same stability flags.
+        /// </summary>
+        [UITest(Kind = "Check", Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        public static IEnumerator Envelope_MultithreadedSweepIsTheSerialOne(TestContext ctx)
+        {
+            string pathA = null, pathB = null;
+            try
+            {
+                yield return OpenWindow("FAREditorModeHeatmaps");
+                ResetConditions();
+                yield return Wait.Frames(2);
+                string[] fields = { "0.5", "2", "0", "15", "4", "4" };
+
+                ctx.Step("Multithreaded sweep");
+                var mt = new SweepOut();
+                yield return Sweep(fields, true, true, mt);
+                pathA = mt.CachePath;
+
+                ctx.Step("Serial sweep");
+                var serial = new SweepOut();
+                yield return Sweep(fields, true, false, serial);
+                pathB = serial.CachePath;
+
+                Assert.Equal(mt.Results.Count, serial.Results.Count, "maps in each sweep");
+                HeatmapResult a = mt.Results[0], b = serial.Results[0];
+                int nM = a.MachAxis.Length, nA = a.AltAxis.Length;
+                Assert.Equal(serial.CellsTotal, serial.CellsDone, "the serial sweep counted every cell it promised");
+                int compared = 0, trimMismatch = 0;
+                for (int k = 0; k < a.EnvelopeSamples.Length; k++)
+                {
+                    RecordGrid(ctx, $"mt{k}", a.EnvelopeSamples[k], nM, nA);
+                    RecordGrid(ctx, $"serial{k}", b.EnvelopeSamples[k], nM, nA);
+                    for (int i = 0; i < nM; i++)
+                        for (int j = 0; j < nA; j++)
+                        {
+                            Cell x = a.EnvelopeSamples[k][i, j], y = b.EnvelopeSamples[k][i, j];
+                            string at = $"Mach {a.MachAxis[i]:F2}, {a.AltAxis[j] / 1000:F0} km, mass sample {k}";
+                            if (x.Trimmed != y.Trimmed)
+                            {
+                                // FAR's stall model carries hysteresis across calls, so a cell at the edge of the
+                                // stall can trim in one sweep and not the other
+                                trimMismatch++;
+                                ctx.Record("trimMismatch " + at, $"multithreaded {Describe(x)}, serial {Describe(y)}");
+                                continue;
+                            }
+
+                            if (!x.Trimmed || x.Extrapolated || y.Extrapolated || x.Alpha > 10 || y.Alpha > 10)
+                                continue;
+                            compared++;
+                            Assert.Equal(y.Feasible, x.Feasible, $"flyable in both sweeps or neither at {at}");
+                            Assert.Equal(y.Overheats, x.Overheats, $"heat-limited in both sweeps or neither at {at}");
+                            Assert.Near(y.Alpha, x.Alpha, 0.1, $"the trim angle of attack at {at} (deg)");
+                            Assert.Near(y.DragN, x.DragN, 0.01 * Math.Abs(y.DragN) + 10, $"the cruise drag at {at} (N)");
+                            Assert.Near(y.ThrustAvailableN, x.ThrustAvailableN, 0.02 * Math.Abs(y.ThrustAvailableN) + 50,
+                                        $"the full-throttle thrust at {at} (N)");
+                        }
+                }
+
+                ctx.Record("compared", $"{compared} cells, {trimMismatch} trimmed in one sweep only");
+                Assert.True(compared >= 10, $"enough cells trimmed well below the stall in both sweeps to compare ({compared})");
+                Assert.True(trimMismatch <= 2, $"the sweeps trim the same cells, but for a couple at the stall's edge ({trimMismatch} differ)");
+
+                Assert.True(a.HasStability && b.HasStability, "both sweeps have their stability map");
+                for (int i = 0; i < nM; i++)
+                    for (int j = 0; j < nA; j++)
+                    {
+                        Cell c = a.EnvelopeSamples[2][i, j];
+                        if (!c.Feasible || c.Alpha > 10)
+                            continue;
+                        if (a.Stability[i, j] == null || b.Stability[i, j] == null)
+                            continue;
+                        string sa = string.Join(" ", a.Stability[i, j].OutOfRange.Select(o => o.Item1).OrderBy(n => n));
+                        string sb = string.Join(" ", b.Stability[i, j].OutOfRange.Select(o => o.Item1).OrderBy(n => n));
+                        Assert.Equal(sb, sa, $"the stability flags at Mach {a.MachAxis[i]:F2}, {a.AltAxis[j] / 1000:F0} km, threaded against serial");
+                    }
+            }
+            finally
+            {
+                DeleteCache(pathA);
+                DeleteCache(pathB);
+                CloseWindow();
+            }
+        }
+
+        // ------------------------------------------------------------------------------------------ flight
+
+        /// <summary>
+        /// A 5 x 5 sweep (Mach 0.4-2 x 0-12 km) in the SPH, then the craft launched to the runway and placed at
+        /// Mach 0.8, 3 km. FAR's flight heatmap window shows that sweep as this vessel's (no mismatch warning), at the
+        /// vessel's mass, which at full tanks is the editor's full-tank map cell for cell; its ceiling summary is the
+        /// editor's; it reads back the vessel's Mach and altitude, and names the nearest cell and that cell's verdict,
+        /// which for a jet at Mach 0.8, 3 km is sustainable level flight.
+        /// </summary>
+        // Explicit, unresolved: at Mach 0.8, 3 km the window's nearest cell read Mach 0.40, 3.0 km, "no trim"
+        [UITest(Kind = "Check", Explicit = true, Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Plane, CraftDir = "SPH",
+                LaunchSite = "Runway", TimeoutSec = 1200)]
+        public static IEnumerator Envelope_FlightWindowShowsTheVesselsEnvelope(TestContext ctx)
+        {
+            List<HeatmapResult> swept;
+            string cachePath = null;
+            try
+            {
+                ctx.Step("Heatmaps: Mach 0.4-2 x 0-12 km, 5 x 5");
+                yield return OpenWindow("FAREditorModeHeatmaps");
+                ResetConditions();
+                yield return Wait.Frames(2);
+                var sw = new SweepOut();
+                yield return Sweep(new[] { "0.4", "2", "0", "12", "5", "5" }, false, true, sw);
+                cachePath = sw.CachePath;
+                swept = sw.Results;
+                Assert.False(sw.StabilityOnly, "an envelope sweep (AJE present)");
+                Assert.True(ReferenceEquals(HeatmapResult.Cached, swept), "the finished sweep is the one handed to the flight scene");
+                RecordGrid(ctx, "shown", swept[0].Envelope, swept[0].MachAxis.Length, swept[0].AltAxis.Length);
+            }
+            finally
+            {
+                // the map travels in memory (HeatmapResult.Cached); its history file is not needed
+                DeleteCache(cachePath);
+                CloseWindow();
+            }
+
+            ctx.Step("Launch to the runway; fly at Mach 0.8, 3 km");
+            EditorLogic.fetch.launchSiteName = "Runway";
+            yield return Nav.Launch(ctx);
+            yield return Wait.Seconds(5);   // FAR voxelizes the craft after it loads
+            var cruise = new FarFlightProbe.Condition { Name = "cruise M0.8 3km", Mach = 0.8, AltM = 3000, AoADeg = 2, Lat = 0, Lon = -60, HeadingDeg = 90 };
+            yield return FlightTests.Airborne(cruise);
+
+            Vessel v = FlightGlobals.ActiveVessel;
+            FlightGUI gui = Far.FlightGui(v);
+            bool shown = Far.FlightGuiShown, heatmapOpen = Get<bool>(gui, "showHeatmapWindow");
+            try
+            {
+                ctx.Step("Open the flight heatmap window");
+                Far.FlightGuiShown = true;
+                yield return Imgui.WaitWindow(Far.MainWindow, 30);
+                yield return Imgui.Toggle(L("FARFlightGUIHeatmapBtn"), true, Far.MainWindow, exact: true);
+                string title = L("FARFlightHeatmapTitle");
+                yield return Imgui.WaitWindow(title);
+                yield return Wait.Frames(3);
+
+                Assert.False(Imgui.IsVisible(L("FARFlightHeatmapNone").Substring(0, 20), title), "the window has a map to show");
+                HeatmapResult editor = swept[0];
+                Assert.True(editor.Matches(v), $"the sweep is recognised as this vessel's: '{editor.CraftName}' with {editor.PartCount} physical parts, vessel '{v.vesselName}' with {HeatmapResult.CountPhysicalParts(v)}");
+                Assert.False(Imgui.IsVisible(Localizer.Format("FARFlightHeatmapMismatch", editor.CraftName), title), "no mismatch warning");
+
+                object heatmapGui = Get(gui, "_heatmapGUI");
+                Assert.True(ReferenceEquals(Get(heatmapGui, "_boundResults"), swept), "the window shows the editor's sweep");
+                var display = Get<List<HeatmapResult>>(heatmapGui, "_displayResults");
+                Assert.True(display != null && display.Count == swept.Count, "a display map for each swept map");
+                HeatmapResult flight = display[display.Count - 1];
+                int nM = flight.MachAxis.Length, nA = flight.AltAxis.Length;
+
+                ctx.Step("The map at the vessel's mass");
+                double vesselKg = v.totalMass * 1000;
+                ctx.Record("mass", $"vessel {vesselKg:F0} kg, map {flight.MassKg:F0}, swept full {editor.SampleMassesKg[2]:F0}, dry {editor.DryMassKg:F0}");
+                Assert.Near(vesselKg, flight.MassKg, Math.Max(20, 0.001 * vesselKg), "the flight map is interpolated to the vessel's mass (kg)");
+                string massText = "Map at current mass " + Inv(flight.MassKg / 1000, "F2") + " t";
+                Assert.True(Imgui.IsVisible(massText, title), $"the window shows '{massText}'");
+                Assert.True(vesselKg >= editor.SampleMassesKg[2] * 0.995,
+                            $"the vessel at launch is not lighter than the editor's full-tank mass ({vesselKg:F0} against {editor.SampleMassesKg[2]:F0} kg)");
+                RecordGrid(ctx, "flight", flight.Envelope, nM, nA);
+                AssertSameMap(editor.Envelope, flight.Envelope, nM, nA, "the flight map at full tanks against the editor's full-tank map");
+                string ceilingText = double.IsNaN(editor.CeilingM) ? "Ceiling: " : "Ceiling: " + Inv(editor.CeilingM / 1000, "F1") + " km";
+                Assert.True(Imgui.IsVisible(ceilingText, title), $"the window shows the editor's ceiling ('{ceilingText}')");
+
+                ctx.Step("The vessel's own point on the map");
+                Imgui.WindowInfo w = Imgui.FindWindow(title);
+                string nowPrefix = Localizer.Format("FARFlightHeatmapNow", "\u0001", "\u0002").Split('\u0001')[0];
+                string now = w?.Labels.FirstOrDefault(l => l.StartsWith(nowPrefix, StringComparison.Ordinal));
+                ctx.Record("now", now);
+                Assert.NotNull(now, $"the window shows where the vessel is ('{nowPrefix}...')");
+                MatchCollection nums = Regex.Matches(now.Substring(nowPrefix.Length), @"-?[0-9]+(\.[0-9]+)?");
+                Assert.True(nums.Count >= 2, "the vessel's Mach and altitude in: " + now);
+                Assert.Near(v.mach, double.Parse(nums[0].Value, CultureInfo.InvariantCulture), 0.05, "the Mach the window reads back");
+                Assert.Near(v.altitude / 1000, double.Parse(nums[1].Value, CultureInfo.InvariantCulture), 0.3, "the altitude the window reads back (km)");
+
+                int ci = IndexNear(flight.MachAxis, v.mach), cj = IndexNear(flight.AltAxis, v.altitude);
+                Cell here = flight.Envelope[ci, cj];
+                string verdict = !here.Trimmed ? L("FARFlightHeatmapPredLift") : here.Feasible ? L("FARFlightHeatmapPredOk") : L("FARFlightHeatmapPredThrust");
+                string predicted = Localizer.Format("FARFlightHeatmapPred", Inv(here.Mach, "F2"), Inv(flight.AltAxis[cj] / 1000, "F1"), verdict);
+                ctx.Record("here", $"cell [{ci},{cj}] {Describe(here)}");
+                yield return Imgui.WaitVisible(predicted, title, 10);
+                Assert.False(Imgui.IsVisible(L("FARFlightHeatmapOutside"), title), "the vessel is inside the swept range");
+                Assert.True(here.Feasible, $"a jet at Mach 0.8, 3 km is in its envelope: the nearest cell (Mach {here.Mach:F2}, {flight.AltAxis[cj] / 1000:F1} km) is {Describe(here)}");
+            }
+            finally
+            {
+                try
+                {
+                    Set(gui, "showHeatmapWindow", heatmapOpen);
+                }
+                catch (Exception e)
+                {
+                    KspTest.Log.Warn("EnvelopeTests: closing the flight heatmap window: " + e.Message);
+                }
+
+                Far.FlightGuiShown = shown;
+            }
+        }
+
+        // ------------------------------------------------------------------------------------------ no AJE
+
+        /// <summary>
+        /// Without SolverEngines there is no thrust to sample: the editor offers no Engine Deck tab; the Heatmaps tab
+        /// with stability off refuses to run and says SolverEngines is missing; with stability on it sweeps a
+        /// stability-only map (3 x 3, Mach 0.4-1.2 x 0-6 km) with no envelope, says so, and neither hands it to the
+        /// flight scene nor files it in the craft's history. With SolverEngines the Engine Deck tab is there.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Plane, TimeoutSec = 900)]
+        public static IEnumerator Envelope_WithoutSolverEnginesTheMapIsStabilityOnly(TestContext ctx)
+        {
+            try
+            {
+                yield return OpenWindow("FAREditorModeHeatmaps");
+                ResetConditions();
+                yield return Wait.Frames(2);
+                var tabs = (string[])Get(Get(Far.Editor, "modeDropdown"), "stringOptions");
+                bool deckTab = tabs.Any(t => t.Trim() == L("FAREditorModeEngineDeck"));
+                ctx.Record("solverEngines", SolverEnginesInterop.Available);
+                Assert.Equal(SolverEnginesInterop.Available, deckTab, "the Engine Deck tab is offered exactly when SolverEngines is there");
+                if (SolverEnginesInterop.Available)
+                {
+                    ctx.Record("skipped", "SolverEngines is loaded: the stability-only fallback cannot be reached");
+                    yield break;
+                }
+
+                HeatmapsGUI hm = Heatmaps;
+                PrepareHeatmaps(hm);
+                yield return SetHeatmapToggles(false, true);
+                string[] fields = { "0.4", "1.2", "0", "6", "3", "3" };
+                for (int i = 0; i < fields.Length; i++)
+                    yield return Imgui.SetTextNth(i, fields[i], Window);
+
+                ctx.Step("Stability off: nothing to sweep");
+                object before = Get(hm, "_results");
+                List<HeatmapResult> cachedBefore = HeatmapResult.Cached;
+                int historyBefore = HeatmapPersistence.ListForVessel(Plane).Count;
+                yield return Imgui.Click(L("FARStabHeatmapRun"), Window);
+                Assert.False(hm.IsSweepRunning, "no sweep runs without engines or stability");
+                Assert.True(ReferenceEquals(before, Get(hm, "_results")), "the maps shown are left alone");
+                Assert.Equal(L("FAREngineDeckNoSolver"), Get<string>(hm, "_statusMessage").Trim(), "the status line");
+                yield return Wait.Frames(3);
+                Assert.True(Imgui.IsVisible(L("FAREngineDeckNoSolver"), Window), "the tab says SolverEngines is missing");
+
+                ctx.Step("Stability on: a stability-only map");
+                yield return Imgui.Toggle(L("FARHeatmapsIncludeStab"), true, Window);
+                yield return Imgui.Click(L("FARStabHeatmapRun"), Window);
+                yield return Wait.Until(() => !hm.IsSweepRunning, 600, "the stability sweep", shot: false);
+                var results = Get<List<HeatmapResult>>(hm, "_results");
+                Assert.True(results != null && !ReferenceEquals(results, before), "the Run button swept a new map");
+                Assert.True(Get<bool>(hm, "_stabilityOnly"), "the sweep is stability-only");
+                Assert.Equal(1, results.Count, "one (stability) result");
+                HeatmapResult r = results[0];
+                Assert.True(r.Envelope == null && r.EnvelopeSamples == null, "no envelope without thrust");
+                Assert.True(r.HasStability && r.Stability != null, "the stability map");
+                for (int i = 0; i < 3; i++)
+                    for (int j = 0; j < 3; j++)
+                        Assert.True(r.Stability[i, j] != null && r.Stability[i, j].Score >= 0, $"the stability cell [{i},{j}] evaluated");
+                Assert.Equal(0, Get<IList>(hm, "_envRenderers").Count, "no envelope maps drawn");
+                string status = Get<string>(hm, "_statusMessage");
+                ctx.Record("status", status);
+                Assert.True(status.Contains("stability map only"), "the status line says the map is stability-only: " + status);
+                yield return Wait.Frames(3);
+                Assert.True(Imgui.IsVisible("stability map only", Window), "the tab says so");
+                Assert.True(Imgui.IsVisible("Stability derivatives", Window), "the tab draws the stability map");
+                Assert.True(ReferenceEquals(cachedBefore, HeatmapResult.Cached), "a stability-only map is not handed to the flight scene");
+                Assert.Equal(historyBefore, HeatmapPersistence.ListForVessel(Plane).Count, "nor filed in the craft's sweep history");
+            }
+            finally
+            {
+                CloseWindow();
+            }
+        }
+
+        // ------------------------------------------------------------------------------------------ helpers: tabs
+
+        private sealed class DeckOut
+        {
+            public EditorEngineDeck.Sample[,] Samples;
+            public double[] Mach, Alt;
+            public string Status;
+            public int Engines, Inlets;
+        }
+
+        /// <summary>The Engine Deck tab's fields typed in (throttle, Mach min/max, altitude min/max km, cells) and sampled.</summary>
+        private static IEnumerator SampleDeck(string[] fields, DeckOut o)
+        {
+            SelectTab("FAREditorModeEngineDeck");
+            yield return Wait.Frames(2);
+            object deckGui = Get(Far.Editor, "_engineDeck");
+            Remember(deckGui, "_throttle", "_machMin", "_machMax", "_altMinKm", "_altMaxKm", "_nMach", "_nAlt", "_showFuelFlow");
+            for (int i = 0; i < fields.Length; i++)
+                yield return Imgui.SetTextNth(i, fields[i], Window);
+            object before = Get(deckGui, "_samples");
+            yield return Imgui.Click(L("FAREngineDeckRun"), Window, exact: true);
+            o.Samples = (EditorEngineDeck.Sample[,])Get(deckGui, "_samples");
+            o.Status = Get<string>(deckGui, "_statusMessage");
+            Assert.True(o.Samples != null && !ReferenceEquals(o.Samples, before), "the Sample button sampled the engines: " + o.Status);
+            o.Mach = (double[])Get(deckGui, "_machAxis");
+            o.Alt = (double[])Get(deckGui, "_altAxis");
+            var deck = (EditorEngineDeck)Get(deckGui, "_deck");
+            o.Engines = deck.EngineCount;
+            o.Inlets = deck.InletCount;
+        }
+
+        private sealed class SweepOut
+        {
+            public List<HeatmapResult> Results;
+            public string Status, CachePath;
+            public int CellsDone, CellsTotal;
+            public bool StabilityOnly;
+        }
+
+        private static HeatmapsGUI Heatmaps => (HeatmapsGUI)Get(Far.Editor, "_heatmaps");
+
+        private static HeatmapsGUI heatmapsUsed;
+        private static bool? cleanupAtStart;
+
+        /// <summary>The Heatmaps tab's state remembered, spoilers in, the fuel slider at full.</summary>
+        private static void PrepareHeatmaps(HeatmapsGUI hm)
+        {
+            heatmapsUsed = hm;
+            if (!cleanupAtStart.HasValue)
+                cleanupAtStart = HeatmapResult.CleanupDisplay;
+            Remember(hm, "_machMin", "_machMax", "_altMinKm", "_altMaxKm", "_nMach", "_nAlt", "_spoilers", "_includeStability",
+                     "_autoRecalc", "_speedInMS", "_autoMaxAlt", "_autoMaxSpeed", "_multithread", "_fuelPos");
+            Set(hm, "_spoilers", false);   // no control for it on the tab
+            Set(hm, "_fuelPos", 2f);       // the slider at full (the last of the 3 mass samples)
+        }
+
+        /// <summary>Mach axis, no auto-fit or auto-recalc, cleanup on, stability and multithreading as asked, through the tab's controls.</summary>
+        private static IEnumerator SetHeatmapToggles(bool stability, bool multithread)
+        {
+            if (Get<bool>(Heatmaps, "_speedInMS"))
+                yield return Imgui.Click("m/s", Window, exact: true);
+            yield return Imgui.Toggle("Max altitude", false, Window);
+            yield return Imgui.Toggle("Max Mach", false, Window);
+            yield return Imgui.Toggle(L("FARHeatmapsAutoRecalc"), false, Window);
+            yield return Imgui.Toggle("Cleanup", true, Window);
+            yield return Imgui.Toggle("Multithread", multithread, Window);
+            yield return Imgui.Toggle(L("FARHeatmapsIncludeStab"), stability, Window);
+        }
+
+        /// <summary>
+        /// A sweep through the Heatmaps tab: its range fields typed in (Mach min, max, altitude min, max km, cells along
+        /// each), Run pressed, the sweep waited out. Records the history file it saved, for the test to delete.
+        /// </summary>
+        private static IEnumerator Sweep(string[] fields, bool stability, bool multithread, SweepOut o)
+        {
+            SelectTab("FAREditorModeHeatmaps");
+            yield return Wait.Frames(2);
+            HeatmapsGUI hm = Heatmaps;
+            PrepareHeatmaps(hm);
+            yield return SetHeatmapToggles(stability, multithread);
+            for (int i = 0; i < fields.Length; i++)
+                yield return Imgui.SetTextNth(i, fields[i], Window);
+            Assert.Equal(multithread, Get<bool>(hm, "_multithread"), "the Multithread toggle");
+            Assert.Equal(stability, Get<bool>(hm, "_includeStability"), "the Include stability toggle");
+
+            object before = Get(hm, "_results");
+            yield return Imgui.Click(L("FARStabHeatmapRun"), Window);
+            yield return Wait.Until(() => !hm.IsSweepRunning, 600, "the heatmap sweep", shot: false);
+
+            o.Results = Get<List<HeatmapResult>>(hm, "_results");
+            o.Status = Get<string>(hm, "_statusMessage");
+            o.CellsDone = Get<int>(hm, "_cellsDone");
+            o.CellsTotal = Get<int>(hm, "_cellsTotal");
+            o.StabilityOnly = Get<bool>(hm, "_stabilityOnly");
+            Assert.True(o.Results != null && o.Results.Count > 0 && !ReferenceEquals(o.Results, before),
+                        "the Run button swept a new map: " + o.Status);
+
+            var history = Get<List<HeatmapPersistence.CacheEntry>>(hm, "_cachedSweeps");
+            int vi = Get<int>(hm, "_viewIndex");
+            if (!o.StabilityOnly && history != null && vi >= 0 && vi < history.Count)
+                o.CachePath = history[vi].Path;
+        }
+
+        private static void DeleteCache(string path)
+        {
+            if (path == null)
+                return;
+            try
+            {
+                HeatmapPersistence.DeletePath(path);
+            }
+            catch (Exception e)
+            {
+                KspTest.Log.Warn("EnvelopeTests: deleting the sweep's history file: " + e.Message);
+            }
+        }
+
+        /// <summary>The static analysis' Cd at Mach 0.5, 2 deg, after a few calls (the wings' stall state settles).</summary>
+        private static double SteadyCd()
+        {
+            double cd = 0;
+            for (int k = 0; k < 4; k++)
+                cd = Far.Instant(2, 0.5).Cd;
+            return cd;
+        }
+
+        /// <summary>The number AJE's tooltip gives for an engine's static thrust (wet if it has an afterburner), kN; NaN if none.</summary>
+        private static double TooltipStaticThrustKN(Part p)
+        {
+            if (p.partInfo?.moduleInfos == null)
+                return double.NaN;
+            foreach (string pattern in new[] { @"Static Thrust \(wet\):\s*(?:</b>)?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*kN", @"Static Thrust:\s*(?:</b>)?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*kN" })
+                foreach (AvailablePart.ModuleInfo mi in p.partInfo.moduleInfos)
+                {
+                    Match m = Regex.Match(mi.info ?? "", pattern);
+                    if (m.Success)
+                        return double.Parse(m.Groups[1].Value.Replace(",", ""), CultureInfo.InvariantCulture);
+                }
+
+            return double.NaN;
+        }
+
+        // ------------------------------------------------------------------------------------------ helpers: maps
+
+        private static void AssertAxes(HeatmapResult r, double[] machs, double[] alts)
+        {
+            Assert.Equal(machs.Length, r.MachAxis.Length, "Mach columns");
+            Assert.Equal(alts.Length, r.AltAxis.Length, "altitude rows");
+            Assert.False(r.SpeedAxisMode, "the x axis is Mach");
+            for (int i = 0; i < machs.Length; i++)
+                Assert.Near(machs[i], r.MachAxis[i], 1e-9, $"Mach column {i}");
+            for (int j = 0; j < alts.Length; j++)
+                Assert.Near(alts[j], r.AltAxis[j], 1e-6, $"altitude row {j} (m)");
+        }
+
+        /// <summary>Two displayed maps the same cell for cell: what trims, flies, is hidden and cruises, at the same drag.</summary>
+        private static void AssertSameMap(Cell[,] expected, Cell[,] actual, int nM, int nA, string what)
+        {
+            var diffs = new List<string>();
+            for (int i = 0; i < nM; i++)
+                for (int j = 0; j < nA; j++)
+                {
+                    Cell e = expected[i, j], a = actual[i, j];
+                    bool same = e.Trimmed == a.Trimmed && e.Feasible == a.Feasible && e.Suppressed == a.Suppressed &&
+                                (!e.Feasible || e.Cruise == a.Cruise) &&
+                                (!e.Trimmed || Math.Abs(e.DragN - a.DragN) <= 1e-6 * Math.Abs(e.DragN) + 1e-6);
+                    if (!same)
+                        diffs.Add($"[{i},{j}] {Describe(e)} -> {Describe(a)}");
+                }
+
+            Assert.True(diffs.Count == 0, $"{what}: {diffs.Count} cells differ: {string.Join("; ", diffs.Take(6))}");
+        }
+
+        private static double HighestFeasible(Cell[,] grid, double[] alts)
+        {
+            double best = double.NaN;
+            for (int i = 0; i < grid.GetLength(0); i++)
+                for (int j = 0; j < grid.GetLength(1); j++)
+                    if (grid[i, j].Feasible && (double.IsNaN(best) || alts[j] > best))
+                        best = alts[j];
+            return best;
+        }
+
+        private static int CountFeasible(Cell[,] grid, int nM, int nA)
+        {
+            int n = 0;
+            for (int i = 0; i < nM; i++)
+                for (int j = 0; j < nA; j++)
+                    if (grid[i, j].Feasible)
+                        n++;
+            return n;
+        }
+
+        private static string Describe(Cell c)
+        {
+            string kind = !c.Trimmed ? "no trim" :
+                          c.Suppressed ? "hidden" :
+                          c.Feasible ? (c.Cruise == PerformanceEnvelopeCalculator.CruiseState.Ok ? "cruise" : c.Cruise.ToString()) :
+                          c.Overheats ? "heat wall" : "thrust-short";
+            if (!c.Trimmed)
+                return kind;
+            return string.Format(CultureInfo.InvariantCulture, "{0}{1}, AoA {2:F2}, drag {3:F2} kN, thrust {4:F2} kN, throttle {5:F2}",
+                                 kind, c.Extrapolated ? " (extrapolated)" : "", c.Alpha, c.DragN / 1000, c.ThrustAvailableN / 1000, c.ThrottleRequired);
+        }
+
+        /// <summary>The grid, top row first: '.' no trim, 'x' hidden, 'F' cruise, 'i' flyable without a cruise, 'H' heat wall, 'g' thrust-short.</summary>
+        private static void RecordGrid(TestContext ctx, string name, Cell[,] grid, int nM, int nA)
+        {
+            var sb = new StringBuilder();
+            for (int j = nA - 1; j >= 0; j--)
+            {
+                for (int i = 0; i < nM; i++)
+                {
+                    Cell c = grid[i, j];
+                    sb.Append(!c.Trimmed ? '.' :
+                              c.Suppressed ? 'x' :
+                              c.Feasible ? (c.Cruise == PerformanceEnvelopeCalculator.CruiseState.Ok ? 'F' : 'i') :
+                              c.Overheats ? 'H' : 'g');
+                }
+
+                if (j > 0)
+                    sb.Append('/');
+            }
+
+            ctx.Record("grid." + name, sb.ToString());
+        }
+
+        private static int IndexNear(double[] x, double v)
+        {
+            int best = 0;
+            for (int i = 1; i < x.Length; i++)
+                if (Math.Abs(x[i] - v) < Math.Abs(x[best] - v))
+                    best = i;
+            return best;
+        }
+
+        // ------------------------------------------------------------------------------------------ helpers: window
+
+        private static bool WindowShown =>
+            (bool)typeof(EditorGUI).GetField("showGUI", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
+
+        /// <summary>The window shown on a tab (its localization key), once the craft is voxelized.</summary>
+        private static IEnumerator OpenWindow(string tabKey)
+        {
+            yield return Far.WaitForEditorVoxels();
+            SelectTab(tabKey);
+            if (!WindowShown)
+            {
+                // what FAR's toolbar button does in the editor; the button shown pressed to match
+                EditorGUI.onAppLaunchToggle();
+                if (FARDebugAndSettings.FARDebugButtonStock)
+                    FARDebugAndSettings.FARDebugButtonStock.SetTrue(false);
+            }
+
+            yield return Imgui.WaitWindow(Window);
+            yield return Wait.Frames(2);
+        }
+
+        /// <summary>Everything the test changed put back (and the heatmap fields saved back to FAR's config), and the window closed.</summary>
+        private static void CloseWindow()
+        {
+            RestoreRemembered();
+            try
+            {
+                if (cleanupAtStart.HasValue)
+                    HeatmapResult.CleanupDisplay = cleanupAtStart.Value;
+                cleanupAtStart = null;
+                heatmapsUsed?.SaveSettings();
+                heatmapsUsed = null;
+                if (EditorGUI.Instance != null && WindowShown)
+                {
+                    EditorGUI.onAppLaunchToggle();
+                    if (FARDebugAndSettings.FARDebugButtonStock)
+                        FARDebugAndSettings.FARDebugButtonStock.SetFalse(false);
+                }
+            }
+            catch (Exception e)
+            {
+                KspTest.Log.Warn("EnvelopeTests: closing FAR's window: " + e.Message);
+            }
+        }
+
+        private static void SelectTab(string tabKey)
+        {
+            object modes = Get(Far.Editor, "modeDropdown");
+            Remember(modes, "selectedOption");
+            SelectOption(modes, L(tabKey));
+        }
+
+        /// <summary>A FAR dropdown's option chosen by its label, as a click in its list would.</summary>
+        private static void SelectOption(object dropdown, string label)
+        {
+            var options = (string[])Get(dropdown, "stringOptions");
+            int i = Array.FindIndex(options, o => string.Equals(o.Trim(), label, StringComparison.OrdinalIgnoreCase));
+            if (i < 0)
+                throw new UITestFailure($"no option '{label}' in FAR's dropdown ({string.Join(", ", options)})");
+            Set(dropdown, "selectedOption", i);
+        }
+
+        /// <summary>The planet (home body) and flap setting (up) every tab shares.</summary>
+        private static void ResetConditions()
+        {
+            object graphGui = Get(Far.Editor, "_editorGraph");
+            object bodies = Get(graphGui, "bodySettingDropdown"), flaps = Get(graphGui, "flapSettingDropdown");
+            Remember(bodies, "selectedOption");
+            Remember(flaps, "selectedOption");
+            SelectOption(bodies, FlightGlobals.GetHomeBody().bodyName);
+            SelectOption(flaps, L("FARFlapSetting0"));
+        }
+
+        // ------------------------------------------------------------------------------------------ helpers: state
+
+        private static readonly List<KeyValuePair<object, Dictionary<string, object>>> Remembered =
+            new List<KeyValuePair<object, Dictionary<string, object>>>();
+
+        /// <summary>Fields' values kept (the first time in a test) to put back when the window closes.</summary>
+        private static void Remember(object o, params string[] fields)
+        {
+            Dictionary<string, object> saved = null;
+            foreach (KeyValuePair<object, Dictionary<string, object>> e in Remembered)
+                if (ReferenceEquals(e.Key, o))
+                    saved = e.Value;
+            if (saved == null)
+            {
+                saved = new Dictionary<string, object>();
+                Remembered.Add(new KeyValuePair<object, Dictionary<string, object>>(o, saved));
+            }
+
+            foreach (string f in fields)
+                if (!saved.ContainsKey(f))
+                {
+                    object v = Get(o, f);
+                    saved[f] = v is Array a ? a.Clone() : v;
+                }
+        }
+
+        private static void RestoreRemembered()
+        {
+            foreach (KeyValuePair<object, Dictionary<string, object>> e in Remembered)
+                foreach (KeyValuePair<string, object> f in e.Value)
+                    try
+                    {
+                        if (f.Value is Array saved && Get(e.Key, f.Key) is Array current && current.Length == saved.Length)
+                            Array.Copy(saved, current, saved.Length);
+                        else
+                            Set(e.Key, f.Key, f.Value);
+                    }
+                    catch (Exception ex)
+                    {
+                        KspTest.Log.Warn($"EnvelopeTests: restoring {e.Key.GetType().Name}.{f.Key}: {ex.Message}");
+                    }
+
+            Remembered.Clear();
+        }
+
+        private static FieldInfo FieldOf(object o, string name)
+        {
+            if (o == null)
+                throw new UITestFailure($"no object to read {name} from");
+            for (Type t = o.GetType(); t != null; t = t.BaseType)
+            {
+                FieldInfo f = t.GetField(name, Members | BindingFlags.DeclaredOnly);
+                if (f != null)
+                    return f;
+            }
+
+            throw new UITestFailure($"{o.GetType().Name} has no field {name}");
+        }
+
+        private static object Get(object o, string name) => FieldOf(o, name).GetValue(o);
+
+        private static T Get<T>(object o, string name) => (T)Get(o, name);
+
+        private static void Set(object o, string name, object value) => FieldOf(o, name).SetValue(o, value);
+    }
+}
