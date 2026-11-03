@@ -593,6 +593,41 @@ namespace FerramAerospaceResearch.InGameTests
                 yield return Snap.Shot(ctx, "flight-heatmap");
                 Assert.False(Imgui.IsVisible(L("FARFlightHeatmapOutside"), title), "the vessel is inside the swept range");
                 Assert.True(here.Feasible, $"a jet at Mach 0.8, 3 km is in its envelope: the nearest cell (Mach {here.Mach:F2}, {flight.AltAxis[cj] / 1000:F1} km) is {Describe(here)}");
+
+                // a click on a cell reaches HandleCellClick through the map renderer's mouse handling, which a test has
+                // no mouse for: the call it makes, with the vessel's own cell
+                ctx.Step("A cell clicked: its speed and altitude become AtmosphereAutopilot's cruise targets");
+                Assert.True(AtmosphereAutopilotInterop.Available, "FAR found AtmosphereAutopilot");
+                AaCreateControllers(v);
+                typeof(FlightHeatmapGUI).GetMethod("HandleCellClick", Members).Invoke(heatmapGui, new object[] { v, flight, (ci, cj) });
+                string sent = Get<string>(heatmapGui, "_logMessage");
+                ctx.Record("cruiseTarget", sent);
+                Assert.True(sent.StartsWith("Set "), "the window says the targets were set: " + sent);
+                AaCruiseTargets(v, out float aaAlt, out float aaSpeed);
+                ctx.Record("aaTargets", $"altitude {aaAlt:F0} m, speed {aaSpeed:F1} m/s; cell {flight.AltAxis[cj]:F0} m, {here.SpeedMPerS:F1} m/s");
+                Assert.Near(flight.AltAxis[cj], aaAlt, 1, "AA's cruise altitude is the cell's (m)");
+                Assert.Near(here.SpeedMPerS, aaSpeed, 0.1, "AA's cruise speed is the cell's (m/s)");
+
+                // the window's prediction check: its button is compiled out (_showPredictionLogButton), so the call it makes
+                ctx.Step("The prediction check against the flight, written to the log");
+                var logged = new List<string>();
+                Application.LogCallback onLog = (m, s, t) => logged.Add(m);
+                Application.logMessageReceived += onLog;
+                string result;
+                try
+                {
+                    result = (string)typeof(FlightHeatmapGUI).GetMethod("LogPredictionCheck", Members).Invoke(heatmapGui, new object[] { v, flight });
+                }
+                finally
+                {
+                    Application.logMessageReceived -= onLog;
+                }
+
+                ctx.Record("predictionCheck", result);
+                string check = logged.FirstOrDefault(m => m.Contains("=== FAR heatmap prediction check ==="));
+                Assert.True(result.StartsWith("Logged to KSP.log"), "the check says it logged: " + result);
+                Assert.NotNull(check, "the check in the log");
+                Assert.True(check.Contains("-- MEASURED --") && check.Contains(v.vesselName), "the check has the vessel's measured flight");
             }
             finally
             {
@@ -713,6 +748,48 @@ namespace FerramAerospaceResearch.InGameTests
             var deck = (EditorEngineDeck)Get(deckGui, "_deck");
             o.Engines = deck.EngineCount;
             o.Inlets = deck.InletCount;
+        }
+
+        // ------------------------------------------------------------------------------------------ helpers: AtmosphereAutopilot
+
+        private static Type Aa(string name)
+        {
+            AssemblyLoader.LoadedAssembly aa = AssemblyLoader.loadedAssemblies.FirstOrDefault(a => a.assembly.GetName().Name == "AtmosphereAutopilot");
+            Assert.NotNull(aa, "AtmosphereAutopilot loaded");
+            return aa.assembly.GetType("AtmosphereAutopilot." + name) ?? throw new UITestFailure("AA has no type " + name);
+        }
+
+        /// <summary>AA's modules for the vessel (AtmosphereAutopilot.getVesselModules), by type.</summary>
+        private static IDictionary AaModules(Vessel v)
+        {
+            Type autopilot = Aa("AtmosphereAutopilot");
+            object instance = autopilot.GetProperty("Instance", Members)?.GetValue(null, null);
+            Assert.NotNull(instance, "AA's instance");
+            var modules = (IDictionary)autopilot.GetMethod("getVesselModules", new[] { typeof(Vessel) }).Invoke(instance, new object[] { v });
+            Assert.True(modules != null && modules.Contains(Aa("TopModuleManager")), "AA's module manager for the vessel");
+            return modules;
+        }
+
+        /// <summary>
+        /// AA's controllers made for the vessel, as its master switch first makes them (TopModuleManager.create_context),
+        /// without switching anything on: until then AA has only its module manager, and FAR has no cruise to set.
+        /// </summary>
+        private static void AaCreateControllers(Vessel v)
+        {
+            IDictionary modules = AaModules(v);
+            if (!modules.Contains(Aa("CruiseController")))
+                Aa("TopModuleManager").GetMethod("create_context", Members).Invoke(modules[Aa("TopModuleManager")], null);
+            Assert.True(modules.Contains(Aa("CruiseController")) && modules.Contains(Aa("ProgradeThrustController")),
+                        "AA's cruise and thrust controllers on the vessel");
+        }
+
+        /// <summary>AtmosphereAutopilot's cruise altitude (CruiseController) and speed (ProgradeThrustController) for the vessel, read from AA.</summary>
+        private static void AaCruiseTargets(Vessel v, out float altitudeM, out float speed)
+        {
+            IDictionary modules = AaModules(v);
+            PropertyInfo value = Aa("DelayedFieldFloat").GetProperty("Value");
+            altitudeM = (float)value.GetValue(Get(modules[Aa("CruiseController")], "desired_altitude"), null);
+            speed = (float)value.GetValue(Get(modules[Aa("ProgradeThrustController")], "setpoint_field"), null);
         }
 
         /// <summary>The static analysis' Cd at Mach 0.5, 2 deg, after a few calls (the wings' stall state settles).</summary>
