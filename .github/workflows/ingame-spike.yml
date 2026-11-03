@@ -19,9 +19,13 @@ on:
         required: false
         default: ""
       mods:
-        description: 'mods for every test, ";" separated (Windows only then): CKAN identifiers, or zip URLs (local mods), e.g. RP-1;ROCapsules;RSSTextures2048;https://.../MechJeb2-dev-....zip'
+        description: 'CKAN mods for every test, ";" separated (Windows only then), e.g. RP-1;ROCapsules;RSSTextures2048;MechJeb2-dev'
         required: false
         default: ""
+      repos:
+        description: 'CKAN repositories besides CKAN''s own, ";" separated: names from its list, or name=url'
+        required: false
+        default: MechJeb2-dev
       params:
         description: 'test parameters, "k=v;k=v", e.g. capsules=Gemini;combos=AsIsStock'
         required: false
@@ -36,6 +40,7 @@ env:
   # an editor test, then a flight test; neither needs a mod beyond the test project's own
   TEST_FILTER: ${{ inputs.filter || 'FullyQualifiedName~Far_Regress_Editor|FullyQualifiedName~Far_FlightVsApi_NoiseFloor' }}
   KSPTEST_MODS: ${{ inputs.mods }}
+  KSPTEST_CKAN_REPOS: ${{ inputs.repos }}
   KSPTEST_PARAMS: ${{ inputs.params }}
   DOTNET_CLI_TELEMETRY_OPTOUT: 1
   DOTNET_NOLOGO: 1
@@ -170,23 +175,12 @@ jobs:
         if: env.KSPTEST_MODS != ''
         run: |
           start=$SECONDS
-          IFS=';,' read -ra all <<< "$KSPTEST_MODS"
-          # a zip URL (a mod not on CKAN, such as a MechJeb2 dev build): its GameData folders (or top folders, for a
-          # zip without GameData/) become local mods
-          mods=(); locals=()
-          for m in "${all[@]}"; do
-            m=$(echo "$m" | xargs)
-            case "$m" in
-              https://*.zip)
-                z="$WORK/zips/$(basename "$m" .zip)"; mkdir -p "$z"
-                curl -fsSL -o "$z.zip" "$m"; 7z x -y -bso0 -bsp0 "-o$z" "$z.zip"
-                r="$z"; [ -d "$z/GameData" ] && r="$z/GameData"
-                for f in "$r"/*/; do f="${f%/}"; locals+=("$f"); cp -r "$f" "$KSPTEST_GAME/GameData/"; echo "local mod $(basename "$f") from $m"; done ;;
-              "") ;;
-              *) mods+=("$m") ;;
-            esac
+          IFS=';,' read -ra mods <<< "$KSPTEST_MODS"
+          IFS=';' read -ra repos <<< "$KSPTEST_CKAN_REPOS"
+          # as KspTest adds them to its instances: a name, or name=url
+          for r in "${repos[@]}"; do
+            [ -n "$r" ] && "$KSPTEST_CKAN" repo add --gamedir "$KSPTEST_GAME" --headless ${r%%=*} $([[ $r == *=* ]] && echo "${r#*=}")
           done
-          (IFS=';'; echo "KSPTEST_MODS=${mods[*]}${locals:+;}${locals[*]}") >> "$GITHUB_ENV"
           "$KSPTEST_CKAN" update --gamedir "$KSPTEST_GAME" --headless
           "$KSPTEST_CKAN" install --gamedir "$KSPTEST_GAME" --headless --no-recommends "${mods[@]}"
           "$KSPTEST_CKAN" list --porcelain --gamedir "$KSPTEST_GAME" --headless | wc -l
