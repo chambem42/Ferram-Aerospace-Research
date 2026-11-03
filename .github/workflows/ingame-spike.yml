@@ -19,7 +19,7 @@ on:
         required: false
         default: ""
       mods:
-        description: 'CKAN mods for every test, ";" separated (Windows only then), e.g. RP-1;ROCapsules;MechJeb2;RSSTextures2048'
+        description: 'mods for every test, ";" separated (Windows only then): CKAN identifiers, or zip URLs (local mods), e.g. RP-1;ROCapsules;RSSTextures2048;https://.../MechJeb2-dev-....zip'
         required: false
         default: ""
       params:
@@ -170,7 +170,23 @@ jobs:
         if: env.KSPTEST_MODS != ''
         run: |
           start=$SECONDS
-          IFS=';,' read -ra mods <<< "$KSPTEST_MODS"
+          IFS=';,' read -ra all <<< "$KSPTEST_MODS"
+          # a zip URL (a mod not on CKAN, such as a MechJeb2 dev build): its GameData folders (or top folders, for a
+          # zip without GameData/) become local mods
+          mods=(); locals=()
+          for m in "${all[@]}"; do
+            m=$(echo "$m" | xargs)
+            case "$m" in
+              https://*.zip)
+                z="$WORK/zips/$(basename "$m" .zip)"; mkdir -p "$z"
+                curl -fsSL -o "$z.zip" "$m"; 7z x -y -bso0 -bsp0 "-o$z" "$z.zip"
+                r="$z"; [ -d "$z/GameData" ] && r="$z/GameData"
+                for f in "$r"/*/; do f="${f%/}"; locals+=("$f"); cp -r "$f" "$KSPTEST_GAME/GameData/"; echo "local mod $(basename "$f") from $m"; done ;;
+              "") ;;
+              *) mods+=("$m") ;;
+            esac
+          done
+          (IFS=';'; echo "KSPTEST_MODS=${mods[*]}${locals:+;}${locals[*]}") >> "$GITHUB_ENV"
           "$KSPTEST_CKAN" update --gamedir "$KSPTEST_GAME" --headless
           "$KSPTEST_CKAN" install --gamedir "$KSPTEST_GAME" --headless --no-recommends "${mods[@]}"
           "$KSPTEST_CKAN" list --porcelain --gamedir "$KSPTEST_GAME" --headless | wc -l
