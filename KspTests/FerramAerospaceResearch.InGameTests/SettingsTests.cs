@@ -220,13 +220,11 @@ namespace FerramAerospaceResearch.InGameTests
         /// <summary>
         /// The Atm Composition tab: the control surface time constants typed in are FARAeroData's (what the control
         /// surfaces read); the home body's viscosity and reference temperature typed in are its FAR atmosphere, no
-        /// other body's; showing another body's data without typing leaves that body as it was. The last fails on
-        /// FAR as it is: the field shows the value as F5 text and parses it back each frame, so 1.7894e-5 becomes 2e-5
-        /// (GUIUtils.TextEntryForDouble).
+        /// other body's; showing another body's data without typing leaves that body as it was, though the field shows
+        /// it rounded to 5 decimals (GUIUtils.TextEntryForDouble parsed that text back every frame, so just showing the
+        /// Sun's 1.7894e-5 made it 2e-5).
         /// </summary>
-        // Explicit: fails on master, a FAR bug: GUIUtils.TextEntryForDouble formats the value "F5" and returns its parse every
-        // frame, so just showing a body rounds its viscosity (the Sun's 1.7894e-5 became 2e-5, measured; Kerbin's alike)
-        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.SpaceCenter, TimeoutSec = 600)]
+        [UITest(Kind = "Check", StartsAt = StartState.SpaceCenter, TimeoutSec = 600)]
         public static IEnumerator Settings_AtmTabEditsBodyData(TestContext ctx)
         {
             CelestialBody home = FlightGlobals.GetHomeBody();
@@ -281,8 +279,8 @@ namespace FerramAerospaceResearch.InGameTests
                 ctx.Record("other", $"{other.bodyName}: viscosity {before.ReferenceViscosity:G6} -> {shown.ReferenceViscosity:G6}");
                 Assert.Near(before.ReferenceTemperature, shown.ReferenceTemperature, 1e-9,
                             other.bodyName + "'s reference temperature, only shown");
-                Assert.Near(before.ReferenceViscosity, shown.ReferenceViscosity, 1e-6 * before.ReferenceViscosity,
-                            other.bodyName + "'s viscosity, only shown (the field rounds it to 5 decimals)");
+                Assert.Equal(before.ReferenceViscosity, shown.ReferenceViscosity,
+                             other.bodyName + "'s viscosity, only shown (the field shows it rounded to 5 decimals)");
             }
             finally
             {
@@ -306,9 +304,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// FARSettingsScenarioModule node, and a quickload brings them back to a new module (the torque arrows from the
         /// file, not memory: they are flipped back before the load), and the dialog shows the preset again.
         /// </summary>
-        // Explicit, unresolved: after the quicksave and quickload the preset index read 4 (FAR's default), not the 5 chosen;
-        // FAR's OnSave/OnLoad do save and read "index", so the test's quickload path or the presets' own index is suspect
-        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.SpaceCenter, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.SpaceCenter, TimeoutSec = 900)]
         public static IEnumerator Settings_DifficultyPresetSurvivesQuickload(TestContext ctx)
         {
             ctx.Step("The presets are FARDifficultyPresets.cfg's");
@@ -387,6 +383,7 @@ namespace FerramAerospaceResearch.InGameTests
             {
                 CloseDebugWindow();
                 RestoreScenario(saved, customAtStart);
+                SavePersistent();
                 DeleteSave();
                 files.Restore();
             }
@@ -398,8 +395,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// pass count is taken as 0, and no preset changes. A quicksave and quickload bring the custom settings back;
         /// "Switch Back To Presets" then puts FAR on one of the presets.
         /// </summary>
-        // Explicit, unresolved: custom mode (-1) read back as preset 4 after the quickload (see the preset test above)
-        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.SpaceCenter, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.SpaceCenter, TimeoutSec = 900)]
         public static IEnumerator Settings_CustomDifficultySurvivesQuickload(TestContext ctx)
         {
             List<FARDifficultyAndExactnessSettings> presets = FARSettingsScenarioModule.FARDifficultyPresetsConfig.Values;
@@ -464,6 +460,7 @@ namespace FerramAerospaceResearch.InGameTests
             {
                 CloseDebugWindow();
                 RestoreScenario(saved, customAtStart);
+                SavePersistent();
                 for (int i = 0; i < presets.Count && i < presetsAtStart.Count; i++)
                     CopyValues(presetsAtStart[i], presets[i]);
                 DeleteSave();
@@ -795,18 +792,24 @@ namespace FerramAerospaceResearch.InGameTests
             Assert.True(File.Exists(SavePath), "the quicksave " + SavePath);
         }
 
-        /// <summary>The test's save loaded and started at the Space Center, as a quickload does; waits for its new settings module.</summary>
+        /// <summary>
+        ///     The test's save loaded at the Space Center as KSP's quickload loads one that does not start in flight
+        ///     (QuickSaveLoad.onQuickloadPipelineFinished): the game read, its scenario modules brought up to date, written
+        ///     as the persistent save, and the Space Center loaded, which loads the persistent save. (Starting the loaded
+        ///     game in place does not do it: the Space Center still loads the persistent save, and FAR's settings come
+        ///     from whatever it last held.) Waits for the new settings module.
+        /// </summary>
         private static IEnumerator QuickLoad(FARSettingsScenarioModule old)
         {
             string folder = HighLogic.SaveFolder;
             ConfigNode node = GamePersistence.LoadSFSFile(SaveName, folder);
             Assert.NotNull(node, "the quicksave read back");
-            Game game = GamePersistence.LoadGameCfg(node, folder, true, false);
+            Game game = GamePersistence.LoadGameCfg(node, SaveName, true, false);
             Assert.NotNull(game, "the quicksave loaded as a game");
-            HighLogic.CurrentGame = game;
-            HighLogic.SaveFolder = folder;
-            game.startScene = GameScenes.SPACECENTER;
-            game.Start();
+            GamePersistence.UpdateScenarioModules(game);
+            GameEvents.onGameStatePostLoad.Fire(node);
+            GamePersistence.SaveGame(game, "persistent", folder, SaveMode.OVERWRITE);
+            HighLogic.LoadScene(GameScenes.SPACECENTER);
             InputLockManager.ClearControlLocks();
             yield return Wait.Until(() => HighLogic.LoadedScene == GameScenes.SPACECENTER &&
                                           FARSettingsScenarioModule.Instance != null &&
@@ -816,6 +819,19 @@ namespace FerramAerospaceResearch.InGameTests
                                     300, "the Space Center reloaded from the quicksave, with a new FAR settings module", shot: false);
             yield return Wait.Seconds(2);
             Ugui.DismissPopups();
+        }
+
+        /// <summary>The persistent save written again from the game as it is: after QuickLoad wrote the test's settings into it.</summary>
+        private static void SavePersistent()
+        {
+            try
+            {
+                GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE);
+            }
+            catch (Exception e)
+            {
+                Log.Warn("SettingsTests: saving the persistent save again: " + e.Message);
+            }
         }
 
         /// <summary>The FARSettingsScenarioModule node of the test's save, read from the file.</summary>
