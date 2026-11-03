@@ -120,9 +120,10 @@ namespace FerramAerospaceResearch.InGameTests
             ctx.Record("drag", $"applied {drag:F2} kN, snapshot {predDrag:F2}");
             ctx.Record("force", $"applied |F| {total:F2} kN, snapshot {predTotal:F2}");
             if (againstApplied)
+            {
                 Assert.Near(drag, predDrag, 0.03 * drag + 0.05, "the snapshot's drag against the drag FAR applies");
-            if (againstApplied)
                 Assert.Near(total, predTotal, 0.03 * total + 0.05, "the snapshot's total force against the one FAR applies");
+            }
 
             // the snapshot reads no live game state: a worker thread gets the same answer
             var worker = System.Threading.Tasks.Task.Run(() =>
