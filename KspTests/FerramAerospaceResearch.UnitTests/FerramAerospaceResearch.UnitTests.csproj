@@ -42,6 +42,10 @@
         <!-- the game's other assemblies FAR's and KSP's types may load (not mscorlib or System*: the test runs on .NET's) -->
         <None Include="$(KspManaged)/UnityEngine.*.dll;$(KspManaged)/KSPAssets.dll;$(KspManaged)/Assembly-CSharp*.dll"
               CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" Visible="false" />
+        <!-- KSPBurst's Unity packages (FAR's Burst code; its config reflection walks those types' attributes), where the
+             install has them (FAR's build dependencies put them in KSPBuildTools' KSP_ROOT too) -->
+        <None Include="$(KspDir)/GameData/000_KSPBurst/Plugins/Unity.*.dll"
+              CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" Visible="false" />
     </ItemGroup>
 
     <Target Name="FarUnitTestsCheckInputs" BeforeTargets="ResolveAssemblyReferences">
