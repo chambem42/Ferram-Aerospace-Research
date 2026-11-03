@@ -134,6 +134,7 @@ namespace FerramAerospaceResearch.InGameTests
                 ctx.Step("held at Mach 0.5, 3 km, 5 deg");
                 FarFlightProbe.Condition c = Cruise(5);
                 yield return FlightTests.Airborne(c);
+                yield return Snap.Shot(ctx, "flight-data");
                 var samples = new List<FarFlightProbe.Sample>();
                 yield return FarFlightProbe.Hold(c, 25, 10, samples, predict: false);
 
@@ -423,6 +424,7 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.True(wingCl.b > 0.1, $"a lifting wing is tinted blue ({wingCl.b:F3})");
                 Assert.True(wingCl.r < 0.01, $"no red without Tint Cd ({wingCl.r:F3})");
 
+                yield return Snap.Shot(ctx, "tint-cl");
                 ctx.Step("Tint Cd");
                 yield return Imgui.Toggle(tintCl, false, Far.SettingsWindow, exact: true);
                 yield return Imgui.Toggle(tintCd, true, Far.SettingsWindow, exact: true);

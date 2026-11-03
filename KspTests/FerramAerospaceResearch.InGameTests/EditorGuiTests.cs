@@ -56,6 +56,7 @@ namespace FerramAerospaceResearch.InGameTests
                 yield return Imgui.SetTextAfterLabel(L("FAREditorStaticGraphPtCount"), "30", Window);
                 yield return Imgui.SetTextAfterLabel(L("FARAbbrevMach"), "0.3", Window);
                 yield return Imgui.Click(L("FAREditorStaticSweepAoA"), Window);
+                yield return Snap.Shot(ctx, "aoa-sweep");
 
                 Dictionary<string, Line> lines = GraphLines(graphGui);
                 Line clLine = Series(lines, L("FARAbbrevCl"));
@@ -130,6 +131,7 @@ namespace FerramAerospaceResearch.InGameTests
                 yield return Imgui.SetTextAfterLabel(L("FAREditorStaticGraphPtCount"), "36", Window);
                 yield return Imgui.SetTextAfterLabel(L("FARAbbrevAoA"), "2", Window);
                 yield return Imgui.Click(L("FAREditorStaticSweepMach"), Window);
+                yield return Snap.Shot(ctx, "mach-sweep");
 
                 Dictionary<string, Line> lines = GraphLines(graphGui);
                 Line clLine = Series(lines, L("FARAbbrevCl"));
@@ -192,6 +194,7 @@ namespace FerramAerospaceResearch.InGameTests
                 ctx.Step("Calculate stability derivatives at 0.5 km, Mach 0.35");
                 var holder = new StabilityDerivOutput[1];
                 yield return CalculateStability("0.5", "0.35", holder);
+                yield return Snap.Shot(ctx, "stability-derivatives");
                 StabilityDerivOutput o = holder[0];
 
                 CelestialBody body = FlightGlobals.GetHomeBody();
@@ -289,6 +292,7 @@ namespace FerramAerospaceResearch.InGameTests
                 ctx.Step("Longitudinal: w0 = 5 m/s for 10 s");
                 yield return Imgui.Select(L("FAREditorSimModeLong"), Window);
                 yield return RunSim(new[] { "5", "0", "0", "0" });
+                yield return Snap.Shot(ctx, "longitudinal-sim");
                 Dictionary<string, Line> lon = GraphLines(simGui);
                 Line w = Series(lon, "w"), q = Series(lon, "q"), u = Series(lon, "u");
                 RecordSim(ctx, "lon", lon);
@@ -302,6 +306,7 @@ namespace FerramAerospaceResearch.InGameTests
                 ctx.Step("Lateral: beta0 = 2 deg for 10 s");
                 yield return Imgui.Select(L("FAREditorSimModeLat"), Window);
                 yield return RunSim(new[] { "2", "0", "0", "0" });
+                yield return Snap.Shot(ctx, "lateral-sim");
                 Dictionary<string, Line> lat = GraphLines(simGui);
                 Line beta = Series(lat, "β"), p = Series(lat, "p"), yawRate = Series(lat, "r");
                 RecordSim(ctx, "lat", lat);
@@ -417,6 +422,7 @@ namespace FerramAerospaceResearch.InGameTests
 
                 Assert.True(pairs >= 1, "the craft has mirrored wing panels to compare");
 
+                yield return Snap.Shot(ctx, "components-table");
                 ctx.Step("Color by Cl, then leave the tab");
                 SelectOption(tintDropdown, "Cl");
                 yield return Wait.Frames(3);
@@ -460,6 +466,7 @@ namespace FerramAerospaceResearch.InGameTests
                 ctx.Step("Heatmaps: Mach 0.35-0.95 x 0-6 km, 3 x 3, with stability");
                 var sw = new SweepOut();
                 yield return Sweep(new[] { "0.35", "0.95", "0", "6", "3", "3" }, true, true, sw);
+                yield return Snap.Shot(ctx, "stability-heatmap");
                 cachePath = sw.CachePath;
                 bool stabilityOnly = sw.StabilityOnly;
                 ctx.Record("stabilityOnly", stabilityOnly);

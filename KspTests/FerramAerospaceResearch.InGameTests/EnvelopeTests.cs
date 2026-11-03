@@ -80,6 +80,7 @@ namespace FerramAerospaceResearch.InGameTests
                 ctx.Step("Heatmaps: Mach 0.3-2.7 x 0-40 km, 5 x 5, with stability, multithreaded");
                 var sw = new SweepOut();
                 yield return Sweep(new[] { "0.3", "2.7", "0", "40", "5", "5" }, true, true, sw);
+                yield return Snap.Shot(ctx, "envelope");
                 cachePath = sw.CachePath;
 
                 Assert.False(sw.StabilityOnly, "with AJE the sweep is an envelope sweep, not stability-only");
@@ -287,6 +288,7 @@ namespace FerramAerospaceResearch.InGameTests
                 ctx.Step("Full throttle, Mach 0-2 x 0-15 km, 5 x 4");
                 var full = new DeckOut();
                 yield return SampleDeck(new[] { "1", "0", "2", "0", "15", "5", "4" }, full);
+                yield return Snap.Shot(ctx, "engine-deck");
                 Assert.Equal(nJets, full.Engines, "the deck samples the craft's jets");
                 Assert.Equal(nInlets, full.Inlets, "the deck counts the craft's AJE inlets");
                 Assert.Equal(Localizer.Format("FAREngineDeckStatus", nJets.ToString(CultureInfo.InvariantCulture), nInlets.ToString(CultureInfo.InvariantCulture)),
@@ -581,6 +583,7 @@ namespace FerramAerospaceResearch.InGameTests
                 string predicted = Localizer.Format("FARFlightHeatmapPred", Inv(here.Mach, "F2"), Inv(flight.AltAxis[cj] / 1000, "F1"), verdict);
                 ctx.Record("here", $"cell [{ci},{cj}] {Describe(here)}");
                 yield return Imgui.WaitVisible(predicted, title, 10);
+                yield return Snap.Shot(ctx, "flight-heatmap");
                 Assert.False(Imgui.IsVisible(L("FARFlightHeatmapOutside"), title), "the vessel is inside the swept range");
                 Assert.True(here.Feasible, $"a jet at Mach 0.8, 3 km is in its envelope: the nearest cell (Mach {here.Mach:F2}, {flight.AltAxis[cj] / 1000:F1} km) is {Describe(here)}");
             }
@@ -647,6 +650,7 @@ namespace FerramAerospaceResearch.InGameTests
                 yield return Imgui.Toggle(L("FARHeatmapsIncludeStab"), true, Window);
                 yield return Imgui.Click(L("FARStabHeatmapRun"), Window);
                 yield return Wait.Until(() => !hm.IsSweepRunning, 600, "the stability sweep", shot: false);
+                yield return Snap.Shot(ctx, "stability-only-map");
                 var results = Get<List<HeatmapResult>>(hm, "_results");
                 Assert.True(results != null && !ReferenceEquals(results, before), "the Run button swept a new map");
                 Assert.True(Get<bool>(hm, "_stabilityOnly"), "the sweep is stability-only");

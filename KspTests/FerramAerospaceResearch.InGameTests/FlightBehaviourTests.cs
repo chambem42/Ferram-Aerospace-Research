@@ -418,6 +418,7 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.True(chute.chuteTemperature > 200 && chute.chuteTemperature < RealChuteFAR.maxTemp,
                             $"the canopy's temperature ({chute.chuteTemperature:F1} K) below its limit");
 
+                yield return Snap.Shot(ctx, "under-canopy");
                 ctx.Step("the chute's info window");
                 chute.GUIToggleWindow();
                 yield return Imgui.WaitWindow(window);
