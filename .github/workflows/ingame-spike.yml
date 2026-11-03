@@ -18,6 +18,14 @@ on:
         description: dotnet test --filter
         required: false
         default: ""
+      mods:
+        description: 'CKAN mods for every test, ";" separated (Windows only then), e.g. RP-1;ROCapsules;MechJeb2;RSSTextures2048'
+        required: false
+        default: ""
+      params:
+        description: 'test parameters, "k=v;k=v", e.g. capsules=Gemini;combos=AsIsStock'
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -27,6 +35,8 @@ env:
   GAME_RELEASE: ksp-1.12.5
   # an editor test, then a flight test; neither needs a mod beyond the test project's own
   TEST_FILTER: ${{ inputs.filter || 'FullyQualifiedName~Far_Regress_Editor|FullyQualifiedName~Far_FlightVsApi_NoiseFloor' }}
+  KSPTEST_MODS: ${{ inputs.mods }}
+  KSPTEST_PARAMS: ${{ inputs.params }}
   DOTNET_CLI_TELEMETRY_OPTOUT: 1
   DOTNET_NOLOGO: 1
 
@@ -76,12 +86,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { name: windows, os: windows-2022, platform: windows }
-          - { name: linux, os: ubuntu-24.04, platform: linux }
+        # a run with mods (RP-1 and the like) is Windows alone
+        include: ${{ fromJSON(inputs.mods && '[{"name":"windows","os":"windows-2022","platform":"windows"}]' || '[{"name":"windows","os":"windows-2022","platform":"windows"},{"name":"linux","os":"ubuntu-24.04","platform":"linux"}]') }}
     name: test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 150
+    timeout-minutes: ${{ inputs.mods && 330 || 150 }}
     defaults:
       run:
         shell: bash
@@ -154,6 +163,19 @@ jobs:
         run: |
           mkdir -p "$WORK/ckan"
           curl -fsSL -o "$KSPTEST_CKAN" https://github.com/KSP-CKAN/CKAN/releases/latest/download/ckan.exe
+
+      # the RP-1 and MechJeb test assemblies build empty against a game without those mods, so they go into the stock
+      # game too (an instance does not copy its source's mods; CKAN's download cache makes the instance's install quick)
+      - name: Mods for the build
+        if: env.KSPTEST_MODS != ''
+        run: |
+          start=$SECONDS
+          IFS=';,' read -ra mods <<< "$KSPTEST_MODS"
+          "$KSPTEST_CKAN" update --gamedir "$KSPTEST_GAME" --headless
+          "$KSPTEST_CKAN" install --gamedir "$KSPTEST_GAME" --headless --no-recommends "${mods[@]}"
+          "$KSPTEST_CKAN" list --porcelain --gamedir "$KSPTEST_GAME" --headless | wc -l
+          du -sh "$KSPTEST_GAME/GameData"
+          echo "installed in $((SECONDS - start)) s"
 
       # batchmode's screen on Windows is no bigger than the desktop (the runner's is 1024x768); without the change the
       # shots are drawn bigger than the screen instead
@@ -249,7 +271,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [windows, linux]
+        name: ${{ fromJSON(inputs.mods && '["windows"]' || '["windows","linux"]') }}
     name: gallery (${{ matrix.name }})
     runs-on: ubuntu-24.04
     steps:

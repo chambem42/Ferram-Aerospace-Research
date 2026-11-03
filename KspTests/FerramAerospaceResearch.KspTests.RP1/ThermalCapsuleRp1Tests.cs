@@ -53,8 +53,9 @@ namespace FerramAerospaceResearch.KspTests.RP1
             voxelField = dv.GetField("voxelThermalAreas", BindingFlags.Public | BindingFlags.Static);
             restoreStock = Reflect.TryFindType("FerramAerospaceResearch.FARAeroComponents.ModularFlightIntegratorRegisterer")
                 ?.GetMethod("RestoreStockOcclusion", BindingFlags.Public | BindingFlags.Static);
-            Type ovf = Reflect.TryFindType("KSPCommunityFixes.BugFixes.OcclusionVehicleFrame") ?? throw new UITestFailure("this KSPCF has no OcclusionVehicleFrame (#436)");
-            occlEnabled = ovf.GetProperty("IsEnabled", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static);
+            // absent in KSPCF releases before #436: only the Stock combos run there
+            occlEnabled = Reflect.TryFindType("KSPCommunityFixes.BugFixes.OcclusionVehicleFrame")
+                ?.GetProperty("IsEnabled", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static);
         }
 
         private static bool? Voxel
@@ -68,7 +69,21 @@ namespace FerramAerospaceResearch.KspTests.RP1
             }
         }
 
-        private static bool Occl { get => (bool)occlEnabled.GetValue(null, null); set => occlEnabled.SetValue(null, value, null); }
+        // null: a KSPCF without OcclusionVehicleFrame, which is stock occlusion
+        private static bool? Occl
+        {
+            get => occlEnabled == null ? (bool?)null : (bool)occlEnabled.GetValue(null, null);
+            set
+            {
+                if (value == null) return;
+                if (occlEnabled == null)
+                {
+                    if (value.Value) throw new UITestFailure("this KSPCF has no OcclusionVehicleFrame (#436): use the Stock combos");
+                    return;
+                }
+                occlEnabled.SetValue(null, value.Value, null);
+            }
+        }
 
         private static void Apply(Combo c)
         {
@@ -81,7 +96,7 @@ namespace FerramAerospaceResearch.KspTests.RP1
         }
 
         /// <summary>
-        /// Params: capsules (Mercury+Gemini+Apollo), craft (absolute path of a craft to fly instead, as "User"), combos (Pr156Occl+Pr156Stock+VoxelOccl+VoxelStock; AsIsOccl/AsIsStock leave FAR alone, for a FAR without the option), peKm (30), pes ("+"-separated perigees instead), apKm (250; the sim starts in a 250 km circular orbit), lanDeg (0), argPeDeg (0), orients ("lan:argPe+..." instead of those two),
+        /// Params: capsules (Mercury+Gemini+Apollo), craft (absolute path of a craft to fly instead, as "User"), combos (Pr156Occl+Pr156Stock+VoxelOccl+VoxelStock; AsIsOccl/AsIsStock leave FAR alone, for a FAR without the option; only the *Stock ones run with a KSPCF before #436), peKm (30), pes ("+"-separated perigees instead), apKm (250; the sim starts in a 250 km circular orbit), lanDeg (0), argPeDeg (0), orients ("lan:argPe+..." instead of those two),
         /// entryAltKm (110), incDeg (28.6), aoa (180 = heat shield first), aoas ("+"-separated instead), hold (steer: set angular velocity; torque: rigidbody forces; part: Part.AddForce/AddTorque, for Principia; torque and part add an integral trim), holdWn (15), place (teleport|sim), editorOnly, shots, endAltKm (20), hyper (10).
         /// </summary>
         [UITest("Far_ThermalCapsules_RP1", Kind = "Measure", NewGame = "career", Requires = "RP-1", StartsAt = StartState.SpaceCenter, TimeoutSec = 10800)]
@@ -116,7 +131,7 @@ namespace FerramAerospaceResearch.KspTests.RP1
             Bind();
             ctx.Record("kspcfPatches", KspcfPatchState());
             bool? startVoxel = Voxel;
-            bool startOccl = Occl;
+            bool? startOccl = Occl;
             ctx.Record("startOptions", $"voxelThermalAreas {startVoxel}, OcclusionVehicleFrame {startOccl}");
 
             var summary = new StringBuilder("capsule,combo,part,index,peakSkinK,skinMaxK,peakSkinFrac,peakIntK,intMaxK,peakIntFrac,ablatorUsed,radArea,expArea,convArea,convAreaMult,convTempMult,skinExpFrac,skinMass,crossSection\n");
@@ -259,7 +274,7 @@ namespace FerramAerospaceResearch.KspTests.RP1
             Ugui.DismissPopups();
             Bind();
             bool? startVoxel = Voxel;
-            bool startOccl = Occl;
+            bool? startOccl = Occl;
             var inv = System.Globalization.CultureInfo.InvariantCulture;
             string[] comboNames = ctx.Param("combos", "Pr156Stock+VoxelStock").Split('+');
             var all = new[]
