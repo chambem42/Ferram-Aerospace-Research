@@ -106,6 +106,8 @@ jobs:
           echo "KSPTEST_CKAN=$w/ckan/ckan.exe" >> "$GITHUB_ENV"
           echo "KSPTEST_KSP_ARGS=-batchmode" >> "$GITHUB_ENV"
           echo "KSPTEST_TEXTURES=low" >> "$GITHUB_ENV"
+          # 4:3 like Linux batchmode's fixed 640x480 screen, which KspTest's shots draw at twice the size
+          echo "KSPTEST_WINDOW=1280x960" >> "$GITHUB_ENV"
           echo "FarGameData=$w/far/FerramAerospaceResearch" >> "$GITHUB_ENV"
           if [ "${{ matrix.platform }}" = windows ]; then
             powershell -NoProfile -Command "Get-CimInstance Win32_VideoController | Select-Object Name, DriverVersion | Format-Table -AutoSize; Get-CimInstance Win32_ComputerSystem | Select-Object NumberOfLogicalProcessors, @{n='RAM GiB';e={[math]::Round(\$_.TotalPhysicalMemory/1GB,1)}} | Format-Table -AutoSize; query user; exit 0"
@@ -152,6 +154,43 @@ jobs:
         run: |
           mkdir -p "$WORK/ckan"
           curl -fsSL -o "$KSPTEST_CKAN" https://github.com/KSP-CKAN/CKAN/releases/latest/download/ckan.exe
+
+      # batchmode's screen on Windows is no bigger than the desktop (the runner's is 1024x768); without the change the
+      # shots are drawn bigger than the screen instead
+      - name: Desktop size
+        if: matrix.platform == 'windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Add-Type @'
+          using System.Runtime.InteropServices;
+          public static class Desktop
+          {
+              [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+              public struct DEVMODE
+              {
+                  [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+                  public short dmSpecVersion, dmDriverVersion, dmSize, dmDriverExtra;
+                  public int dmFields, dmPositionX, dmPositionY, dmDisplayOrientation, dmDisplayFixedOutput;
+                  public short dmColor, dmDuplex, dmYResolution, dmTTOption, dmCollate;
+                  [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+                  public short dmLogPixels;
+                  public int dmBitsPerPel, dmPelsWidth, dmPelsHeight, dmDisplayFlags, dmDisplayFrequency;
+                  public int dmICMMethod, dmICMIntent, dmMediaType, dmDitherType, dmReserved1, dmReserved2, dmPanningWidth, dmPanningHeight;
+              }
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool EnumDisplaySettings(string device, int mode, ref DEVMODE dm);
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int ChangeDisplaySettings(ref DEVMODE dm, int flags);
+          }
+          '@
+          function Mode([int]$i) { $dm = New-Object Desktop+DEVMODE; $dm.dmSize = [Runtime.InteropServices.Marshal]::SizeOf($dm); if ([Desktop]::EnumDisplaySettings([NullString]::Value, $i, [ref]$dm)) { $dm } }
+          $cur = Mode -1
+          "desktop $($cur.dmPelsWidth)x$($cur.dmPelsHeight)"
+          $modes = for ($i = 0; ($m = Mode $i); $i++) { "$($m.dmPelsWidth)x$($m.dmPelsHeight)" }
+          "modes: " + (($modes | Select-Object -Unique) -join ' ')
+          $cur.dmPelsWidth = 1280; $cur.dmPelsHeight = 960; $cur.dmFields = 0x80000 -bor 0x100000
+          "ChangeDisplaySettings: $([Desktop]::ChangeDisplaySettings([ref]$cur, 0)) (0 is success)"
+          $now = Mode -1
+          "desktop now $($now.dmPelsWidth)x$($now.dmPelsHeight)"
 
       - name: Virtual display
         if: matrix.platform == 'linux'
