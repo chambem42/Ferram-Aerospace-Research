@@ -234,3 +234,43 @@ jobs:
             ${{ runner.temp }}/trx
             ${{ runner.temp }}/diag
           if-no-files-found: warn
+
+  # one HTML page per leg, the screenshots in it, uploaded unzipped so it is a single file. Its own job, from the
+  # uploaded results only: a pip install never runs beside the extracted game.
+  gallery:
+    needs: test
+    if: always()
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [windows, linux]
+    name: gallery (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v6
+        id: results
+        continue-on-error: true
+        with:
+          name: results-${{ matrix.name }}
+          path: ${{ runner.temp }}/results-${{ matrix.name }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build the page
+        run: |
+          python -m pip install --quiet --disable-pip-version-check pillow || echo "no Pillow: the page embeds the PNGs"
+          python .github/scripts/shots_gallery.py "$RUNNER_TEMP/results-${{ matrix.name }}/results" \
+            "$RUNNER_TEMP/gallery/screenshots-${{ matrix.name }}.html" \
+            --title "FAR in-game tests: ${{ matrix.name }}, ${GITHUB_SHA::8}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: ${{ runner.temp }}/gallery/screenshots-${{ matrix.name }}.html
+          archive: false
