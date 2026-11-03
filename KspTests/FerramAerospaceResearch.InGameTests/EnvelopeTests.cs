@@ -489,8 +489,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// editor's; it reads back the vessel's Mach and altitude, and names the nearest cell and that cell's verdict,
         /// which for a jet at Mach 0.8, 3 km is sustainable level flight.
         /// </summary>
-        // Explicit, unresolved: at Mach 0.8, 3 km the window's nearest cell read Mach 0.40, 3.0 km, "no trim"
-        [UITest(Kind = "Check", Explicit = true, Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Plane, CraftDir = "SPH",
+        [UITest(Kind = "Check", Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Plane, CraftDir = "SPH",
                 LaunchSite = "Runway", TimeoutSec = 1200)]
         public static IEnumerator Envelope_FlightWindowShowsTheVesselsEnvelope(TestContext ctx)
         {
@@ -563,6 +562,15 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.True(Imgui.IsVisible(ceilingText, title), $"the window shows the editor's ceiling ('{ceilingText}')");
 
                 ctx.Step("The vessel's own point on the map");
+                // placed again: at zero throttle it has coasted down since (to Mach 0.54 by here, measured), and the
+                // window reads the vessel as it is, nearer the Mach 0.4 column than the 0.8 one
+                yield return FarFlightProbe.Place(cruise);
+                ctx.Record("placed", $"mach {v.mach:F3}, srfSpeed {v.srfSpeed:F1} m/s, speed of sound {v.speedOfSound:F1} m/s");
+                // the vessel's Mach (what the window reads) comes a few frames after its speed off rails
+                yield return Wait.Until(() => v.speedOfSound > 0 && Math.Abs(v.mach - v.srfSpeed / v.speedOfSound) < 0.01, 10,
+                                        "the vessel's Mach caught up with its speed", shot: false);
+                yield return Wait.Frames(3);
+                ctx.Record("reading", $"mach {v.mach:F3}, srfSpeed {v.srfSpeed:F1} m/s");
                 Imgui.WindowInfo w = Imgui.FindWindow(title);
                 string nowPrefix = Localizer.Format("FARFlightHeatmapNow", "\u0001", "\u0002").Split('\u0001')[0];
                 string now = w?.Labels.FirstOrDefault(l => l.StartsWith(nowPrefix, StringComparison.Ordinal));
