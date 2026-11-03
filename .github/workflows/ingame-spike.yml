@@ -185,9 +185,15 @@ jobs:
           function Mode([int]$i) { $dm = New-Object Desktop+DEVMODE; $dm.dmSize = [Runtime.InteropServices.Marshal]::SizeOf($dm); if ([Desktop]::EnumDisplaySettings([NullString]::Value, $i, [ref]$dm)) { $dm } }
           $cur = Mode -1
           "desktop $($cur.dmPelsWidth)x$($cur.dmPelsHeight)"
-          $modes = for ($i = 0; ($m = Mode $i); $i++) { "$($m.dmPelsWidth)x$($m.dmPelsHeight)" }
-          "modes: " + (($modes | Select-Object -Unique) -join ' ')
-          $cur.dmPelsWidth = 1280; $cur.dmPelsHeight = 960; $cur.dmFields = 0x80000 -bor 0x100000
+          $modes = for ($i = 0; ($m = Mode $i); $i++) { $m }
+          "modes: " + (($modes | ForEach-Object { "$($_.dmPelsWidth)x$($_.dmPelsHeight)" } | Select-Object -Unique) -join ' ')
+          # the smallest that holds the window (the runner has no 1280x960 itself)
+          $w, $h = $env:KSPTEST_WINDOW -split 'x' | ForEach-Object { [int]$_ }
+          $fit = $modes | Where-Object { $_.dmPelsWidth -ge $w -and $_.dmPelsHeight -ge $h } |
+            Sort-Object { $_.dmPelsWidth * $_.dmPelsHeight } | Select-Object -First 1
+          if (-not $fit) { "no mode holds ${w}x${h}"; exit 0 }
+          $cur.dmPelsWidth = $fit.dmPelsWidth; $cur.dmPelsHeight = $fit.dmPelsHeight; $cur.dmFields = 0x80000 -bor 0x100000
+          "setting $($fit.dmPelsWidth)x$($fit.dmPelsHeight)"
           "ChangeDisplaySettings: $([Desktop]::ChangeDisplaySettings([ref]$cur, 0)) (0 is success)"
           $now = Mode -1
           "desktop now $($now.dmPelsWidth)x$($now.dmPelsHeight)"
