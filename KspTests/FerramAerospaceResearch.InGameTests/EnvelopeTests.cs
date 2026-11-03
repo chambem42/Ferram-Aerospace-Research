@@ -420,6 +420,7 @@ namespace FerramAerospaceResearch.InGameTests
                 int nM = a.MachAxis.Length, nA = a.AltAxis.Length;
                 Assert.Equal(serial.CellsTotal, serial.CellsDone, "the serial sweep counted every cell it promised");
                 int compared = 0, trimMismatch = 0;
+                double dAlpha = 0, dDrag = 0, dThrust = 0;
                 for (int k = 0; k < a.EnvelopeSamples.Length; k++)
                 {
                     RecordGrid(ctx, $"mt{k}", a.EnvelopeSamples[k], nM, nA);
@@ -431,8 +432,6 @@ namespace FerramAerospaceResearch.InGameTests
                             string at = $"Mach {a.MachAxis[i]:F2}, {a.AltAxis[j] / 1000:F0} km, mass sample {k}";
                             if (x.Trimmed != y.Trimmed)
                             {
-                                // FAR's stall model carries hysteresis across calls, so a cell at the edge of the
-                                // stall can trim in one sweep and not the other
                                 trimMismatch++;
                                 ctx.Record("trimMismatch " + at, $"multithreaded {Describe(x)}, serial {Describe(y)}");
                                 continue;
@@ -441,18 +440,26 @@ namespace FerramAerospaceResearch.InGameTests
                             if (!x.Trimmed || x.Extrapolated || y.Extrapolated || x.Alpha > 10 || y.Alpha > 10)
                                 continue;
                             compared++;
+                            dAlpha = Math.Max(dAlpha, Math.Abs(x.Alpha - y.Alpha));
+                            dDrag = Math.Max(dDrag, Math.Abs(x.DragN - y.DragN) / Math.Max(1, Math.Abs(y.DragN)));
+                            dThrust = Math.Max(dThrust, Math.Abs(x.ThrustAvailableN - y.ThrustAvailableN) / Math.Max(1, Math.Abs(y.ThrustAvailableN)));
+                            // The two paths are not bit-identical (some input differs in its last bits), and the trim's
+                            // secant solve (1e-4 in Cl) can stop anywhere in its tolerance band: measured on the Aeris 4A,
+                            // 0.0016 deg, 0.033% drag and 4e-6 of the thrust at most. The limits are a few times that,
+                            // so a threading bug that moves a cell's answer at all shows.
                             Assert.Equal(y.Feasible, x.Feasible, $"flyable in both sweeps or neither at {at}");
                             Assert.Equal(y.Overheats, x.Overheats, $"heat-limited in both sweeps or neither at {at}");
-                            Assert.Near(y.Alpha, x.Alpha, 0.1, $"the trim angle of attack at {at} (deg)");
-                            Assert.Near(y.DragN, x.DragN, 0.01 * Math.Abs(y.DragN) + 10, $"the cruise drag at {at} (N)");
-                            Assert.Near(y.ThrustAvailableN, x.ThrustAvailableN, 0.02 * Math.Abs(y.ThrustAvailableN) + 50,
+                            Assert.Near(y.Alpha, x.Alpha, 0.005, $"the trim angle of attack at {at} (deg)");
+                            Assert.Near(y.DragN, x.DragN, 0.001 * Math.Abs(y.DragN) + 1, $"the cruise drag at {at} (N)");
+                            Assert.Near(y.ThrustAvailableN, x.ThrustAvailableN, 1e-4 * Math.Abs(y.ThrustAvailableN) + 1,
                                         $"the full-throttle thrust at {at} (N)");
                         }
                 }
 
                 ctx.Record("compared", $"{compared} cells, {trimMismatch} trimmed in one sweep only");
+                ctx.Record("largestDifference", $"AoA {dAlpha:G3} deg, drag {dDrag:G3}, thrust {dThrust:G3} (relative)");
                 Assert.True(compared >= 10, $"enough cells trimmed well below the stall in both sweeps to compare ({compared})");
-                Assert.True(trimMismatch <= 2, $"the sweeps trim the same cells, but for a couple at the stall's edge ({trimMismatch} differ)");
+                Assert.Equal(0, trimMismatch, "cells that trim in one sweep and not the other");
 
                 Assert.True(a.HasStability && b.HasStability, "both sweeps have their stability map");
                 for (int i = 0; i < nM; i++)
