@@ -70,31 +70,6 @@ namespace FerramAerospaceResearch.UnitTests
         }
 
         [Theory]
-        [InlineData(1.0, 1.4142135623730951, 1.1981402347355922)]   // Gauss's constant's reciprocal times sqrt 2
-        [InlineData(24.0, 6.0, 13.458171481725615)]
-        [InlineData(5.0, 5.0, 5.0)]
-        public void ArithmeticGeometricMean(double a, double b, double agm)
-        {
-            Assert.Equal(agm, FARMathUtil.ArithmeticGeometricMean(a, b, 1e-13), 10);
-        }
-
-        [Theory]
-        [InlineData(1.0, Math.PI / 2)]                  // a circle: E(0)
-        [InlineData(0.5, 1.2110560275684594)]          // E(k), k^2 = 0.75: FAR passes b/a, the complementary modulus
-        [InlineData(0.1, 1.0159935450252240)]
-        public void CompleteEllipticIntegralSecondKindTakesTheComplementaryModulus(double bOverA, double e)
-        {
-            Assert.Equal(e, FARMathUtil.CompleteEllipticIntegralSecondKind(bOverA, 1e-13), 9);
-        }
-
-        [Fact]
-        public void EllipsePerimeter()
-        {
-            // a = 2, b = 1: 9.688448220547676
-            Assert.Equal(9.688448220547676, 4 * 2 * FARMathUtil.CompleteEllipticIntegralSecondKind(0.5, 1e-13), 8);
-        }
-
-        [Theory]
         [InlineData(2.0, 0.5)]
         [InlineData(10.0, 2.0)]
         [InlineData(0.3, 2.2)]

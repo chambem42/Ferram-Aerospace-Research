@@ -103,37 +103,38 @@ namespace FerramAerospaceResearch
                 return colliders;
             }
 
-            // ReSharper disable once UnusedMember.Global
-            public static Bounds[] GetPartMeshBoundsInPartSpace(this Part part, int excessiveVerts = 2500)
-            {
-                List<Transform> transforms = part.FindModelComponents<Transform>();
-                var bounds = new Bounds[transforms.Count];
-                Matrix4x4 partMatrix = part.partTransform.worldToLocalMatrix;
-                for (int i = 0; i < transforms.Count; i++)
-                {
-                    var newBounds = new Bounds();
-                    Transform t = transforms[i];
+            // Unused: nothing in FAR calls it (commented out after the test suite's coverage run)
+            // // ReSharper disable once UnusedMember.Global
+            // public static Bounds[] GetPartMeshBoundsInPartSpace(this Part part, int excessiveVerts = 2500)
+            // {
+            //     List<Transform> transforms = part.FindModelComponents<Transform>();
+            //     var bounds = new Bounds[transforms.Count];
+            //     Matrix4x4 partMatrix = part.partTransform.worldToLocalMatrix;
+            //     for (int i = 0; i < transforms.Count; i++)
+            //     {
+            //         var newBounds = new Bounds();
+            //         Transform t = transforms[i];
 
-                    var mf = t.GetComponent<MeshFilter>();
-                    if (mf == null)
-                        continue;
-                    Mesh m = mf.sharedMesh;
+            //         var mf = t.GetComponent<MeshFilter>();
+            //         if (mf == null)
+            //             continue;
+            //         Mesh m = mf.sharedMesh;
 
-                    if (m == null)
-                        continue;
-                    Matrix4x4 matrix = partMatrix * t.localToWorldMatrix;
+            //         if (m == null)
+            //             continue;
+            //         Matrix4x4 matrix = partMatrix * t.localToWorldMatrix;
 
-                    if (m.vertices.Length < excessiveVerts)
-                        foreach (Vector3 vertex in m.vertices)
-                            newBounds.Encapsulate(matrix.MultiplyPoint(vertex));
-                    else
-                        newBounds.SetMinMax(matrix.MultiplyPoint(m.bounds.min), matrix.MultiplyPoint(m.bounds.max));
+            //         if (m.vertices.Length < excessiveVerts)
+            //             foreach (Vector3 vertex in m.vertices)
+            //                 newBounds.Encapsulate(matrix.MultiplyPoint(vertex));
+            //         else
+            //             newBounds.SetMinMax(matrix.MultiplyPoint(m.bounds.min), matrix.MultiplyPoint(m.bounds.max));
 
-                    bounds[i] = newBounds;
-                }
+            //         bounds[i] = newBounds;
+            //     }
 
-                return bounds;
-            }
+            //     return bounds;
+            // }
 
             /// <summary>
             ///     Returns the total mass of the part

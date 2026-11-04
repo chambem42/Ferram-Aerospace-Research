@@ -316,11 +316,12 @@ namespace FerramAerospaceResearch.FARPartGeometry
                 CheckAnimations();
         }
 
-        public void ClearMeshData()
-        {
-            meshDataList = null;
-            _ready = false;
-        }
+        // Unused: nothing in FAR calls it (commented out after the test suite's coverage run)
+        // public void ClearMeshData()
+        // {
+        //     meshDataList = null;
+        //     _ready = false;
+        // }
 
         public void GeometryPartModuleRebuildMeshData()
         {

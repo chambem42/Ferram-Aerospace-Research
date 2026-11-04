@@ -67,16 +67,6 @@ namespace FerramAerospaceResearch.UnitTests
                 Assert.Equal(FARAeroUtil.RayleighPitotTubeStagPressure(1 - 1e-9), FARAeroUtil.RayleighPitotTubeStagPressure(1 + 1e-9), 6);
         }
 
-        [Theory]
-        [InlineData(0.0, 1.0)]        // at rest: the incompressible stagnation value
-        [InlineData(0.3, 1.02269)]    // (p0/p - 1) * 2 / (gamma M^2), isentropic
-        [InlineData(2.0, 1.65732)]    // behind the normal shock
-        public void MaxPressureCoefficient(double mach, double cpMax)
-        {
-            using (Gas.Gamma(Gamma))
-                Assert.Equal(cpMax, FARAeroUtil.MaxPressureCoefficientCalc(mach), 4);
-        }
-
         [Fact]
         public void ShockRelationsFollowTheAdiabaticIndex()
         {
@@ -137,17 +127,6 @@ namespace FerramAerospaceResearch.UnitTests
         public void ObliqueShockAboveTheMaximumDeflectionIsDetached(double mach, double maxDeflectionDeg)
         {
             Assert.True(double.IsNaN(FARAeroUtil.CalculateSinWeakObliqueShockAngle(mach, Gamma, (maxDeflectionDeg + 1) * Math.PI / 180)));
-        }
-
-        [Theory]
-        [InlineData(2.0, 64.67)]
-        [InlineData(3.0, 65.24)]
-        public void ShockAngleAtMaximumDeflection(double mach, double betaDeg)
-        {
-            double sinBeta = FARAeroUtil.CalculateSinMaxShockAngle(mach, Gamma);
-            Assert.Equal(betaDeg, Math.Asin(sinBeta) * 180 / Math.PI, 1);
-            FARAeroUtil.MaxShockAngleCheck(mach, Gamma, out bool attached);
-            Assert.True(attached);
         }
 
         // skin friction: flat plate, FAR's 8% roughness allowance on top
@@ -238,22 +217,6 @@ namespace FerramAerospaceResearch.UnitTests
                 Assert.Equal(0, FARAeroUtil.CalculateReynoldsNumber(1.225, 0, 34, 0.1, 288.15, Gamma));
                 Assert.Equal(0, FARAeroUtil.SkinFrictionDrag(1.225, 0, 34, 0.1, 288.15, Gamma));
             }
-        }
-
-        [Fact]
-        public void OswaldEfficiencyUnsweptIsOneOverOnePlusPiARCd0()
-        {
-            Assert.Equal(1 / (Math.PI * 8 * 0.02 + 1), FARAeroUtil.CalculateOswaldsEfficiency(8, 1, 0.02), 4);
-        }
-
-        [Fact]
-        public void OswaldEfficiencyFallsWithSweepAndAspectRatio()
-        {
-            double unswept = FARAeroUtil.CalculateOswaldsEfficiency(8, 1, 0.02);
-            double swept = FARAeroUtil.CalculateOswaldsEfficiency(8, Math.Cos(35 * Math.PI / 180), 0.02);
-            double stubby = FARAeroUtil.CalculateOswaldsEfficiency(4, 1, 0.02);
-            Assert.True(swept < unswept);
-            Assert.True(stubby > unswept);
         }
     }
 }

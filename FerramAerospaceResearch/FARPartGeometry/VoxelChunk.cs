@@ -128,18 +128,20 @@ namespace FerramAerospaceResearch.FARPartGeometry
         }
 
         //Use when certain that locking is unnecessary and need to fill the location
-        public void SetVoxelPointPartOnlyGlobalIndexNoLock(int zeroBaseIndex, Part p)
-        {
-            zeroBaseIndex -= offset;
-            SetPart(p, zeroBaseIndex, VoxelOrientationPlane.NONE, 0);
-        }
+        // Unused: nothing in FAR calls it (commented out after the test suite's coverage run)
+        // public void SetVoxelPointPartOnlyGlobalIndexNoLock(int zeroBaseIndex, Part p)
+        // {
+        //     zeroBaseIndex -= offset;
+        //     SetPart(p, zeroBaseIndex, VoxelOrientationPlane.NONE, 0);
+        // }
 
-        // ReSharper disable once UnusedMember.Global
-        public void SetVoxelPointPartOnlyGlobalIndexNoLock(int i, int j, int k, Part p)
-        {
-            int index = i + 8 * j + 64 * k - offset;
-            SetPart(p, index, VoxelOrientationPlane.NONE, 0);
-        }
+        // Unused: nothing in FAR calls it (commented out after the test suite's coverage run)
+        // // ReSharper disable once UnusedMember.Global
+        // public void SetVoxelPointPartOnlyGlobalIndexNoLock(int i, int j, int k, Part p)
+        // {
+        //     int index = i + 8 * j + 64 * k - offset;
+        //     SetPart(p, index, VoxelOrientationPlane.NONE, 0);
+        // }
 
         //Use when certain that locking is unnecessary and need to fill the location
         public void SetVoxelPointGlobalIndexNoLock(
@@ -221,18 +223,20 @@ namespace FerramAerospaceResearch.FARPartGeometry
             return (!(p is null) && partPriorities.TryGetValue(p, out int v)) ? v : int.MinValue;
         }
 
-        // ReSharper disable once UnusedMember.Global
-        public bool VoxelPointExistsLocalIndex(int zeroBaseIndex)
-        {
-            return voxelPoints[zeroBaseIndex].GetSize() > 0;
-        }
+        // Unused: nothing in FAR calls it (commented out after the test suite's coverage run)
+        // // ReSharper disable once UnusedMember.Global
+        // public bool VoxelPointExistsLocalIndex(int zeroBaseIndex)
+        // {
+        //     return voxelPoints[zeroBaseIndex].GetSize() > 0;
+        // }
 
-        // ReSharper disable once UnusedMember.Global
-        public bool VoxelPointExistsLocalIndex(int i, int j, int k)
-        {
-            int index = i + 8 * j + 64 * k;
-            return voxelPoints[index].GetSize() > 0;
-        }
+        // Unused: nothing in FAR calls it (commented out after the test suite's coverage run)
+        // // ReSharper disable once UnusedMember.Global
+        // public bool VoxelPointExistsLocalIndex(int i, int j, int k)
+        // {
+        //     int index = i + 8 * j + 64 * k;
+        //     return voxelPoints[index].GetSize() > 0;
+        // }
 
         public bool VoxelPointExistsGlobalIndex(int zeroBaseIndex)
         {
