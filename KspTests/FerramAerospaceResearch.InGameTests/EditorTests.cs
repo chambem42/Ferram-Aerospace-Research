@@ -294,6 +294,8 @@ namespace FerramAerospaceResearch.InGameTests
                                               EditorLogic.fetch.ship.shipName == craft &&
                                               Refl.Get<Vector3>(Far.EditorVehicle, "_vehicleMainAxis") == axis,
                                         120, $"FAR's voxel model of {craft} along its root's {name}", shot: false);
+                // the static analysis on the new model too (under a coverage recorder it can lag the model)
+                yield return Wait.Until(() => Far.EditorReady && Far.Instant(2, 0.5).Cd > 0, 120, $"the static analysis of {craft}", shot: false);
                 yield return Far.Settled(craft);
 
                 Transform root = EditorLogic.RootPart.transform;
