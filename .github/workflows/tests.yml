@@ -325,10 +325,13 @@ jobs:
           cp "$COV/out"/FerramAerospaceResearch*.dll "$COV/out/AltCover.Recorder.g.dll" "$COV/out/coverage.xml" "$COV/overlay/FerramAerospaceResearch/Plugins/"
           # the unit tests' FAR
           cp "$COV/out"/FerramAerospaceResearch*.dll "$COV/out/AltCover.Recorder.g.dll" "$p/ferramGraph.dll" "$COV/farbin/"
+      # against the stripped assemblies as the unit job runs them (they carry Unity.Burst, which the stock game does not)
       - name: Unit tests
         run: |
+          curl -fsSL -o "$WORK/ksplibs.zip" https://github.com/KSPModdingLibs/KSPLibs/raw/main/KSP-1.12.5.zip
+          7z x -y -bso0 -bsp0 "-o$WORK/ksplibs" "$WORK/ksplibs.zip"
           U=KspTests/FerramAerospaceResearch.UnitTests/bin/Debug/net48
-          dotnet build KspTests/FerramAerospaceResearch.UnitTests "-p:KspDir=$KSPTEST_GAME" "-p:FarBin=$COV/farbin" -v q -nologo
+          dotnet build KspTests/FerramAerospaceResearch.UnitTests "-p:KspDir=$WORK/ksplibs" "-p:FarBin=$COV/farbin" -v q -nologo
           cp "$COV/out/coverage.xml" "$COV/out/AltCover.Recorder.g.dll" "$U/"
           dotnet test KspTests/FerramAerospaceResearch.UnitTests --no-build || echo "::warning::unit tests failed under coverage"
           cp "$U/coverage.xml" "$COV/unit.xml"
