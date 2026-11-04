@@ -79,6 +79,7 @@ namespace FerramAerospaceResearch.FARPartGeometry
         private int xLength, yLength, zLength;
         private int xCellLength, yCellLength, zCellLength;
         private int threadsQueued;
+        private bool chunksRecycled;
 
         private VehicleVoxel(Vessel vessel)
         {
@@ -397,6 +398,14 @@ namespace FerramAerospaceResearch.FARPartGeometry
         {
             lock (clearedChunks)
             {
+                // once only: a chunk given back twice is in the pool twice, or there while another model has it, and is
+                // handed to two places of a model at once
+                if (chunksRecycled)
+                {
+                    ThreadSafeDebugLogger.Warning("Voxel chunks given back twice: the second time ignored\n" + Environment.StackTrace);
+                    return;
+                }
+                chunksRecycled = true;
                 RecycleChunksFromArray();
                 chunksInUse -= xLength * yLength * zLength;
                 Monitor.Pulse(clearedChunks);
