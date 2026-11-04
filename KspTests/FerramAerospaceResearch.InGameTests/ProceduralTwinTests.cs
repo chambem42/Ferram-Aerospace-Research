@@ -23,15 +23,23 @@ namespace FerramAerospaceResearch.InGameTests
         private const string WingTwin = "Aeris 4A PW", TankTwin = "Aeris 4A PP";
         private const string B9Wing = "B9.Aero.Wing.Procedural.TypeA", PPTank = "proceduralTankLiquid";
 
+        /// <summary>
+        /// FAR's editor sim on the craft in the editor, known by the parts named (each twin keeps some stock parts): it reads
+        /// ready (from the craft before, or before it has taken up the wings) until it has voxelized this craft, and only
+        /// then gives it lift.
+        /// </summary>
+        private static IEnumerator WaitForSim(string what, params string[] parts)
+        {
+            yield return Wait.Until(() => Far.EditorReady && parts.All(n => EditorLogic.fetch.ship.parts.Any(p => p.partInfo.name == n)) &&
+                                          Far.Instant(2, 0.5).Cl > 0.01,
+                                    120, "FAR's editor sim on " + what, shot: false);
+        }
+
         /// <summary>The stock Aeris 4A into the editor in place of the twin, and FAR's sim on it.</summary>
         private static IEnumerator LoadStockAeris(TestContext ctx)
         {
             yield return Nav.LoadCraft(ctx, ctx.CraftPath(Far.Plane, "SPH"));
-            // FAR's sim reads ready from the craft before until it has voxelized this one and taken up its wings
-            yield return Wait.Until(() => Far.EditorReady && EditorLogic.fetch.ship.parts.Any(p => p.partInfo.name == "deltaWing") &&
-                                          EditorLogic.fetch.ship.parts.Any(p => p.partInfo.name == "fuelTank.long") &&
-                                          Far.Instant(2, 0.5).Cl > 0.01,
-                                    120, "FAR's editor sim on the stock Aeris 4A", shot: false);
+            yield return WaitForSim("the stock Aeris 4A", "fuelTank.long", "deltaWing");
         }
 
         private static double Volume(FARAeroComponents.VehicleAerodynamics v) => v.GetCrossSectionAreas().Sum() * v.SectionThickness;
@@ -89,7 +97,7 @@ namespace FerramAerospaceResearch.InGameTests
         public static IEnumerator Procedural_B9TwinIsTheStockAeris(TestContext ctx)
         {
             ctx.Step("The twin: its B9 panels as FAR and B9 see them");
-            yield return Far.WaitForEditorVoxels();
+            yield return WaitForSim("the B9 twin", B9Wing);
             List<Part> twinParts = EditorLogic.fetch.ship.parts;
             Dictionary<uint, Panel> b9 = Panels(twinParts, p => p.partInfo.name == B9Wing);
             Assert.Equal(4, b9.Count, "the twin's four B9 panels");
@@ -149,7 +157,7 @@ namespace FerramAerospaceResearch.InGameTests
         public static IEnumerator Procedural_PPTwinIsTheStockAeris(TestContext ctx)
         {
             ctx.Step("The twin: its ProceduralParts tanks voxelized");
-            yield return Far.WaitForEditorVoxels();
+            yield return WaitForSim("the ProceduralParts twin", PPTank);
             List<Part> tanks = EditorLogic.fetch.ship.parts.Where(p => p.partInfo.name == PPTank).ToList();
             Assert.Equal(3, tanks.Count, "the twin's three ProceduralParts tanks");
             FARAeroComponents.VehicleAerodynamics va = Far.EditorVehicle;
