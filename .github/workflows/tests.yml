@@ -336,19 +336,23 @@ jobs:
           dotnet test KspTests/FerramAerospaceResearch.UnitTests --no-build || echo "::warning::unit tests failed under coverage"
           cp "$U/coverage.xml" "$COV/unit.xml"
       - name: In-game tests
+        env:
+          # each KSP session's counts, copied into its results once KSP exits (the next session's deploy into the
+          # same instance writes over them)
+          KSPTEST_COLLECT: GameData/FerramAerospaceResearch/Plugins/coverage.xml
         run: |
           args=(test KspTests/FerramAerospaceResearch.InGameTests.Run -p:KspDir="$KSPTEST_GAME" --logger "console;verbosity=normal")
           [ -n "$TEST_FILTER" ] && args+=(--filter "$TEST_FILTER")
           # timing-sensitive tests can fail under the instrumentation's slowdown; their counts still go in
           dotnet "${args[@]}" || echo "::warning::in-game tests failed under coverage"
-      # each KSP instance (the main one, AJE's) keeps its own counts in its copy of FAR
       - name: Report
         run: |
           reports=("$COV/unit.xml"); i=0
-          for f in "$(cygpath -u "$KSPTEST_INSTANCES")"/*/GameData/FerramAerospaceResearch/Plugins/coverage.xml; do
+          for f in "$(cygpath -u "$KSPTEST_RESULTS")"/*/collected/GameData/FerramAerospaceResearch/Plugins/coverage.xml; do
             [ -f "$f" ] || continue
             i=$((i+1)); cp "$f" "$COV/ingame-$i.xml"; reports+=("$COV/ingame-$i.xml")
           done
+          echo "$i KSP session report(s)"
           python -I .github/scripts/coverage_report.py "${GITHUB_REPOSITORY#*/}/" "$COV/report.md" "${reports[@]}"
           cat "$COV/report.md" >> "$GITHUB_STEP_SUMMARY"
       # the report and the counts only: never the game or an instance
