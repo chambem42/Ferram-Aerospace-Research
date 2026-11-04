@@ -221,7 +221,20 @@ namespace FerramAerospaceResearch.FARAeroComponents
         private bool updateVisualization;
         public FARWingAerodynamicModel LegacyWingModel { get; private set; }
 
-        public Func<Part, Vector3, Vector3> AeroForceModifier { get; set; }
+        private Func<Part, Vector3, Vector3> aeroForceModifier;
+
+        public Func<Part, Vector3, Vector3> AeroForceModifier
+        {
+            get { return aeroForceModifier; }
+            set
+            {
+                aeroForceModifier = value;
+                ForceModifierVersion++;
+            }
+        }
+
+        /// <summary>Changes each time any part's modifier is set: a prediction made before it is stale.</summary>
+        internal static int ForceModifierVersion { get; private set; }
 
         public ProjectedArea ProjectedAreas
         {
