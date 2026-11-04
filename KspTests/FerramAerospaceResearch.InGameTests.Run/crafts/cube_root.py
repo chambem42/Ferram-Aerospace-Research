@@ -3,6 +3,9 @@
     python cube_root.py STOCK.craft y "Kerbal 1 Cube Root.craft"
     python cube_root.py STOCK.craft x "Kerbal 1 Cube Root X.craft"
     python cube_root.py STOCK.craft z "Kerbal 1 Cube Root Z.craft"
+    python cube_root.py STOCK.craft y30 "Kerbal 1 Cube Root Y30.craft"
+    python cube_root.py STOCK.craft x60 "Kerbal 1 Cube Root X60.craft"
+    python cube_root.py STOCK.craft z60 "Kerbal 1 Cube Root Z60.craft"
 
 STOCK is the game's Ships/VAB/Kerbal 1.craft. Its parachute, on the pod's top node, gives way to a Cubic Octagonal
 Strut (strutCube) on that node, made the craft's root. FAR voxelizes an editor craft in its root part's frame, and the
@@ -10,11 +13,16 @@ rocket's axis is the axis of that frame the stack lies along: y with the strut a
 turned 90 deg about the world z axis, z with it turned -90 deg about the world x axis (the root's +x, +z up). The strut
 is turned about its own centre, and a cube turned by 90 deg is the same cube, so the three crafts have one shape and
 differ only in the frame FAR builds the voxel model in.
+
+y30, x60 and z60 turn the strut 30 deg and 60 deg about the world z axis and -60 deg about the world x axis: the
+stack lies between two of the root's axes, nearer y, x and z, so FAR's axis is none of the root's and the voxel
+model is cut at a slant to its grid (a cube turned by these angles is not the same cube: the strut is 0.26 m).
 """
 import re, sys
 
 stock_path, axis, out_path = sys.argv[1:4]
-ROT = {"y": "0,0,0,1", "x": "0,0,0.707106769,0.707106769", "z": "-0.707106769,0,0,0.707106769"}[axis]
+ROT = {"y": "0,0,0,1", "x": "0,0,0.707106769,0.707106769", "z": "-0.707106769,0,0,0.707106769",
+       "y30": "0,0,0.258819045,0.965925826", "x60": "0,0,0.5,0.866025404", "z60": "-0.5,0,0,0.866025404"}[axis]
 CUBE_ID = "strutCube_4294000001"
 HALF = 0.1287344          # strutCube's node offsets: top and bottom at +-0.1287344 along its y
 
@@ -111,7 +119,7 @@ for s, e in parts:
     i = e
 chunks.append(rest[i:])
 out += "".join(chunks)
-name = {"y": "Kerbal 1 Cube Root", "x": "Kerbal 1 Cube Root X", "z": "Kerbal 1 Cube Root Z"}[axis]
+name = "Kerbal 1 Cube Root" + ("" if axis == "y" else " " + axis.upper())
 out = re.sub(r"(?m)^ship = .*$", "ship = " + name, out, count=1)
 assert chute_id not in out
 open(out_path, "w", encoding="utf-8", newline="").write(out)

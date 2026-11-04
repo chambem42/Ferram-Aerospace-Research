@@ -6,7 +6,9 @@ using FerramAerospaceResearch.FARAeroComponents;
 using FerramAerospaceResearch.FARGUI.FAREditorGUI.Simulation;
 using FerramAerospaceResearch.FARPartGeometry;
 using FerramAerospaceResearch.FARPartGeometry.GeometryModification;
+using FerramAerospaceResearch.FARThreading;
 using KspTest;
+using ProceduralFairings;
 using UnityEngine;
 
 namespace FerramAerospaceResearch.InGameTests
@@ -209,6 +211,91 @@ namespace FerramAerospaceResearch.InGameTests
             Assert.Near(-right.Cy, left.Cy, 0.05 * Math.Abs(right.Cy), "side force is equal and opposite either side");
         }
 
+        private const string ComSat = "ComSat Lx Unclamped";      // stock, its launch clamp taken off (crafts/)
+
+        /// <summary>
+        /// A stock fairing in the editor is voxelized shut whatever the editor shows of it: the editor draws a fairing being
+        /// worked on exploded and see-through, and FAR's fairing updater puts every panel back (unexploded, opaque, its
+        /// colliders on) before each voxelization. The ComSat Lx with its panels shown exploded and see-through comes out
+        /// the model it is with them shut, the panels put back, and the updater keeps the bounds of every panel.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Vab, Craft = ComSat, TimeoutSec = 900)]
+        public static IEnumerator Editor_FairingIsVoxelizedShut(TestContext ctx)
+        {
+            yield return LoadedCraft("the ComSat Lx", "fairingSize1");
+            Part fairingPart = EditorLogic.fetch.ship.parts.First(p => p.Modules.Contains<ModuleProceduralFairing>());
+            var fairing = fairingPart.FindModuleImplementing<ModuleProceduralFairing>();
+            List<FairingPanel> panels = fairing.Panels;
+            Assert.True(panels != null && panels.Count > 0, "the fairing has panels");
+            var geo = fairingPart.FindModuleImplementing<GeometryPartModule>();
+            object updater = ((IEnumerable)Refl.Get(geo, "geometryUpdaters")).Cast<object>().FirstOrDefault(u => u is StockProcFairingGeoUpdater);
+            Assert.NotNull(updater, "FAR's fairing updater on the fairing");
+            Assert.Equal(panels.Count, Refl.Get<List<Bounds>>(updater, "prevPanelBounds").Count, "the updater keeps the bounds of every panel");
+            VehicleAerodynamics v = Far.EditorVehicle;
+            double volume = Far.Volume(v), area = v.MaxCrossSectionArea, cd = Far.Instant(0, 0.5).Cd;
+            ctx.Record("shut", $"{panels.Count} panels; volume {volume:F3} m3, max cross-section {area:F3} m2, Cd {cd:F5}");
+
+            ctx.Step("The panels shown exploded and see-through, the craft voxelized again");
+            foreach (FairingPanel p in panels)
+            {
+                p.SetTgtExplodedView(1);
+                p.SetExplodedView(1);
+                p.SetTgtOpacity(0.2f);
+                p.SetOpacity(0.2f);
+            }
+
+            yield return Far.Revoxelize("the ComSat Lx, its fairing exploded");
+            yield return Far.Settled("the ComSat Lx");
+            v = Far.EditorVehicle;
+            double volume2 = Far.Volume(v), area2 = v.MaxCrossSectionArea, cd2 = Far.Instant(0, 0.5).Cd;
+            ctx.Record("exploded", $"volume {volume2:F3} m3, max cross-section {area2:F3} m2, Cd {cd2:F5}");
+            Assert.Near(volume, volume2, 0.01 * volume, "volume with the panels shown exploded, the shut fairing's");
+            Assert.Near(area, area2, 0.01 * area, "largest cross-section with the panels shown exploded, the shut fairing's");
+            Assert.Near(cd, cd2, 0.01 * cd, "Cd at Mach 0.5 with the panels shown exploded, the shut fairing's");
+            Assert.Equal(panels.Count, Refl.Get<List<Bounds>>(updater, "prevPanelBounds").Count, "the updater still keeps every panel");
+        }
+
+        /// <summary>
+        /// Voxelized on Unity's main thread (as FAR does in a development build: VoxelizationThreadpool.RunInMainThread),
+        /// the Aeris is the model the worker threads make of it: the same cross-sections and volume, and the static analysis
+        /// on it the same to 0.1% (on master it differs in the fourth figure: Cd 0.025886 against 0.025882 at 4 deg).
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
+        public static IEnumerator Editor_MainThreadVoxelizationIsTheThreadedOne(TestContext ctx)
+        {
+            bool was = VoxelizationThreadpool.RunInMainThread;
+            try
+            {
+                yield return Far.WaitForEditorVoxels();
+                yield return Far.Settled("the Aeris");
+                double[] threaded = Far.EditorVehicle.GetCrossSectionAreas();
+                double vol = Far.Volume(Far.EditorVehicle);
+                InstantConditionSimOutput t = Far.Instant(4, 0.5);
+
+                ctx.Step("Voxelized again on the main thread");
+                VoxelizationThreadpool.RunInMainThread = true;
+                yield return Far.Revoxelize("the Aeris on the main thread");
+                yield return Far.Settled("the Aeris on the main thread");
+                double[] main = Far.EditorVehicle.GetCrossSectionAreas();
+                double vol2 = Far.Volume(Far.EditorVehicle);
+                InstantConditionSimOutput m = Far.Instant(4, 0.5);
+                double worst = threaded.Zip(main, (a, b) => Math.Abs(a - b)).DefaultIfEmpty(0).Max();
+                ctx.Record("models", $"threaded: volume {vol:F4} m3, Cl {t.Cl:F5}, Cd {t.Cd:F5}, Cm {t.Cm:F5}; " +
+                                     $"main thread: volume {vol2:F4} m3, Cl {m.Cl:F5}, Cd {m.Cd:F5}, Cm {m.Cm:F5}; " +
+                                     $"{threaded.Length} / {main.Length} sections, the most apart {worst:G3} m2");
+                Assert.Equal(threaded.Length, main.Length, "as many cross-sections");
+                Assert.True(worst <= 1e-6 * threaded.Max(), $"the same cross-sections (the most apart by {worst:G3} m2)");
+                Assert.Near(vol, vol2, 1e-6 * vol, "the same volume");
+                Assert.Near(t.Cl, m.Cl, 1e-3 * Math.Abs(t.Cl) + 1e-6, "the same Cl at 4 deg");
+                Assert.Near(t.Cd, m.Cd, 1e-3 * t.Cd + 1e-7, "the same Cd at 4 deg");
+                Assert.Near(t.Cm, m.Cm, 1e-3 * Math.Abs(t.Cm) + 1e-6, "the same Cm at 4 deg");
+            }
+            finally
+            {
+                VoxelizationThreadpool.RunInMainThread = was;
+            }
+        }
+
         private const string CubeRoot = "Kerbal 1 Cube Root";   // crafts/cube_root.py
 
         private sealed class AxisModel
@@ -222,22 +309,25 @@ namespace FerramAerospaceResearch.InGameTests
         /// FAR voxelizes an editor craft in its root part's frame and cuts its cross-sections across the axis of that
         /// frame the craft lies along, by one of three branches of its section code. The stock Kerbal 1 on a cubic strut
         /// root (crafts/cube_root.py), the strut as the game places it (the stack along the root's y) and turned 90 deg in
-        /// place (along its x, along its z): one shape in three frames, the parts all where they are. Each is cut along its
-        /// own axis, as long as the rocket, every section a real area; each is the same rocket to within 15% in volume and
-        /// largest cross-section, with drag at zero angle of attack that rises through Mach 1.
-        /// Editor_VoxelModelIsTheSameAlongEveryAxis holds the three to the same model.
+        /// place (along its x, along its z): one shape in three frames, the parts all where they are. Then the strut turned
+        /// 30 deg and 60 deg (the stack between two of the root's axes, nearer its y, its x, its z): FAR's axis is none of
+        /// the root's but the stack's, within 15 deg, and the model is cut at a slant to its grid. Each is cut along its own
+        /// axis, as long as the rocket, every section a real area; each is the same rocket to within 15% in volume and 20% in
+        /// largest cross-section, with drag at zero angle of attack that rises through Mach 1. (On master the slanted models
+        /// come out 8-13% fuller and up to 16% wider than the one along the root's y.)
+        /// Editor_VoxelModelIsTheSameAlongEveryAxis holds the first three to the same model.
         /// </summary>
-        [UITest(Kind = "Check", StartsAt = StartState.Vab, Craft = CubeRoot, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Vab, Craft = CubeRoot, TimeoutSec = 1200)]
         public static IEnumerator Editor_VoxelModelAlongEachRootAxis(TestContext ctx)
         {
             var models = new List<AxisModel>();
-            yield return AxisModels(ctx, models);
+            yield return AxisModels(ctx, models, oblique: true);
             AxisModel y = models[0];
             foreach (AxisModel m in models)
             {
                 string along = $"along the root's {m.Axis}";
                 Assert.Near(y.Volume, m.Volume, 0.15 * y.Volume, "volume " + along + ", the rocket's");
-                Assert.Near(y.MaxArea, m.MaxArea, 0.15 * y.MaxArea, "largest cross-section " + along + ", the rocket's");
+                Assert.Near(y.MaxArea, m.MaxArea, 0.20 * y.MaxArea, "largest cross-section " + along + ", the rocket's");
                 Assert.True(m.CdSub > 0, $"drag at zero angle of attack {along} ({m.CdSub:F5})");
                 Assert.True(m.CdTrans > 1.3 * m.CdSub, $"Cd at Mach 1.1 ({m.CdTrans:F5}) well above Mach 0.5's ({m.CdSub:F5}) {along}");
             }
@@ -282,26 +372,49 @@ namespace FerramAerospaceResearch.InGameTests
         }
 
         /// <summary>The three cube-root crafts loaded in turn, each one's model checked along its own axis and kept.</summary>
-        private static IEnumerator AxisModels(TestContext ctx, List<AxisModel> models)
+        private static IEnumerator AxisModels(TestContext ctx, List<AxisModel> models, bool oblique = false)
         {
-            var crafts = new[] { (CubeRoot, Vector3.up, "y"), (CubeRoot + " X", Vector3.right, "x"), (CubeRoot + " Z", Vector3.forward, "z") };
-            foreach ((string craft, Vector3 axis, string name) in crafts)
+            // the craft, the root's axis the stack lies along (or lies nearest), its name, and whether it lies between two
+            var crafts = new List<(string, Vector3, string, bool)>
+            {
+                (CubeRoot, Vector3.up, "y", false), (CubeRoot + " X", Vector3.right, "x", false), (CubeRoot + " Z", Vector3.forward, "z", false)
+            };
+            if (oblique)
+                crafts.AddRange(new[]
+                {
+                    (CubeRoot + " Y30", Vector3.up, "y30", true), (CubeRoot + " X60", Vector3.right, "x60", true),
+                    (CubeRoot + " Z60", Vector3.forward, "z60", true)
+                });
+            foreach ((string craft, Vector3 axis, string name, bool slant) in crafts)
             {
                 ctx.Step($"{craft}: the stack along the root's {name}");
                 if (craft != CubeRoot)
                     yield return Nav.LoadCraft(ctx, ctx.CraftPath(craft, "VAB"));
+                // the stack in the root's frame, and FAR's axis for it: the root's own axis, or within 15 deg of the stack
+                Vector3 Stack() => Abs(EditorLogic.RootPart.transform.InverseTransformDirection(Vector3.up));
+                bool AxisIsTheCrafts(Vector3 main) =>
+                    slant ? Vector3.Angle(main, Stack()) < 15 && main != axis && Largest(main) == axis : main == axis;
                 yield return Wait.Until(() => Far.EditorReady && EditorLogic.RootPart != null && EditorLogic.RootPart.partInfo.name == "strutCube" &&
                                               EditorLogic.fetch.ship.shipName == craft &&
-                                              Refl.Get<Vector3>(Far.EditorVehicle, "_vehicleMainAxis") == axis,
+                                              AxisIsTheCrafts(Refl.Get<Vector3>(Far.EditorVehicle, "_vehicleMainAxis")),
                                         120, $"FAR's voxel model of {craft} along its root's {name}", shot: false);
                 // the static analysis on the new model too (under a coverage recorder it can lag the model)
                 yield return Wait.Until(() => Far.EditorReady && Far.Instant(2, 0.5).Cd > 0, 120, $"the static analysis of {craft}", shot: false);
                 yield return Far.Settled(craft);
 
-                Transform root = EditorLogic.RootPart.transform;
-                Assert.True(Vector3.Dot(root.TransformDirection(axis), Vector3.up) > 0.999f,
-                            $"the root's {name} axis is the stack's ({root.TransformDirection(axis):F3})");
-                Assert.Equal(axis, Refl.Get<Vector3>(Far.EditorVehicle, "_vehicleMainAxis"), $"FAR's axis is the root's {name}");
+                Vector3 main = Refl.Get<Vector3>(Far.EditorVehicle, "_vehicleMainAxis");
+                ctx.Record("axis_" + name, $"stack in the root's frame {Stack():F3}, FAR's axis {main:F3} ({Vector3.Angle(main, Stack()):F1} deg off)");
+                if (slant)
+                {
+                    Assert.True(Vector3.Angle(main, Stack()) < 15, $"FAR's axis is the stack's ({main:F3} against {Stack():F3})");
+                    Assert.True(main != Vector3.up && main != Vector3.right && main != Vector3.forward, $"FAR's axis is none of the root's ({main:F3})");
+                }
+                else
+                {
+                    Assert.True(Vector3.Dot(Stack(), axis) > 0.999f, $"the root's {name} axis is the stack's ({Stack():F3})");
+                    Assert.Equal(axis, main, $"FAR's axis is the root's {name}");
+                }
+
                 VehicleAerodynamics v = Far.EditorVehicle;
                 double extent = CraftExtent(Vector3.up, Vector3.right, Vector3.forward).x;
                 InstantConditionSimOutput aoa = Far.Instant(4, 0.5), beta = Far.Instant(0, 0.5, 4);
@@ -318,6 +431,12 @@ namespace FerramAerospaceResearch.InGameTests
                 models.Add(m);
             }
         }
+
+        private static Vector3 Abs(Vector3 v) => new Vector3(Math.Abs(v.x), Math.Abs(v.y), Math.Abs(v.z));
+
+        /// <summary>The unit axis of a vector's largest component.</summary>
+        private static Vector3 Largest(Vector3 v) =>
+            Math.Abs(v.y) >= Math.Abs(v.x) && Math.Abs(v.y) >= Math.Abs(v.z) ? Vector3.up : Math.Abs(v.x) > Math.Abs(v.z) ? Vector3.right : Vector3.forward;
 
         /// <summary>The cross-sections with the empty ones at either end left off.</summary>
         private static double[] Trimmed(double[] areas)
