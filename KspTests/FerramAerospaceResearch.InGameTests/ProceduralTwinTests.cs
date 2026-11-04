@@ -53,7 +53,7 @@ namespace FerramAerospaceResearch.InGameTests
                     stableSince = float.MaxValue;
                     continue;
                 }
-                double c = Far.Instant(2, 0.5).Cl, v = Volume(Far.EditorVehicle);
+                double c = Far.Instant(2, 0.5).Cl, v = Far.Volume(Far.EditorVehicle);
                 if (double.IsNaN(cl) || Math.Abs(c - cl) > 1e-7 || Math.Abs(v - vol) > 1e-6)
                 {
                     cl = c;
@@ -73,8 +73,6 @@ namespace FerramAerospaceResearch.InGameTests
             yield return Nav.LoadCraft(ctx, ctx.CraftPath(Far.Plane, "SPH"));
             yield return WaitForSim("the stock Aeris 4A", "fuelTank.long", "deltaWing");
         }
-
-        private static double Volume(FARAeroComponents.VehicleAerodynamics v) => v.GetCrossSectionAreas().Sum() * v.SectionThickness;
 
         private sealed class Panel
         {
@@ -193,7 +191,7 @@ namespace FerramAerospaceResearch.InGameTests
             List<Part> tanks = EditorLogic.fetch.ship.parts.Where(p => p.partInfo.name == PPTank).ToList();
             Assert.Equal(3, tanks.Count, "the twin's three ProceduralParts tanks");
             FARAeroComponents.VehicleAerodynamics va = Far.EditorVehicle;
-            double maxTwin = va.MaxCrossSectionArea, volTwin = Volume(va), lenTwin = va.Length;
+            double maxTwin = va.MaxCrossSectionArea, volTwin = Far.Volume(va), lenTwin = va.Length;
             Aero twin = Measure();
             yield return Snap.Shot(ctx, "pp-twin");
 
@@ -207,7 +205,7 @@ namespace FerramAerospaceResearch.InGameTests
             yield return Wait.Until(() => Far.EditorReady && Far.EditorVehicle.Length > lenTwin + 0.5, 120,
                                     "FAR to revoxelize the plane with the longer tank", shot: false);
             yield return Settled("the twin with the longer tank");
-            double volLonger = Volume(Far.EditorVehicle), added = Math.PI * 0.625 * 0.625;
+            double volLonger = Far.Volume(Far.EditorVehicle), added = Math.PI * 0.625 * 0.625;
             ctx.Record("longer", string.Format(CultureInfo.InvariantCulture,
                                                "length {0:F3} -> {1:F3} m: FAR's mesh of the tank {2:F3} -> {3:F3} m long; vehicle {4:F2} -> {5:F2} m, volume {6:F3} -> {7:F3} m3 (a 1.25 m cylinder's metre {8:F3})",
                                                length, central.Modules["ProceduralShapeCylinder"].Fields.GetValue<float>("length"), meshLength,
@@ -221,7 +219,7 @@ namespace FerramAerospaceResearch.InGameTests
             ctx.Step("The stock Aeris 4A");
             yield return LoadStockAeris(ctx);
             va = Far.EditorVehicle;
-            double maxStock = va.MaxCrossSectionArea, volStock = Volume(va);
+            double maxStock = va.MaxCrossSectionArea, volStock = Far.Volume(va);
             Aero real = Measure();
 
             ctx.Step("The twin's voxel model and aerodynamics are the stock plane's");

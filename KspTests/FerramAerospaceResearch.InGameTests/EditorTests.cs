@@ -1,20 +1,26 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using FerramAerospaceResearch.FARAeroComponents;
 using FerramAerospaceResearch.FARGUI.FAREditorGUI.Simulation;
+using FerramAerospaceResearch.FARPartGeometry;
+using FerramAerospaceResearch.FARPartGeometry.GeometryModification;
 using KspTest;
 using UnityEngine;
 
 namespace FerramAerospaceResearch.InGameTests
 {
     /// <summary>
-    /// FAR in the editor, on stock crafts: the voxel model of the craft and the static analysis built on it, checked
+    /// FAR in the editor, on stock crafts (the Aeris 4A, an airliner, a rocket): the voxel model of the craft and the static analysis built on it, checked
     /// against the craft's own size and against what any conventional plane does (lift rises with angle of attack, it
     /// is stable in pitch, a symmetric craft is symmetric in sideslip, drag rises through Mach 1).
     /// </summary>
     public static class EditorTests
     {
+        // stock crafts
+        private const string Airliner = "Stearwing A300";
+        private const string Rocket = "Kerbal 1";
 
         /// <summary>The voxel model's length and largest cross-section against the craft's bounds.</summary>
         [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
@@ -98,6 +104,109 @@ namespace FerramAerospaceResearch.InGameTests
             ctx.Record("Cd0.5", sub);
             ctx.Record("Cd1.1", trans);
             Assert.True(trans > 1.3 * sub, $"Cd at Mach 1.1 ({trans:F4}) well above Mach 0.5's ({sub:F4})");
+        }
+
+        /// <summary>
+        /// The stock Stearwing A300 airliner: its Goliath turbofans are engines with an intake in the part, so each gets
+        /// one integrated intake-engine adjuster ducting 100 times the intake's area. The ducting takes area out of the
+        /// cross-sections the nacelles are in: without the adjusters the voxel model holds more volume and the airliner
+        /// more drag at Mach 0.8, and with them back the model is what it was. And the airliner flies like one: lift
+        /// rising with angle of attack, stable in pitch.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Airliner, TimeoutSec = 900)]
+        public static IEnumerator Editor_AirlinerDuctsItsIntegratedIntakes(TestContext ctx)
+        {
+            yield return Far.WaitForEditorVoxels();
+            VehicleAerodynamics vehicle = Far.EditorVehicle;
+            Part[] goliaths = EditorLogic.fetch.ship.parts.Where(p => p.partInfo.name == "turboFanSize2").ToArray();
+            Assert.Equal(2, goliaths.Length, "the airliner's Goliaths");
+            foreach (Part p in goliaths)
+            {
+                GeometryPartModule g = p.FindModuleImplementing<GeometryPartModule>();
+                var adjusters = Refl.Get<List<ICrossSectionAdjuster>>(g, "crossSectionAdjusters");
+                Assert.Equal(1, adjusters.Count, "one cross-section adjuster on a Goliath");
+                Assert.True(adjusters[0] is IntegratedIntakeEngineCrossSectionAdjuster, $"an integrated intake-engine adjuster ({adjusters[0].GetType().Name})");
+                double intake = p.FindModuleImplementing<ModuleResourceIntake>().area;
+                Assert.Near(100 * intake, g.MaxCrossSectionAdjusterArea, 1e-6, "the adjuster ducts 100 times the intake's area (m2)");
+            }
+
+            Transform root = EditorLogic.RootPart.transform;
+            Vector3 extent = CraftExtent(root.up, root.right, root.forward);
+            ctx.Record("extent", extent.ToString("F2"));
+            Assert.InRange(0.85 * extent.x, 1.1 * extent.x, vehicle.Length, "voxel length against the airliner's length");
+
+            double vol = Far.Volume(vehicle), cd = Far.Instant(2, 0.8).Cd;
+            // the most the ducts can take out: their area along the whole nacelle
+            double goliathLength = goliaths.Max(p => p.FindModuleImplementing<GeometryPartModule>().localMeshBounds.size.y);
+            double ductMax = goliaths.Sum(p => p.FindModuleImplementing<GeometryPartModule>().MaxCrossSectionAdjusterArea) * goliathLength;
+            var saved = new Dictionary<GeometryPartModule, List<ICrossSectionAdjuster>>();
+            try
+            {
+                ctx.Step("Without the Goliaths' adjusters");
+                foreach (Part p in goliaths)
+                {
+                    GeometryPartModule g = p.FindModuleImplementing<GeometryPartModule>();
+                    saved[g] = Refl.Get<List<ICrossSectionAdjuster>>(g, "crossSectionAdjusters");
+                    Refl.Set(g, "crossSectionAdjusters", new List<ICrossSectionAdjuster>());
+                }
+
+                yield return Far.Revoxelize("the airliner without ducting");
+                double volBare = Far.Volume(vehicle), cdBare = Far.Instant(2, 0.8).Cd;
+                ctx.Record("ducting", $"volume {vol:F2} m3 ducted, {volBare:F2} without; Cd at Mach 0.8 {cd:F5} ducted, {cdBare:F5} without; " +
+                                      $"at most {ductMax:F2} m3 of duct");
+                Assert.True(volBare > vol, $"the ducting takes volume out of the model ({vol:F2} against {volBare:F2} m3)");
+                Assert.True(volBare - vol < ductMax, $"no more than the ducts' area along the nacelles ({volBare - vol:F2} m3, at most {ductMax:F2})");
+                Assert.True(cdBare > cd, $"more drag without the ducting ({cdBare:F5} against {cd:F5})");
+            }
+            finally
+            {
+                foreach (KeyValuePair<GeometryPartModule, List<ICrossSectionAdjuster>> kv in saved)
+                    Refl.Set(kv.Key, "crossSectionAdjusters", kv.Value);
+            }
+
+            ctx.Step("The adjusters back");
+            yield return Far.Revoxelize("the airliner ducted again");
+            Assert.Near(vol, Far.Volume(vehicle), 1e-4 * vol, "the ducted volume again (m3)");
+
+            ctx.Step("An airliner's lift and pitch stability");
+            InstantConditionSimOutput a0 = Far.Instant(0, 0.5), a6 = Far.Instant(6, 0.5);
+            ctx.Record("alpha", $"0 deg Cl {a0.Cl:F4} Cm {a0.Cm:F4}; 6 deg Cl {a6.Cl:F4} Cm {a6.Cm:F4}");
+            Assert.InRange(0.02, 0.12, (a6.Cl - a0.Cl) / 6, "lift slope per degree");
+            Assert.True(a6.Cm < a0.Cm, $"stable in pitch: Cm falls with alpha ({a0.Cm:F4} to {a6.Cm:F4})");
+        }
+
+        /// <summary>
+        /// The stock Kerbal 1 in the VAB (the Kerbal X has launch clamps, whose encrypted config the test instance does not
+        /// load): a rocket, so FAR's axis is the stack's (the root part's up), and the stock tanks
+        /// voxelize from their colliders. The voxel model's length and largest cross-section against the rocket's bounds,
+        /// at least the core and its two boosters' circles across it; drag at zero angle of attack, rising through Mach 1; equal
+        /// and opposite side forces either side.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Vab, Craft = Rocket, TimeoutSec = 900)]
+        public static IEnumerator Editor_RocketVoxelModelMatchesTheStack(TestContext ctx)
+        {
+            yield return Far.WaitForEditorVoxels();
+            VehicleAerodynamics vehicle = Far.EditorVehicle;
+            Transform root = EditorLogic.RootPart.transform;
+            Vector3 extent = CraftExtent(root.up, root.right, root.forward);
+            ctx.Record("extent", extent.ToString("F2"));
+            ctx.Record("voxel", $"length {vehicle.Length:F2} m, max cross-section {vehicle.MaxCrossSectionArea:F3} m2, volume {Far.Volume(vehicle):F2} m3");
+            Assert.InRange(0.85 * extent.x, 1.1 * extent.x, vehicle.Length, "voxel length against the rocket's height");
+            Assert.InRange(0.02 * extent.y * extent.z, extent.y * extent.z, vehicle.MaxCrossSectionArea, "largest cross-section inside the rocket's footprint");
+            // the 1.25 m core and its two 1.25 m solid boosters side by side
+            double stack = 3 * Math.PI * 0.625 * 0.625;
+            Assert.True(vehicle.MaxCrossSectionArea > 0.8 * stack, $"the core and boosters across the stack ({vehicle.MaxCrossSectionArea:F2} against {stack:F2} m2)");
+            double[] areas = vehicle.GetCrossSectionAreas();
+            Assert.True(areas.All(a => a >= 0 && !double.IsNaN(a)), "every cross-section is a real, non-negative area");
+
+            double sub = Far.Instant(0, 0.5).Cd, trans = Far.Instant(0, 1.1).Cd;
+            ctx.Record("Cd", $"Mach 0.5 {sub:F4}, Mach 1.1 {trans:F4}");
+            Assert.True(sub > 0, $"drag at zero angle of attack ({sub:F4})");
+            Assert.True(trans > 1.3 * sub, $"Cd at Mach 1.1 ({trans:F4}) well above Mach 0.5's ({sub:F4})");
+            InstantConditionSimOutput right = Far.Instant(0, 0.5, 4), left = Far.Instant(0, 0.5, -4);
+            ctx.Record("sideslip", $"Cy {right.Cy:F5} / {left.Cy:F5}");
+            Assert.True(Math.Abs(right.Cy) > 1e-3, $"sideslip gives a side force ({right.Cy:G3})");
+            Assert.Near(-right.Cy, left.Cy, 0.05 * Math.Abs(right.Cy), "side force is equal and opposite either side");
         }
 
         /// <summary>The craft's size along three axes: the spread of its meshes' vertices (in world space) along each.</summary>

@@ -262,6 +262,104 @@ namespace FerramAerospaceResearch.InGameTests
             }
         }
 
+        /// <summary>
+        /// The Heatmaps tab's auto-fit and its m/s axis. Auto-fit (Max altitude and Max Mach on) over a user's range that
+        /// is too small (Mach 0.3-1 x 0-5 km, 4 x 4) runs a coarse 10 x 10 probe out to Mach 15 and half the atmosphere,
+        /// then sweeps the user's grid out to 15% past the probe's highest flyable cell: wider than the user asked, the
+        /// probe left out of the history, the user's grid and minima kept. The speed unit button turns the range into
+        /// m/s at the sea-level speed of sound; a sweep in m/s keeps the typed speeds as its axis, each cell at the Mach
+        /// that speed is at its altitude.
+        /// </summary>
+        [UITest(Kind = "Check", Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 1200)]
+        public static IEnumerator Envelope_AutoFitAndSpeedAxis(TestContext ctx)
+        {
+            var caches = new List<string>();
+            try
+            {
+                yield return OpenWindow("FAREditorModeHeatmaps");
+                ResetConditions();
+                yield return Wait.Frames(2);
+                CelestialBody body = FlightGlobals.GetHomeBody();
+                HeatmapsGUI hm = Heatmaps;
+                PrepareHeatmaps(hm);
+                string craft = EditorLogic.fetch.ship.shipName;
+                int historyBefore = HeatmapPersistence.ListForVessel(craft).Count;
+
+                ctx.Step("Auto-fit both maxima from Mach 0.3-1 x 0-5 km, 4 x 4");
+                var fit = new SweepOut();
+                yield return Sweep(new[] { "0.3", "1", "0", "5", "4", "4" }, false, true, fit, autoFit: true);
+                caches.Add(fit.CachePath);
+                HeatmapResult r = fit.Results[0];
+                double machMax = double.Parse(Get<string>(hm, "_machMax"), CultureInfo.InvariantCulture);
+                double altMaxKm = double.Parse(Get<string>(hm, "_altMaxKm"), CultureInfo.InvariantCulture);
+                ctx.Record("fitted", $"Mach 0.3-{machMax}, 0-{altMaxKm} km; ceiling {r.CeilingM:F0} m");
+                RecordGrid(ctx, "fit", r.Envelope, r.MachAxis.Length, r.AltAxis.Length);
+                Assert.Equal("4", Get<string>(hm, "_nMach"), "the user's Mach cells after the probe");
+                Assert.Equal("4", Get<string>(hm, "_nAlt"), "the user's altitude cells after the probe");
+                Assert.Equal("0.3", Get<string>(hm, "_machMin"), "the user's Mach minimum after the probe");
+                Assert.Equal("0", Get<string>(hm, "_altMinKm"), "the user's altitude minimum after the probe");
+                Assert.Equal(4, r.MachAxis.Length, "the sweep's Mach columns are the user's");
+                Assert.Equal(4, r.AltAxis.Length, "the sweep's altitude rows are the user's");
+                Assert.Near(machMax, r.MachAxis[3], 1e-9, "the sweep runs to the fitted Mach");
+                Assert.Near(altMaxKm * 1000, r.AltAxis[3], 1e-6, "the sweep runs to the fitted altitude");
+                Assert.True(machMax > 1 && altMaxKm > 5, "the fit widened the range past the user's (the Aeris flies above Mach 1 and 5 km)");
+
+                // the probe: 10 cells from the user's minimum to Mach 15 and to half the atmosphere; the fit is 15%
+                // past one of its cells (capped there)
+                double probeAltStep = body.atmosphereDepth / 2 / 9, probeMachStep = (15 - 0.3) / 9;
+                int ja = (int)Math.Round(altMaxKm * 1000 / 1.15 / probeAltStep), im = (int)Math.Round((machMax / 1.15 - 0.3) / probeMachStep);
+                Assert.Near(Math.Min(ja * probeAltStep * 1.15, body.atmosphereDepth / 2) / 1000, altMaxKm, 0.05,
+                            $"the fitted altitude is 15% past probe row {ja} (km)");
+                Assert.Near(Math.Min((0.3 + im * probeMachStep) * 1.15, 15), machMax, 0.005, $"the fitted Mach is 15% past probe column {im}");
+                Assert.True(r.CeilingM >= r.AltAxis[1], $"the envelope reaches past the frame's lowest third ({r.CeilingM:F0} m)");
+                int historyAfter = HeatmapPersistence.ListForVessel(craft).Count;
+                Assert.Equal(historyBefore + 1, historyAfter, "one sweep joins the history, not the probe");
+
+                ctx.Step("The speed unit button: the range in m/s at the sea-level speed of sound");
+                yield return Imgui.SetTextNth(0, "0.3", Window);
+                yield return Imgui.SetTextNth(1, "2", Window);
+                double sos0 = EditorAtmosphere.GetGasProperties(body, 0).SpeedOfSound;
+                yield return SetHeatmapToggles(false, true, speedInMS: true);
+                Assert.Equal(Inv(0.3 * sos0, "F0"), Get<string>(hm, "_machMin"), "the minimum in m/s");
+                Assert.Equal(Inv(2 * sos0, "F0"), Get<string>(hm, "_machMax"), "the maximum in m/s");
+
+                ctx.Step("A sweep at 100-700 m/s x 0-10 km, 4 x 3");
+                var ms = new SweepOut();
+                yield return Sweep(new[] { "100", "700", "0", "10", "4", "3" }, false, true, ms, speedInMS: true);
+                caches.Add(ms.CachePath);
+                HeatmapResult s = ms.Results[0];
+                RecordGrid(ctx, "speeds", s.Envelope, 4, 3);
+                Assert.True(s.SpeedAxisMode, "the map's x axis is speed");
+                double[] speeds = { 100, 300, 500, 700 }, alts = { 0, 5000, 10000 };
+                Assert.Equal(4, s.MachAxis.Length, "speed columns");
+                for (int i = 0; i < speeds.Length; i++)
+                    Assert.Near(speeds[i], s.MachAxis[i], 1e-9, $"speed column {i} (m/s)");
+                int valid = 0;
+                for (int j = 0; j < alts.Length; j++)
+                {
+                    double sos = EditorAtmosphere.GetGasProperties(body, alts[j]).SpeedOfSound;
+                    for (int i = 0; i < speeds.Length; i++)
+                    {
+                        Cell c = s.Envelope[i, j];
+                        if (c.SpeedMPerS <= 0)
+                            continue;
+                        valid++;
+                        string at = $"at {speeds[i]} m/s, {alts[j] / 1000} km";
+                        Assert.Near(speeds[i] / sos, c.Mach, 1e-3 * c.Mach, $"the Mach {at}");
+                        Assert.Near(speeds[i], c.SpeedMPerS, 0.005 * speeds[i], $"the cell's airspeed {at}");
+                    }
+                }
+                Assert.True(valid >= 10, $"cells with an airspeed ({valid} of 12)");
+                Assert.True(s.Envelope[1, 0].Feasible, "flyable at 300 m/s at sea level");
+            }
+            finally
+            {
+                foreach (string c in caches)
+                    DeleteCache(c);
+                CloseWindow();
+            }
+        }
+
         // ------------------------------------------------------------------------------------------ engine deck
 
         /// <summary>

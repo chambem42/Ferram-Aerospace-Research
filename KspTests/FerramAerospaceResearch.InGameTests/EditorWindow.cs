@@ -187,13 +187,18 @@ namespace FerramAerospaceResearch.InGameTests
             Set(hm, "_fuelPos", 2f);       // the slider at full (the last of the 3 mass samples)
         }
 
-        /// <summary>Mach axis, no auto-fit or auto-recalc, cleanup on, stability and multithreading as asked, through the tab's controls.</summary>
-        public static IEnumerator SetHeatmapToggles(bool stability, bool multithread)
+        /// <summary>
+        /// The x axis in Mach or m/s, auto-fit of both maxima on or off, no auto-recalc, cleanup on, stability and
+        /// multithreading as asked, through the tab's controls.
+        /// </summary>
+        public static IEnumerator SetHeatmapToggles(bool stability, bool multithread, bool autoFit = false, bool speedInMS = false)
         {
-            if (Get<bool>(Heatmaps, "_speedInMS"))
-                yield return Imgui.Click("m/s", Window, exact: true);
-            yield return Imgui.Toggle("Max altitude", false, Window);
-            yield return Imgui.Toggle("Max Mach", false, Window);
+            bool inMS = Get<bool>(Heatmaps, "_speedInMS");
+            if (inMS != speedInMS)
+                yield return Imgui.Click(inMS ? "m/s" : "Mach", Window, exact: true);
+            Assert.Equal(speedInMS, Get<bool>(Heatmaps, "_speedInMS"), "the speed unit button");
+            yield return Imgui.Toggle("Max altitude", autoFit, Window);
+            yield return Imgui.Toggle(speedInMS ? "Max speed" : "Max Mach", autoFit, Window);
             yield return Imgui.Toggle(L("FARHeatmapsAutoRecalc"), false, Window);
             yield return Imgui.Toggle("Cleanup", true, Window);
             yield return Imgui.Toggle("Multithread", multithread, Window);
@@ -204,13 +209,14 @@ namespace FerramAerospaceResearch.InGameTests
         /// A sweep through the Heatmaps tab: its range fields typed in (Mach min, max, altitude min, max km, cells along
         /// each), Run pressed, the sweep waited out. Records the history file it saved, for the test to delete.
         /// </summary>
-        public static IEnumerator Sweep(string[] fields, bool stability, bool multithread, SweepOut o)
+        public static IEnumerator Sweep(string[] fields, bool stability, bool multithread, SweepOut o, bool autoFit = false,
+                                        bool speedInMS = false)
         {
             SelectTab("FAREditorModeHeatmaps");
             yield return Wait.Frames(2);
             HeatmapsGUI hm = Heatmaps;
             PrepareHeatmaps(hm);
-            yield return SetHeatmapToggles(stability, multithread);
+            yield return SetHeatmapToggles(stability, multithread, autoFit, speedInMS);
             for (int i = 0; i < fields.Length; i++)
                 yield return Imgui.SetTextNth(i, fields[i], Window);
             Assert.Equal(multithread, Get<bool>(hm, "_multithread"), "the Multithread toggle");
@@ -218,7 +224,8 @@ namespace FerramAerospaceResearch.InGameTests
 
             object before = Get(hm, "_results");
             yield return Imgui.Click(L("FARStabHeatmapRun"), Window);
-            yield return Wait.Until(() => !hm.IsSweepRunning, 900, "the heatmap sweep", shot: false);
+            // an auto-fit probe hands over to the sweep it framed in the same frame it finishes
+            yield return Wait.Until(() => !hm.IsSweepRunning && !Get<bool>(hm, "_autoFitProbe"), 900, "the heatmap sweep", shot: false);
 
             o.Results = Get<List<HeatmapResult>>(hm, "_results");
             o.Status = Get<string>(hm, "_statusMessage");

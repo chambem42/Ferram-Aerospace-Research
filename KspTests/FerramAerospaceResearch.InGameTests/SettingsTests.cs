@@ -7,6 +7,7 @@ using System.Reflection;
 using ferram4;
 using FerramAerospaceResearch.FARAeroComponents;
 using FerramAerospaceResearch.FARGUI.FAREditorGUI;
+using FerramAerospaceResearch.FARPartGeometry;
 using FerramAerospaceResearch.Geometry;
 using FerramAerospaceResearch.Settings;
 using KspTest;
@@ -488,7 +489,7 @@ namespace FerramAerospaceResearch.InGameTests
             {
                 ctx.Step("An eighth of the voxels");
                 vs.numVoxelsControllableVessel = count / 8;
-                yield return Revoxelize("an eighth of the voxels");
+                yield return Far.Revoxelize("an eighth of the voxels");
                 double t1 = v.SectionThickness, len1 = v.Length, max1 = v.MaxCrossSectionArea;
                 int n1 = v.GetCrossSectionAreas().Length;
                 ctx.Record("coarse", $"{count / 8} voxels: section {t1:F4} m, {n1} sections, length {len1:F2} m, max area {max1:F3} m2");
@@ -501,7 +502,7 @@ namespace FerramAerospaceResearch.InGameTests
                 ctx.Step("The voxel count put back");
                 vs.numVoxelsControllableVessel = count;
                 restored = true;
-                yield return Revoxelize("the voxel count put back");
+                yield return Far.Revoxelize("the voxel count put back");
                 Assert.Near(t0, v.SectionThickness, 1e-3 * t0, "the section thickness with the voxel count put back");
                 Assert.Equal(n0, v.GetCrossSectionAreas().Length, "the cross-sections with the voxel count put back");
             }
@@ -510,6 +511,86 @@ namespace FerramAerospaceResearch.InGameTests
                 vs.numVoxelsControllableVessel = count;
                 if (!restored && EditorGUI.Instance != null)
                     EditorGUI.RequestUpdateVoxel();
+            }
+        }
+
+        /// <summary>
+        /// The subvoxel resolution ("Use Higher Res SubVoxels"; FAR takes it up at the next scene's voxel setup, which
+        /// the test calls itself): low-res subvoxels (4 bits a plane) give the craft about the shape the high-res ones
+        /// (8 bits) do. Then high-res again at the same voxel count, so the chunk pool is not rebuilt: the shape is the
+        /// high-res one, not the low-res chunks read at the high-res scale. The setting and count put back give the
+        /// first shape.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
+        public static IEnumerator Settings_LowResSubvoxelsKeepTheShape(TestContext ctx)
+        {
+            yield return Far.WaitForEditorVoxels();
+            FARVoxelSettings vs = FARSettingsScenarioModule.VoxelSettings;
+            int count = vs.numVoxelsControllableVessel;
+            bool highRes = vs.useHigherResVoxelPoints;
+            VehicleAerodynamics v = Far.EditorVehicle;
+
+            (double Volume, double MaxArea, double Length, double Cd) Shape(string what)
+            {
+                var s = (Far.Volume(v), v.MaxCrossSectionArea, v.Length, Far.Instant(2, 0.5).Cd);
+                ctx.Record(what, $"volume {s.Item1:F3} m3, max area {s.Item2:F4} m2, length {s.Item3:F3} m, Cd {s.Item4:F5}");
+                return s;
+            }
+
+            void AssertNear((double Volume, double MaxArea, double Length, double Cd) e,
+                            (double Volume, double MaxArea, double Length, double Cd) a, double tol, string what)
+            {
+                Assert.Near(e.Volume, a.Volume, tol * e.Volume, $"the volume, {what}");
+                Assert.Near(e.MaxArea, a.MaxArea, tol * e.MaxArea, $"the largest cross-section, {what}");
+                Assert.Near(e.Length, a.Length, tol * e.Length + 2 * v.SectionThickness, $"the length, {what}");
+                Assert.Near(e.Cd, a.Cd, 2 * tol * e.Cd, $"Cd at Mach 0.5, 2 deg, {what}");
+            }
+
+            // a few hundred voxels more: the chunk pool is rebuilt (its size follows the count), the voxel barely smaller
+            int more = count + count / 20;
+            bool restored = false;
+            try
+            {
+                ctx.Step($"High-res subvoxels at {count} voxels");
+                vs.useHigherResVoxelPoints = true;
+                VehicleVoxel.VoxelSetup();
+                yield return Far.Revoxelize("high-res subvoxels");
+                var high = Shape("high");
+
+                ctx.Step($"Low-res subvoxels at {more} voxels (the pool rebuilt with 4-bit chunks)");
+                vs.useHigherResVoxelPoints = false;
+                vs.numVoxelsControllableVessel = more;
+                VehicleVoxel.VoxelSetup();
+                yield return Far.Revoxelize("low-res subvoxels");
+                var low = Shape("low");
+                AssertNear(high, low, 0.05, "low-res subvoxels against high-res");
+
+                ctx.Step($"High-res subvoxels again at {more} voxels (the pool not rebuilt)");
+                vs.useHigherResVoxelPoints = true;
+                VehicleVoxel.VoxelSetup();
+                yield return Far.Revoxelize("high-res subvoxels, same count");
+                var again = Shape("highAgain");
+                AssertNear(high, again, 0.03, "high-res subvoxels after low-res chunks");
+
+                ctx.Step("The setting and the count put back");
+                vs.useHigherResVoxelPoints = highRes;
+                vs.numVoxelsControllableVessel = count;
+                VehicleVoxel.VoxelSetup();
+                restored = true;
+                yield return Far.Revoxelize("the subvoxel setting put back");
+                if (highRes)
+                    AssertNear(high, Shape("restored"), 1e-3, "with the setting put back");
+            }
+            finally
+            {
+                vs.useHigherResVoxelPoints = highRes;
+                vs.numVoxelsControllableVessel = count;
+                if (!restored)
+                {
+                    VehicleVoxel.VoxelSetup();
+                    if (EditorGUI.Instance != null)
+                        EditorGUI.RequestUpdateVoxel();
+                }
             }
         }
 
@@ -544,17 +625,17 @@ namespace FerramAerospaceResearch.InGameTests
                 ctx.Step("Strict: " + strict.name);
                 m.settings = strict;
                 m.currentIndex = strict.index;
-                yield return Revoxelize("the strict preset");
+                yield return Far.Revoxelize("the strict preset");
                 double roughS = Curvature(v), sonicS = v.SonicDragArea, cdS = Far.Instant(0, 1.05).Cd;
-                double lenS = v.Length, volS = Volume(v);
+                double lenS = v.Length, volS = Far.Volume(v);
                 ctx.Record("strict", $"sum|A''| {roughS:G5}, Mach 1 drag area {sonicS:G5}, Cd(M1.05) {cdS:F5}, volume {volS:F3}");
 
                 ctx.Step("Lenient: " + lenient.name);
                 m.settings = lenient;
                 m.currentIndex = lenient.index;
-                yield return Revoxelize("the lenient preset");
+                yield return Far.Revoxelize("the lenient preset");
                 double roughL = Curvature(v), sonicL = v.SonicDragArea, cdL = Far.Instant(0, 1.05).Cd;
-                double lenL = v.Length, volL = Volume(v);
+                double lenL = v.Length, volL = Far.Volume(v);
                 ctx.Record("lenient", $"sum|A''| {roughL:G5}, Mach 1 drag area {sonicL:G5}, Cd(M1.05) {cdL:F5}, volume {volL:F3}");
 
                 Assert.Near(lenS, lenL, 2 * v.SectionThickness, "the same voxel model's length under both presets");
@@ -567,7 +648,7 @@ namespace FerramAerospaceResearch.InGameTests
                 m.settings = settingsAtStart;
                 m.currentIndex = indexAtStart;
                 restored = true;
-                yield return Revoxelize("the settings put back");
+                yield return Far.Revoxelize("the settings put back");
             }
             finally
             {
@@ -914,22 +995,10 @@ namespace FerramAerospaceResearch.InGameTests
         // ------------------------------------------------------------------------------------------ helpers: editor
 
         /// <summary>A fresh voxelization of the craft in the editor, and its result taken up by the editor's sims.</summary>
-        private static IEnumerator Revoxelize(string what)
-        {
-            VehicleAerodynamics v = Far.EditorVehicle;
-            EditorGUI.RequestUpdateVoxel();
-            // the request is taken when the voxelization is queued (Voxelizing set on the way), then the thread runs
-            yield return Wait.Until(() => !Far.Editor.VoxelizationUpdateQueued, 60, $"FAR's editor to voxelize ({what})", shot: false);
-            yield return Wait.Until(() => !v.Voxelizing, 120, $"FAR's voxelization to finish ({what})", shot: false);
-            yield return Wait.Seconds(1);
-            yield return Far.WaitForEditorVoxels();
-        }
-
         /// <summary>The cross-sections' total curvature: the sum of |A''| over the craft, times the section thickness.</summary>
         private static double Curvature(VehicleAerodynamics v) =>
             v.GetCrossSection2ndAreaDerivs().Sum(d => Math.Abs(d)) * v.SectionThickness;
 
-        private static double Volume(VehicleAerodynamics v) => v.GetCrossSectionAreas().Sum() * v.SectionThickness;
 
     }
 }

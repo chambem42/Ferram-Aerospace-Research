@@ -98,6 +98,21 @@ namespace FerramAerospaceResearch.InGameTests
             yield return Wait.Until(() => EditorReady, timeoutSec, "FAR's editor voxels and sim", shot: false);
         }
 
+        /// <summary>The craft in the editor voxelized again (after a setting or part change FAR does not see itself).</summary>
+        public static IEnumerator Revoxelize(string what)
+        {
+            VehicleAerodynamics v = EditorVehicle;
+            EditorGUI.RequestUpdateVoxel();
+            // the request is taken when the voxelization is queued (Voxelizing set on the way), then the thread runs
+            yield return Wait.Until(() => !Editor.VoxelizationUpdateQueued, 60, $"FAR's editor to voxelize ({what})", shot: false);
+            yield return Wait.Until(() => !v.Voxelizing, 120, $"FAR's voxelization to finish ({what})", shot: false);
+            yield return Wait.Seconds(1);
+            yield return WaitForEditorVoxels();
+        }
+
+        /// <summary>The voxel model's volume: its cross-sections times their thickness.</summary>
+        public static double Volume(VehicleAerodynamics v) => v.GetCrossSectionAreas().Sum() * v.SectionThickness;
+
         /// <summary>The instant sim at one condition, steady (no rates), no flaps or spoilers.</summary>
         public static InstantConditionSimOutput Instant(double alphaDeg, double mach, double betaDeg = 0, double pitch = 0)
         {
