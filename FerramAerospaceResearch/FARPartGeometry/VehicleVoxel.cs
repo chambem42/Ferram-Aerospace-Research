@@ -136,7 +136,9 @@ namespace FerramAerospaceResearch.FARPartGeometry
                 int chunksForQueue =
                     (int)Math.Ceiling(FARSettingsScenarioModule.VoxelSettings.numVoxelsControllableVessel * 0.034375);
 
-                if (MAX_CHUNKS_IN_QUEUE == chunksForQueue)
+                // the pool's chunks have the subvoxel format they were made with: a new format needs new chunks
+                bool sameFormat = clearedChunks.Count == 0 || clearedChunks.Peek().HighRes == useHigherResVoxels;
+                if (MAX_CHUNKS_IN_QUEUE == chunksForQueue && sameFormat)
                     return;
                 clearedChunks.Clear();
                 MAX_CHUNKS_IN_QUEUE = chunksForQueue;
@@ -413,6 +415,9 @@ namespace FerramAerospaceResearch.FARPartGeometry
 
                         chunk.ClearChunk();
 
+                        // one made before the subvoxel setting changed is not reused
+                        if (chunk.HighRes != useHigherResVoxels)
+                            continue;
                         if (clearedChunks.Count < MAX_CHUNKS_IN_QUEUE)
                             clearedChunks.Push(chunk);
                         else
