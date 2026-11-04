@@ -20,6 +20,10 @@ on:
         description: dotnet test --filter for the in-game tests (default all but the Explicit ones)
         required: false
         default: ""
+      coverage:
+        description: measure FAR's line coverage too (an instrumented build; adds a slower job)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -242,6 +246,117 @@ jobs:
           path: |
             ${{ runner.temp }}/results
             ${{ runner.temp }}/trx
+          if-no-files-found: warn
+
+  # FAR's line coverage: the unit and in-game tests against FAR instrumented by AltCover, one count per sequence point,
+  # merged into a report (the job summary and the coverage artifact). Slower than the plain run, so on pushes to the
+  # default branch and when a manual run asks for it. Same secrets rule as the in-game job; the game folder and its
+  # instances are never uploaded, only the counts.
+  coverage:
+    needs: build
+    if: >-
+      (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) ||
+      (github.event_name == 'workflow_dispatch' && inputs.coverage)
+    runs-on: windows-2022
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    env:
+      TEST_FILTER: ${{ inputs.filter }}
+      ALTCOVER: "9.0.145"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.x
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Paths
+        run: |
+          w=$(cygpath -m "$RUNNER_TEMP")
+          echo "WORK=$w" >> "$GITHUB_ENV"
+          echo "COV=$w/cov" >> "$GITHUB_ENV"
+          echo "KSPTEST_GAME=$w/ksp" >> "$GITHUB_ENV"
+          echo "KSPTEST_INSTANCES=$w/instances" >> "$GITHUB_ENV"
+          echo "KSPTEST_RESULTS=$w/results" >> "$GITHUB_ENV"
+          echo "KSPTEST_CKAN=$w/ckan/ckan.exe" >> "$GITHUB_ENV"
+          echo "KSPTEST_KSP_ARGS=-batchmode" >> "$GITHUB_ENV"
+          echo "KSPTEST_TEXTURES=low" >> "$GITHUB_ENV"
+          # the runner's desktop as it comes (no screenshots kept here)
+          echo "KSPTEST_WINDOW=1024x768" >> "$GITHUB_ENV"
+          echo "FarGameData=$w/cov/overlay/FerramAerospaceResearch" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v6
+        with:
+          name: far-gamedata
+          path: ${{ runner.temp }}/far/FerramAerospaceResearch
+      - name: Download the game
+        env:
+          GH_TOKEN: ${{ secrets.KSP_GAME_TOKEN }}
+          GAME_REPO: ${{ vars.KSP_GAME_REPO }}
+        run: gh release download "$GAME_RELEASE-windows" -R "$GAME_REPO" -p '*.7z.*' -D "$WORK/game-archive"
+      - name: Extract the game
+        env:
+          KSP_GAME_KEY: ${{ secrets.KSP_GAME_KEY }}
+        run: |
+          7z x -y -bso0 -bsp0 "-p$KSP_GAME_KEY" "-o$KSPTEST_GAME" "$WORK/game-archive/$GAME_RELEASE-windows.7z.001"
+          rm -rf "$WORK/game-archive"
+      - name: CKAN
+        run: |
+          mkdir -p "$WORK/ckan"
+          curl -fsSL -o "$KSPTEST_CKAN" https://github.com/KSP-CKAN/CKAN/releases/latest/download/ckan.exe
+      - name: Instrument FAR
+        run: |
+          curl -fsSL -o "$WORK/altcover.nupkg" "https://www.nuget.org/api/v2/package/altcover/$ALTCOVER"
+          7z x -y -bso0 -bsp0 "-o$WORK/altcover" "$WORK/altcover.nupkg" 'tools/net472/*'
+          p="$WORK/far/FerramAerospaceResearch/Plugins"
+          mkdir -p "$COV/in" "$COV/farbin" "$COV/overlay"
+          cp "$p"/FerramAerospaceResearch*.dll "$p"/FerramAerospaceResearch*.pdb "$COV/in/"
+          # KSP's own assemblies resolve FAR's references (it needs nothing from the mods it talks to)
+          deps=(); for f in "$(cygpath -u "$KSPTEST_GAME")"/KSP_x64_Data/Managed/*.dll; do deps+=("-d=$(cygpath -m "$f")"); done
+          "$WORK/altcover/tools/net472/AltCover.exe" -i="$COV/in" -o="$COV/out" --save --portable "${deps[@]}" > "$COV/instrument.log" 2>&1 ||
+            { tail -20 "$COV/instrument.log"; exit 1; }
+          # the in-game tests' FAR: the build's GameData with the instrumented assemblies, the recorder and its report
+          cp -r "$WORK/far/FerramAerospaceResearch" "$COV/overlay/"; rm -f "$COV/overlay/FerramAerospaceResearch/Plugins/"*.pdb
+          cp "$COV/out"/FerramAerospaceResearch*.dll "$COV/out/AltCover.Recorder.g.dll" "$COV/out/coverage.xml" "$COV/overlay/FerramAerospaceResearch/Plugins/"
+          # the unit tests' FAR
+          cp "$COV/out"/FerramAerospaceResearch*.dll "$COV/out/AltCover.Recorder.g.dll" "$p/ferramGraph.dll" "$COV/farbin/"
+      - name: Unit tests
+        run: |
+          U=KspTests/FerramAerospaceResearch.UnitTests/bin/Debug/net48
+          dotnet build KspTests/FerramAerospaceResearch.UnitTests "-p:KspDir=$KSPTEST_GAME" "-p:FarBin=$COV/farbin" -v q -nologo
+          cp "$COV/out/coverage.xml" "$COV/out/AltCover.Recorder.g.dll" "$U/"
+          dotnet test KspTests/FerramAerospaceResearch.UnitTests --no-build || echo "::warning::unit tests failed under coverage"
+          cp "$U/coverage.xml" "$COV/unit.xml"
+      - name: In-game tests
+        run: |
+          args=(test KspTests/FerramAerospaceResearch.InGameTests.Run -p:KspDir="$KSPTEST_GAME" --logger "console;verbosity=normal")
+          [ -n "$TEST_FILTER" ] && args+=(--filter "$TEST_FILTER")
+          # timing-sensitive tests can fail under the instrumentation's slowdown; their counts still go in
+          dotnet "${args[@]}" || echo "::warning::in-game tests failed under coverage"
+      # each KSP instance (the main one, AJE's) keeps its own counts in its copy of FAR
+      - name: Report
+        run: |
+          reports=("$COV/unit.xml"); i=0
+          for f in "$(cygpath -u "$KSPTEST_INSTANCES")"/*/GameData/FerramAerospaceResearch/Plugins/coverage.xml; do
+            [ -f "$f" ] || continue
+            i=$((i+1)); cp "$f" "$COV/ingame-$i.xml"; reports+=("$COV/ingame-$i.xml")
+          done
+          python -I .github/scripts/coverage_report.py "${GITHUB_REPOSITORY#*/}/" "$COV/report.md" "${reports[@]}"
+          cat "$COV/report.md" >> "$GITHUB_STEP_SUMMARY"
+      # the report and the counts only: never the game or an instance
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: coverage
+          path: |
+            ${{ runner.temp }}/cov/report.md
+            ${{ runner.temp }}/cov/unit.xml
+            ${{ runner.temp }}/cov/ingame-*.xml
           if-no-files-found: warn
 
   # one HTML page of screenshots per in-game leg, uploaded unzipped so it opens as a single file. Its own job, from
