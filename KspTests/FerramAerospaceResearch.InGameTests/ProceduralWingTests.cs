@@ -93,8 +93,10 @@ namespace FerramAerospaceResearch.InGameTests
 
             ctx.Step("The stock Aeris 4A");
             yield return Nav.LoadCraft(ctx, ctx.CraftPath(Far.Plane, "SPH"));
-            yield return Wait.Seconds(2);
-            yield return Far.WaitForEditorVoxels();
+            // FAR's sim reads ready from the craft before until it has voxelized this one and taken up its wings
+            yield return Wait.Until(() => Far.EditorReady && EditorLogic.fetch.ship.parts.Any(p => p.partInfo.name == "deltaWing") &&
+                                          Far.Instant(2, 0.5).Cl > 0.01,
+                                    120, "FAR's editor sim on the stock craft", shot: false);
             Dictionary<uint, Panel> stock = Panels(EditorLogic.fetch.ship.parts, p => p.partInfo.name == "structuralWing" || p.partInfo.name == "deltaWing");
             Assert.Equal(4, stock.Count, "the stock plane's four main panels");
             Aero real = Measure();

@@ -386,6 +386,97 @@ namespace FerramAerospaceResearch.InGameTests
             }
         }
 
+        // ------------------------------------------------------------------------------------------ history
+
+        /// <summary>
+        /// The Heatmaps tab's history of the craft's sweeps: each sweep is filed on disk, the newest shown. The back
+        /// button shows the older sweep read back from its file: the same maps as swept (every mass sample's cells,
+        /// the axes, the ceiling, the stability flags). Forward shows the newer again; Remove deletes the one shown
+        /// and its file and shows the one left; Clear History deletes the rest.
+        /// </summary>
+        [UITest(Kind = "Check", Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
+        public static IEnumerator Envelope_SweepHistoryIsKeptAndBrowsed(TestContext ctx)
+        {
+            const string Back = "◄", Forward = "►";
+            SweepOut first = null, second = null;
+            try
+            {
+                yield return OpenWindow("FAREditorModeHeatmaps");
+                ResetConditions();
+                yield return Wait.Frames(2);
+                HeatmapsGUI hm = Heatmaps;
+                int before = HeatmapPersistence.ListForVessel(Far.Plane).Count;
+
+                ctx.Step("Two sweeps: with stability, then without");
+                first = new SweepOut();
+                yield return Sweep(new[] { "0.4", "1.2", "0", "6", "3", "3" }, true, true, first);
+                second = new SweepOut();
+                yield return Sweep(new[] { "0.6", "1.6", "0", "9", "3", "3" }, false, true, second);
+                var history = Get<List<HeatmapPersistence.CacheEntry>>(hm, "_cachedSweeps");
+                ctx.Record("history", string.Join(", ", history.Select(h => System.IO.Path.GetFileName(h.Path))));
+                Assert.Equal(before + 2, history.Count, "both sweeps filed in the craft's history");
+                Assert.True(first.CachePath != null && System.IO.File.Exists(first.CachePath) && System.IO.File.Exists(second.CachePath), "each sweep's file on disk");
+                Assert.Equal(history.Count - 1, Get<int>(hm, "_viewIndex"), "the newest sweep shown");
+
+                ctx.Step("Back: the first sweep, read back from its file");
+                yield return Imgui.Click(Back, Window, exact: true);
+                Assert.Equal(history.Count - 2, Get<int>(hm, "_viewIndex"), "the older sweep shown");
+                var shown = Get<List<HeatmapResult>>(hm, "_results");
+                Assert.False(ReferenceEquals(shown, first.Results), "the sweep read back, not the one in memory");
+                AssertSameSweep(first.Results, shown, "the first sweep read back");
+                yield return Snap.Shot(ctx, "older-sweep");
+
+                ctx.Step("Forward: the second sweep");
+                yield return Imgui.Click(Forward, Window, exact: true);
+                Assert.Equal(history.Count - 1, Get<int>(hm, "_viewIndex"), "the newest sweep shown again");
+                AssertSameSweep(second.Results, Get<List<HeatmapResult>>(hm, "_results"), "the second sweep read back");
+
+                ctx.Step("Remove: the second sweep and its file gone");
+                yield return Imgui.Click("Remove", Window, exact: true);
+                history = Get<List<HeatmapPersistence.CacheEntry>>(hm, "_cachedSweeps");
+                Assert.Equal(before + 1, history.Count, "one sweep left in the history");
+                Assert.False(System.IO.File.Exists(second.CachePath), "the removed sweep's file deleted");
+                AssertSameSweep(first.Results, Get<List<HeatmapResult>>(hm, "_results"), "the sweep left, shown");
+
+                ctx.Step("Clear History: none left");
+                yield return Imgui.Click("Clear History", Window, exact: true);
+                Assert.Equal(0, Get<List<HeatmapPersistence.CacheEntry>>(hm, "_cachedSweeps").Count, "the history empty");
+                Assert.Equal(0, HeatmapPersistence.ListForVessel(Far.Plane).Count, "no sweep of the craft on disk");
+                Assert.False(System.IO.File.Exists(first.CachePath), "the first sweep's file deleted");
+            }
+            finally
+            {
+                DeleteCache(first?.CachePath);
+                DeleteCache(second?.CachePath);
+                CloseWindow();
+            }
+        }
+
+        /// <summary>Two sweeps' maps the same: axes, ceiling, every mass sample's cells, and the stability flags.</summary>
+        private static void AssertSameSweep(List<HeatmapResult> expected, List<HeatmapResult> actual, string what)
+        {
+            Assert.True(actual != null && actual.Count == expected.Count, $"{what}: {expected.Count} map(s)");
+            for (int m = 0; m < expected.Count; m++)
+            {
+                HeatmapResult e = expected[m], a = actual[m];
+                AssertAxes(a, e.MachAxis, e.AltAxis);
+                Assert.True(e.CeilingM.Equals(a.CeilingM), $"{what}: the ceiling ({e.CeilingM} against {a.CeilingM})");
+                Assert.Equal(e.EnvelopeSamples.Length, a.EnvelopeSamples.Length, $"{what}: mass samples");
+                for (int k = 0; k < e.EnvelopeSamples.Length; k++)
+                    AssertSameMap(e.EnvelopeSamples[k], a.EnvelopeSamples[k], e.MachAxis.Length, e.AltAxis.Length, $"{what}, mass sample {k}");
+                Assert.Equal(e.HasStability, a.HasStability, $"{what}: a stability map or none");
+                if (!e.HasStability)
+                    continue;
+                for (int i = 0; i < e.MachAxis.Length; i++)
+                    for (int j = 0; j < e.AltAxis.Length; j++)
+                    {
+                        string fe = e.Stability[i, j] == null ? "-" : string.Join(" ", e.Stability[i, j].OutOfRange.Select(o => o.Item1).OrderBy(n => n));
+                        string fa = a.Stability[i, j] == null ? "-" : string.Join(" ", a.Stability[i, j].OutOfRange.Select(o => o.Item1).OrderBy(n => n));
+                        Assert.Equal(fe, fa, $"{what}: the stability flags at [{i},{j}]");
+                    }
+            }
+        }
+
         // ------------------------------------------------------------------------------------------ threads
 
         /// <summary>
