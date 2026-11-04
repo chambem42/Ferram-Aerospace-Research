@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using FerramAerospaceResearch.FARGUI.FARFlightGUI;
 using KspTest;
 using UnityEngine;
 
@@ -165,6 +166,39 @@ namespace FerramAerospaceResearch.InGameTests
             Assert.True(FARAPI.VesselDragCoeff(v) > 0, "positive Cd");
             Assert.True(FARAPI.VesselRefArea(v) > 0, "a reference area");
             Assert.True(FARAPI.VesselVoxelizationCompletedEver(v), "the vessel was voxelized");
+
+            // the altitude-only prediction: drag against the velocity and lift up, of the flight's size (how close
+            // it comes is Flight_PredictionIsTheAppliedForce's, explicit while master is 40% short on drag)
+            ctx.Step("CalculateVesselAeroForces at the vessel's speed and altitude");
+            double drag = samples.Average(s => s.Flight[0]), lift = samples.Average(s => s.Flight[1]);
+            Vector3 vel = v.srf_velocity;
+            FARAPI.CalculateVesselAeroForces(v, out Vector3 f, out Vector3 tq, vel, v.altitude);
+            Vector3 up = Vector3.ProjectOnPlane(v.upAxis, vel).normalized;
+            double predDrag = -Vector3.Dot(f, vel.normalized), predLift = Vector3.Dot(f, up);
+            ctx.Record("altitudeApi", $"drag {predDrag:F2} kN (flying {drag:F2}), lift {predLift:F2} kN (flying {lift:F2}), torque {tq.magnitude:F2} kN m");
+            Assert.True(predDrag > 0.3 * drag && predDrag < 3 * drag, $"the predicted drag is the flight's to within a factor of 3 ({predDrag:F2} against {drag:F2} kN)");
+            Assert.True(predLift > 0.5 * lift && predLift < 2 * lift, $"the predicted lift is the flight's to within a factor of 2 ({predLift:F2} against {lift:F2} kN)");
+
+            ctx.Step("ToggleAirspeedDisplay, for every vessel and for this one");
+            AirspeedSettingsGUI air = Far.FlightGui(v).airSpeedGUI;
+            bool allAtStart = AirspeedSettingsGUI.allEnabled, vesselAtStart = air.enabled;
+            try
+            {
+                Assert.True(FARAPI.ToggleAirspeedDisplay(false), "turning the airspeed display off everywhere");
+                Assert.False(AirspeedSettingsGUI.allEnabled, "the airspeed display off everywhere");
+                Assert.True(FARAPI.ToggleAirspeedDisplay(), "toggling it everywhere");
+                Assert.True(AirspeedSettingsGUI.allEnabled, "toggled back on everywhere");
+                Assert.True(FARAPI.ToggleAirspeedDisplay(false, v), "turning it off for the vessel");
+                Assert.False(air.enabled, "off for the vessel");
+                Assert.True(AirspeedSettingsGUI.allEnabled, "still on everywhere else");
+                Assert.True(FARAPI.ToggleAirspeedDisplay(null, v), "toggling it for the vessel");
+                Assert.True(air.enabled, "back on for the vessel");
+            }
+            finally
+            {
+                AirspeedSettingsGUI.allEnabled = allAtStart;
+                air.enabled = vesselAtStart;
+            }
         }
     }
 }

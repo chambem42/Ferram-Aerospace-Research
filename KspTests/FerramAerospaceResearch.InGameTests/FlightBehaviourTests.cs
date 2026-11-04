@@ -338,6 +338,40 @@ namespace FerramAerospaceResearch.InGameTests
         }
 
         /// <summary>
+        /// A wing past its stress limit tears off. An outboard wing panel's limit is set below the load it carries in
+        /// cruise (the per-part limit FAR takes from the part's stress template at start, as a weaker template would
+        /// give it): within a few physics frames FAR decouples it from the plane, the flight log records the
+        /// aerodynamic failure, and the parts still within their limits stay on.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        public static IEnumerator Behaviour_OverstressedWingTearsOff(TestContext ctx)
+        {
+            yield return Wait.Seconds(5);
+            yield return FlightTests.Airborne(Far.At(0.5, 3000, 4));
+            Vessel v = FlightGlobals.ActiveVessel;
+            Assert.True(FARDebugValues.allowStructuralFailures, "structural failures on (FAR's default)");
+
+            // an outboard panel: a wing with nothing attached to it, the largest such
+            Part wing = v.parts.Where(p => p.parent != null && p.children.Count == 0 && p.Modules.Contains<FARWingAerodynamicModel>())
+                           .OrderByDescending(p => p.Modules.GetModule<FARWingAerodynamicModel>().S).FirstOrDefault();
+            Assert.NotNull(wing, "an outboard wing panel");
+            FARAeroPartModule aero = wing.Modules.GetModule<FARAeroPartModule>();
+            int partsBefore = v.parts.Count, logBefore = FlightLogger.eventLog.Count;
+            ctx.Record("wing", $"{wing.partInfo.title} ({wing.partInfo.name}), limits Y {Refl.Get(aero, "partForceMaxY")}, XZ {Refl.Get(aero, "partForceMaxXZ")} kN");
+
+            ctx.Step("The panel's stress limit below its cruise load");
+            Refl.Set(aero, "partStressMaxXZ", 0.0);
+            Refl.Set(aero, "partForceMaxXZ", 0.0);
+            yield return Wait.Until(() => wing.vessel != v, 10, "the overstressed panel to come off", shot: false);
+
+            ctx.Record("after", $"{v.parts.Count} parts (from {partsBefore}); the panel on {wing.vessel?.vesselName}");
+            Assert.Equal(partsBefore - 1, v.parts.Count, "only the panel came off");
+            List<string> logged = FlightLogger.eventLog.Skip(logBefore).ToList();
+            ctx.Record("flightLog", string.Join(" | ", logged));
+            Assert.True(logged.Any(m => m.Contains(wing.partInfo.title)), $"the flight log records the panel's failure ({string.Join(" | ", logged)})");
+        }
+
+        /// <summary>
         /// A stock capsule (Kerbal 1's, off its rocket) dropped at 3 km: falling stowed it picks up speed; its chute,
         /// deployed from the part menu, predeploys, then opens fully at the altitude set, to the full canopy area, and
         /// the capsule settles at the sink rate where the canopy's drag (Cd 1) carries its weight; the chute's info
