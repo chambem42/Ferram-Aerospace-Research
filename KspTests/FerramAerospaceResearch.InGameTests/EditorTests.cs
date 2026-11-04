@@ -116,7 +116,7 @@ namespace FerramAerospaceResearch.InGameTests
         [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Airliner, TimeoutSec = 900)]
         public static IEnumerator Editor_AirlinerDuctsItsIntegratedIntakes(TestContext ctx)
         {
-            yield return Far.WaitForEditorVoxels();
+            yield return Far.WaitForCraft("the airliner", "turboFanSize2", "airlinerMainWing");
             VehicleAerodynamics vehicle = Far.EditorVehicle;
             Part[] goliaths = EditorLogic.fetch.ship.parts.Where(p => p.partInfo.name == "turboFanSize2").ToArray();
             Assert.Equal(2, goliaths.Length, "the airliner's Goliaths");
@@ -185,7 +185,7 @@ namespace FerramAerospaceResearch.InGameTests
         [UITest(Kind = "Check", StartsAt = StartState.Vab, Craft = Rocket, TimeoutSec = 900)]
         public static IEnumerator Editor_RocketVoxelModelMatchesTheStack(TestContext ctx)
         {
-            yield return Far.WaitForEditorVoxels();
+            yield return Far.WaitForCraft("the rocket", "solidBooster.v2", "liquidEngine3.v2");
             VehicleAerodynamics vehicle = Far.EditorVehicle;
             Transform root = EditorLogic.RootPart.transform;
             Vector3 extent = CraftExtent(root.up, root.right, root.forward);

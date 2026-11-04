@@ -33,39 +33,9 @@ namespace FerramAerospaceResearch.InGameTests
             yield return Wait.Until(() => Far.EditorReady && parts.All(n => EditorLogic.fetch.ship.parts.Any(p => p.partInfo.name == n)) &&
                                           Far.Instant(2, 0.5).Cl > 0.01,
                                     120, "FAR's editor sim on " + what, shot: false);
-            yield return Settled(what);
+            yield return Far.Settled(what);
         }
 
-        /// <summary>
-        /// FAR's model of the craft done changing: its lift at 2 deg and its voxel volume the same over two seconds, with
-        /// no voxelization queued. A craft just loaded is voxelized again as its parts finish starting, and
-        /// the wings' interactions follow; read before, the twin comes out a few percent off.
-        /// </summary>
-        private static IEnumerator Settled(string what)
-        {
-            double cl = double.NaN, vol = double.NaN;
-            float stableSince = float.MaxValue, deadline = UnityEngine.Time.realtimeSinceStartup + 120;
-            while (UnityEngine.Time.realtimeSinceStartup < deadline)
-            {
-                yield return Wait.Seconds(0.5);
-                if (!Far.EditorReady)
-                {
-                    stableSince = float.MaxValue;
-                    continue;
-                }
-                double c = Far.Instant(2, 0.5).Cl, v = Far.Volume(Far.EditorVehicle);
-                if (double.IsNaN(cl) || Math.Abs(c - cl) > 1e-7 || Math.Abs(v - vol) > 1e-6)
-                {
-                    cl = c;
-                    vol = v;
-                    stableSince = UnityEngine.Time.realtimeSinceStartup;
-                }
-                else if (UnityEngine.Time.realtimeSinceStartup - stableSince >= 2)
-                    yield break;
-            }
-
-            throw new UITestFailure($"FAR's model of {what} never settled (Cl at 2 deg {cl:F5}, volume {vol:F3} m3)");
-        }
 
         /// <summary>The stock Aeris 4A into the editor in place of the twin, and FAR's sim on it.</summary>
         private static IEnumerator LoadStockAeris(TestContext ctx)
@@ -204,7 +174,7 @@ namespace FerramAerospaceResearch.InGameTests
             Paw.CloseAll();
             yield return Wait.Until(() => Far.EditorReady && Far.EditorVehicle.Length > lenTwin + 0.5, 120,
                                     "FAR to revoxelize the plane with the longer tank", shot: false);
-            yield return Settled("the twin with the longer tank");
+            yield return Far.Settled("the twin with the longer tank");
             double volLonger = Far.Volume(Far.EditorVehicle), added = Math.PI * 0.625 * 0.625;
             ctx.Record("longer", string.Format(CultureInfo.InvariantCulture,
                                                "length {0:F3} -> {1:F3} m: FAR's mesh of the tank {2:F3} -> {3:F3} m long; vehicle {4:F2} -> {5:F2} m, volume {6:F3} -> {7:F3} m3 (a 1.25 m cylinder's metre {8:F3})",

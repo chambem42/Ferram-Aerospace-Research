@@ -287,7 +287,8 @@ namespace FerramAerospaceResearch.InGameTests
 
                 ctx.Step("Auto-fit both maxima from Mach 0.3-1 x 0-5 km, 4 x 4");
                 var fit = new SweepOut();
-                yield return Sweep(new[] { "0.3", "1", "0", "5", "4", "4" }, false, true, fit, autoFit: true);
+                // serial: under a coverage recorder the workers contend for its counters, and the probe takes many minutes
+                yield return Sweep(new[] { "0.3", "1", "0", "5", "4", "4" }, false, false, fit, autoFit: true);
                 caches.Add(fit.CachePath);
                 HeatmapResult r = fit.Results[0];
                 double machMax = double.Parse(Get<string>(hm, "_machMax"), CultureInfo.InvariantCulture);
@@ -319,13 +320,13 @@ namespace FerramAerospaceResearch.InGameTests
                 yield return Imgui.SetTextNth(0, "0.3", Window);
                 yield return Imgui.SetTextNth(1, "2", Window);
                 double sos0 = EditorAtmosphere.GetGasProperties(body, 0).SpeedOfSound;
-                yield return SetHeatmapToggles(false, true, speedInMS: true);
+                yield return SetHeatmapToggles(false, false, speedInMS: true);
                 Assert.Equal(Inv(0.3 * sos0, "F0"), Get<string>(hm, "_machMin"), "the minimum in m/s");
                 Assert.Equal(Inv(2 * sos0, "F0"), Get<string>(hm, "_machMax"), "the maximum in m/s");
 
                 ctx.Step("A sweep at 100-700 m/s x 0-10 km, 4 x 3");
                 var ms = new SweepOut();
-                yield return Sweep(new[] { "100", "700", "0", "10", "4", "3" }, false, true, ms, speedInMS: true);
+                yield return Sweep(new[] { "100", "700", "0", "10", "4", "3" }, false, false, ms, speedInMS: true);
                 caches.Add(ms.CachePath);
                 HeatmapResult s = ms.Results[0];
                 RecordGrid(ctx, "speeds", s.Envelope, 4, 3);

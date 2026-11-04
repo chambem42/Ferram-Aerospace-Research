@@ -95,7 +95,56 @@ namespace FerramAerospaceResearch.InGameTests
         /// <summary>Waits for the craft in the editor to be voxelized and its simulation to have the result.</summary>
         public static IEnumerator WaitForEditorVoxels(double timeoutSec = 90)
         {
-            yield return Wait.Until(() => EditorReady, timeoutSec, "FAR's editor voxels and sim", shot: false);
+            // ready with an empty sim for a moment after a craft is loaded in place of another
+            yield return Wait.Until(() => EditorReady && Instant(2, 0.5).Cd > 0, timeoutSec, "FAR's editor voxels and sim", shot: false);
+        }
+
+        /// <summary>
+        /// FAR's model of the craft done changing: its lift at 2 deg and its voxel volume the same over two seconds, with
+        /// no voxelization queued. A craft just loaded is voxelized again as its parts finish starting, and
+        /// the wings' interactions follow; read before, a craft comes out a few percent off.
+        /// </summary>
+        public static IEnumerator Settled(string what)
+        {
+            double cl = double.NaN, vol = double.NaN, lastDcl = 0, lastDvol = 0;
+            int notReady = 0, changes = 0;
+            float stableSince = float.MaxValue, deadline = UnityEngine.Time.realtimeSinceStartup + 120;
+            while (UnityEngine.Time.realtimeSinceStartup < deadline)
+            {
+                yield return Wait.Seconds(0.5);
+                if (!EditorReady)
+                {
+                    notReady++;
+                    stableSince = float.MaxValue;
+                    continue;
+                }
+                double c = Instant(2, 0.5).Cl, v = Volume(EditorVehicle);
+                if (double.IsNaN(cl) || Math.Abs(c - cl) > 1e-7 || Math.Abs(v - vol) > 1e-6)
+                {
+                    changes++;
+                    lastDcl = c - cl;
+                    lastDvol = v - vol;
+                    cl = c;
+                    vol = v;
+                    stableSince = UnityEngine.Time.realtimeSinceStartup;
+                }
+                else if (UnityEngine.Time.realtimeSinceStartup - stableSince >= 2)
+                    yield break;
+            }
+
+            throw new UITestFailure($"FAR's model of {what} never settled (Cl at 2 deg {cl:F5}, volume {vol:F3} m3; " +
+                                    $"{changes} changes, the last {lastDcl:G3} and {lastDvol:G3} m3; not ready {notReady} times)");
+        }
+
+        /// <summary>
+        /// A craft just loaded into the editor (known by its parts) voxelized and FAR's model of it settled: right after a
+        /// load the editor can still be ready with the previous craft's model.
+        /// </summary>
+        public static IEnumerator WaitForCraft(string what, params string[] parts)
+        {
+            yield return Wait.Until(() => EditorReady && parts.All(n => EditorLogic.fetch.ship.parts.Any(p => p.partInfo.name == n)),
+                                    120, "FAR's editor on " + what, shot: false);
+            yield return Settled(what);
         }
 
         /// <summary>The craft in the editor voxelized again (after a setting or part change FAR does not see itself).</summary>
@@ -113,11 +162,14 @@ namespace FerramAerospaceResearch.InGameTests
         /// <summary>The voxel model's volume: its cross-sections times their thickness.</summary>
         public static double Volume(VehicleAerodynamics v) => v.GetCrossSectionAreas().Sum() * v.SectionThickness;
 
-        /// <summary>The instant sim at one condition, steady (no rates), no flaps or spoilers.</summary>
+        /// <summary>
+        /// The instant sim at one condition, steady (no rates), no flaps or spoilers, the wings' stall from nothing (as FAR's
+        /// trim iteration does): kept, a wing near its stall angle creeps further into it on every call.
+        /// </summary>
         public static InstantConditionSimOutput Instant(double alphaDeg, double mach, double betaDeg = 0, double pitch = 0)
         {
             var input = new InstantConditionSimInput(alphaDeg, betaDeg, 0, 0, 0, 0, mach, pitch, 0, false);
-            EditorSim.GetClCdCmSteady(input, out InstantConditionSimOutput output, true);
+            EditorSim.GetClCdCmSteady(input, out InstantConditionSimOutput output, true, true);
             return output;
         }
 

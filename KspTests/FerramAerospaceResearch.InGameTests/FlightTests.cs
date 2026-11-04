@@ -202,6 +202,9 @@ namespace FerramAerospaceResearch.InGameTests
             }
 
             ctx.Step("the rest of the flight numbers, for the vessel and the active vessel");
+            // valid except while a revoxelization (FAR redoes the voxels in flight now and then) is under way; the
+            // numbers below are all read in the frame it is
+            yield return Wait.Until(() => FARAPI.VesselVoxelizationCompletedAndValid(v), 60, "a valid voxelization", shot: false);
             double rho = v.atmDensity, eas = FARAPI.VesselEAS(v), ias = FARAPI.VesselIAS(v);
             ctx.Record("airspeeds", $"TAS {v.srfSpeed:F1} EAS {eas:F1} IAS {ias:F1} m/s");
             Assert.Near(v.srfSpeed * Math.Sqrt(rho / 1.225), eas, 0.02 * eas, "EAS is TAS * sqrt(rho / rho0)");
@@ -218,7 +221,6 @@ namespace FerramAerospaceResearch.InGameTests
             Vector3 aero = FARAPI.VesselAerodynamicForce(v);
             double appliedDrag = -Vector3.Dot(aero, v.srf_velocity.normalized);
             Assert.Near(drag, appliedDrag, 0.1 * drag + 0.2, "the aerodynamic force's drag is the one held");
-            Assert.True(FARAPI.VesselVoxelizationCompletedAndValid(v), "the voxelization is valid now");
             Assert.False(FARAPI.VesselVoxelizationCompletedAndValid(null), "no voxelization for no vessel");
             Assert.Equal(FARAPI.VesselAoA(v), FARAPI.ActiveVesselAoA(), "the active vessel's angle of attack");
             Assert.Equal(FARAPI.VesselDynPres(v), FARAPI.ActiveVesselDynPres(), "the active vessel's dynamic pressure");
