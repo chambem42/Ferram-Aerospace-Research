@@ -384,25 +384,6 @@ namespace FerramAerospaceResearch.InGameTests
 
         // ------------------------------------------------------------------ access
 
-        /// <summary>FAR exceptions logged while a test runs (FAR catches none of its exposure exceptions in LateUpdate).</summary>
-        private sealed class ExceptionLog : IDisposable
-        {
-            private readonly List<string> messages = new List<string>();
-
-            public ExceptionLog() => Application.logMessageReceived += OnLog;
-
-            private void OnLog(string condition, string stackTrace, LogType type)
-            {
-                if (type == LogType.Exception && (stackTrace?.Contains("FerramAerospaceResearch") == true || condition.Contains("Exposure")))
-                    messages.Add(condition);
-            }
-
-            public void Dispose() => Application.logMessageReceived -= OnLog;
-
-            public void AssertNone(string what) =>
-                Assert.True(messages.Count == 0, $"no FAR exceptions {what} ({messages.Count}: {string.Join(" | ", messages.Distinct().Take(3))})");
-        }
-
         /// <summary>The active vessel's VehicleExposure, its renderer and results, and the settings a test changes.</summary>
         private sealed class Exposure : IDisposable
         {
