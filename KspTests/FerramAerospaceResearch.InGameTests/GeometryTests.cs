@@ -24,7 +24,21 @@ namespace FerramAerospaceResearch.InGameTests
             yield return Wait.Seconds(3);
             Vessel v = FlightGlobals.ActiveVessel;
             Part pod = v.parts.FirstOrDefault(p => p.protoModuleCrew.Count > 0);
-            Assert.NotNull(pod, "a crewed part on the Kerbal 1");
+            if (pod == null)
+            {
+                // launched with nobody aboard (every kerbal still out on an earlier test's flight): one seated in the pod
+                pod = v.parts.FirstOrDefault(p => p.CrewCapacity > 0);
+                Assert.NotNull(pod, "a part on the Kerbal 1 that seats a kerbal");
+                KerbalRoster roster = HighLogic.CurrentGame.CrewRoster;
+                ProtoCrewMember hired = roster.Crew.FirstOrDefault(c => c.rosterStatus == ProtoCrewMember.RosterStatus.Available) ??
+                                        roster.GetNextOrNewKerbal();
+                pod.AddCrewmember(hired);
+                v.CrewListSetDirty();
+                v.SpawnCrew();
+                ctx.Record("crew", $"launched with nobody aboard: {hired.name} seated in the {pod.partInfo.title}");
+                yield return Wait.Seconds(2);
+            }
+
             ProtoCrewMember crew = pod.protoModuleCrew[0];
 
             ctx.Step(crew.name + " out on EVA");
