@@ -136,17 +136,6 @@ namespace FerramAerospaceResearch.InGameTests
                                     $"{changes} changes, the last {lastDcl:G3} and {lastDvol:G3} m3; not ready {notReady} times)");
         }
 
-        /// <summary>
-        /// A craft just loaded into the editor (known by its parts) voxelized and FAR's model of it settled: right after a
-        /// load the editor can still be ready with the previous craft's model.
-        /// </summary>
-        public static IEnumerator WaitForCraft(string what, params string[] parts)
-        {
-            yield return Wait.Until(() => EditorReady && parts.All(n => EditorLogic.fetch.ship.parts.Any(p => p.partInfo.name == n)),
-                                    120, "FAR's editor on " + what, shot: false);
-            yield return Settled(what);
-        }
-
         /// <summary>The craft in the editor voxelized again (after a setting or part change FAR does not see itself).</summary>
         public static IEnumerator Revoxelize(string what)
         {

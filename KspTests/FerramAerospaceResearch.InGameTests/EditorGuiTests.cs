@@ -704,7 +704,8 @@ namespace FerramAerospaceResearch.InGameTests
             yield return Wait.Until(() => Far.EditorReady && Math.Abs(Far.Instant(2, 0.3).Cd - cdBefore) > 1e-6,
                                     45, $"FAR's drag to change with {what}", shot: false);
             yield return Wait.Seconds(5);   // the animation runs out, and the voxelization after it
-            yield return Far.WaitForEditorVoxels();
+            // the first change can be a voxelization from part way through the animation (a slow one, under coverage)
+            yield return Far.Settled(what);
         }
 
         // ------------------------------------------------------------------------------------------ helpers: data

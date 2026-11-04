@@ -116,7 +116,7 @@ namespace FerramAerospaceResearch.InGameTests
         [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Airliner, TimeoutSec = 900)]
         public static IEnumerator Editor_AirlinerDuctsItsIntegratedIntakes(TestContext ctx)
         {
-            yield return Far.WaitForCraft("the airliner", "turboFanSize2", "airlinerMainWing");
+            yield return LoadedCraft("the airliner", "turboFanSize2", "airlinerMainWing");
             VehicleAerodynamics vehicle = Far.EditorVehicle;
             Part[] goliaths = EditorLogic.fetch.ship.parts.Where(p => p.partInfo.name == "turboFanSize2").ToArray();
             Assert.Equal(2, goliaths.Length, "the airliner's Goliaths");
@@ -185,7 +185,7 @@ namespace FerramAerospaceResearch.InGameTests
         [UITest(Kind = "Check", StartsAt = StartState.Vab, Craft = Rocket, TimeoutSec = 900)]
         public static IEnumerator Editor_RocketVoxelModelMatchesTheStack(TestContext ctx)
         {
-            yield return Far.WaitForCraft("the rocket", "solidBooster.v2", "liquidEngine3.v2");
+            yield return LoadedCraft("the rocket", "solidBooster.v2", "liquidEngine3.v2");
             VehicleAerodynamics vehicle = Far.EditorVehicle;
             Transform root = EditorLogic.RootPart.transform;
             Vector3 extent = CraftExtent(root.up, root.right, root.forward);
@@ -207,6 +207,21 @@ namespace FerramAerospaceResearch.InGameTests
             ctx.Record("sideslip", $"Cy {right.Cy:F5} / {left.Cy:F5}");
             Assert.True(Math.Abs(right.Cy) > 1e-3, $"sideslip gives a side force ({right.Cy:G3})");
             Assert.Near(-right.Cy, left.Cy, 0.05 * Math.Abs(right.Cy), "side force is equal and opposite either side");
+        }
+
+        /// <summary>
+        /// A craft loaded in place of another: its parts there, FAR's voxel model as long as the craft (the editor can be
+        /// ready, and steady, with the last craft's model for a while after a load), and settled.
+        /// </summary>
+        private static IEnumerator LoadedCraft(string what, params string[] parts)
+        {
+            yield return Wait.Until(() => Far.EditorReady && parts.All(n => EditorLogic.fetch.ship.parts.Any(p => p.partInfo.name == n)),
+                                    120, "FAR's editor on " + what, shot: false);
+            Transform root = EditorLogic.RootPart.transform;
+            double length = CraftExtent(root.up, root.right, root.forward).x;
+            yield return Wait.Until(() => Far.EditorReady && Far.EditorVehicle.Length > 0.85 * length && Far.EditorVehicle.Length < 1.1 * length,
+                                    120, $"FAR's voxel model of {what}, {length:F1} m long", shot: false);
+            yield return Far.Settled(what);
         }
 
         /// <summary>The craft's size along three axes: the spread of its meshes' vertices (in world space) along each.</summary>

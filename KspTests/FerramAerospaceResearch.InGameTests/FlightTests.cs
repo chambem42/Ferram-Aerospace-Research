@@ -220,7 +220,10 @@ namespace FerramAerospaceResearch.InGameTests
             Assert.Near(Math.Sqrt(2 * bc * g / rho), tv, 0.02 * tv, "terminal velocity sqrt(2 BC g / rho)");
             Vector3 aero = FARAPI.VesselAerodynamicForce(v);
             double appliedDrag = -Vector3.Dot(aero, v.srf_velocity.normalized);
-            Assert.Near(drag, appliedDrag, 0.1 * drag + 0.2, "the aerodynamic force's drag is the one held");
+            // the vessel flies free since the hold: against FAR's own coefficient now
+            double cdqs = FARAPI.VesselDragCoeff(v) * FARAPI.VesselDynPres(v) * FARAPI.VesselRefArea(v);
+            ctx.Record("drag", $"aerodynamic force {appliedDrag:F2} kN, Cd q S {cdqs:F2} kN (held {drag:F2})");
+            Assert.Near(cdqs, appliedDrag, 0.02 * cdqs + 0.05, "the aerodynamic force's drag is Cd q S");
             Assert.False(FARAPI.VesselVoxelizationCompletedAndValid(null), "no voxelization for no vessel");
             Assert.Equal(FARAPI.VesselAoA(v), FARAPI.ActiveVesselAoA(), "the active vessel's angle of attack");
             Assert.Equal(FARAPI.VesselDynPres(v), FARAPI.ActiveVesselDynPres(), "the active vessel's dynamic pressure");
