@@ -485,6 +485,167 @@ namespace FerramAerospaceResearch.InGameTests
             }
         }
 
+        // ------------------------------------------------------------------------------------------ the mouse
+
+        private const int TooltipWindowId = 0x7A9B3C0D;   // HeatmapAxes' tooltip overlay window
+
+        /// <summary>
+        /// The maps under a (synthetic) mouse. Over an envelope cell the tooltip, drawn beside the pointer, is that cell's:
+        /// its Mach, speed and altitude, and its row's envelope (top and slowest level speed at that altitude); over a
+        /// stability cell, that cell's Mach, altitude and score; off the maps there is none. A box dragged across the
+        /// envelope map zooms every map to the cells it spans, the hover then finding the zoomed view's cells; Reset
+        /// zooms out. A press and release in one place is a click, not a box: no zoom. A middle click on a cell logs
+        /// FAR's diagnostic of that cell.
+        /// </summary>
+        [UITest(Kind = "Check", Requires = AjeRequires, Mods = AjeMods, StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
+        public static IEnumerator Envelope_MapAnswersTheMouse(TestContext ctx)
+        {
+            var caches = new List<string>();
+            var diagnostics = new List<string>();
+            Rect? windowAt = null;
+            void Listen(string message, string trace, LogType type)
+            {
+                if (message != null && message.Contains("FAR heatmap cell diagnostic")) diagnostics.Add(message);
+            }
+
+            Application.logMessageReceived += Listen;
+            try
+            {
+                yield return OpenWindow("FAREditorModeHeatmaps");
+                ResetConditions();
+                yield return Wait.Frames(2);
+
+                ctx.Step("A 4 x 4 sweep with stability, Mach 0.3-1.2 x 0-9 km");
+                var sw = new SweepOut();
+                // serial: under a coverage recorder the workers contend for its counters
+                yield return Sweep(new[] { "0.3", "1.2", "0", "9", "4", "4" }, true, false, sw);
+                caches.Add(sw.CachePath);
+                Assert.False(sw.StabilityOnly, "an envelope swept (SolverEngines loaded)");
+                HeatmapsGUI hm = Heatmaps;
+                HeatmapResult r = sw.Results[0];
+                HeatmapRenderer env = Get<List<HeatmapRenderer>>(hm, "_envRenderers")[0];
+                HeatmapRenderer stab = Get<HeatmapRenderer>(hm, "_stabRenderer");
+                var envTex = Get<Texture2D>(env, "_envTex");
+                var stabTex = Get<Texture2D>(stab, "_stabTex");
+                // IMGUI takes a press only inside a window that holds the real mouse, at the screen's top left in
+                // batchmode (KspTest's Imgui mouse): the window over that corner
+                windowAt = Get<Rect>(Far.Editor, "guiRect");
+                Set(Far.Editor, "guiRect", new Rect(0, 0, windowAt.Value.width, windowAt.Value.height));
+                yield return Wait.Frames(3);
+                yield return Wait.Until(() => Imgui.ImageRect(envTex, Window) != null && Imgui.ImageRect(stabTex, Window) != null, 15,
+                                        "both maps drawn", shot: false, detail: Imgui.Dump);
+                Rect envMap = Imgui.ImageRect(envTex, Window).Value, stabMap = Imgui.ImageRect(stabTex, Window).Value;
+                ctx.Record("maps", $"envelope {envMap}, stability {stabMap}");
+
+                ctx.Step("Hovering an envelope cell");
+                (int i, int j) cell = (2, 1);
+                yield return HoverTip(CellCentre(envMap, cell, 0, 3, 0, 3));
+                Cell c = r.Envelope[cell.i, cell.j];
+                string tip = Tip();
+                ctx.Record("envelopeTip", tip);
+                Assert.True(tip.StartsWith("M " + Inv(c.Mach, "F2")) && tip.Contains(Inv(c.SpeedMPerS, "F0") + " m/s") &&
+                            tip.Contains(Inv(r.AltAxis[cell.j] / 1000, "F1") + " km"), $"the tooltip is the hovered cell's ({tip.Split('\n')[0]})");
+                Assert.True(tip.Contains("─ At " + Inv(r.AltAxis[cell.j] / 1000, "F1") + " km ─"), "the tooltip has the row's envelope");
+                Assert.True(tip.Contains("Top speed") || tip.Contains("Level flight not possible"), "the row's top speed, or why there is none");
+                AssertTipBeside(Imgui.Pointer.Value);
+
+                ctx.Step("Hovering a stability cell");
+                (int i, int j) scell = (1, 2);
+                yield return HoverTip(CellCentre(stabMap, scell, 0, 3, 0, 3));
+                tip = Tip();
+                ctx.Record("stabilityTip", tip);
+                Assert.True(tip.StartsWith("M " + Inv(r.MachAxis[scell.i], "F2") + "  ·  " + Inv(r.AltAxis[scell.j] / 1000, "F1") + " km"),
+                            $"the stability tooltip is the hovered cell's ({tip.Split('\n')[0]})");
+                Assert.True(tip.Contains("Score:") || tip.Contains("Not evaluated") || tip.Contains("Errored"), "the cell's score");
+                AssertTipBeside(Imgui.Pointer.Value);
+
+                ctx.Step("The pointer off the maps");
+                yield return Imgui.Hover(new Vector2(envMap.xMax + 40, envMap.y - 40), 5);
+                Assert.True(TipRect().x < -1000, $"no tooltip off the maps (its window at {TipRect()})");
+
+                ctx.Step("A click without a drag");
+                yield return Imgui.MouseClick(CellCentre(envMap, (1, 1), 0, 3, 0, 3));
+                Assert.False((bool)GetStatic(typeof(HeatmapRenderer), "_zoomActive"), "a click is not a box: no zoom");
+
+                ctx.Step("A box dragged from cell (1, 1) to (2, 2)");
+                yield return Imgui.MouseDragFromTo(CellCentre(envMap, (1, 1), 0, 3, 0, 3), CellCentre(envMap, (2, 2), 0, 3, 0, 3));
+                yield return Wait.Frames(3);
+                object zoom = GetStatic(typeof(HeatmapRenderer), "_zoom");
+                string window = $"Mach cells {Get(zoom, "IMin")}-{Get(zoom, "IMax")}, altitude cells {Get(zoom, "JMin")}-{Get(zoom, "JMax")}";
+                ctx.Record("zoom", window);
+                Assert.True((bool)GetStatic(typeof(HeatmapRenderer), "_zoomActive"), "the drag zoomed in");
+                Assert.Equal("Mach cells 1-2, altitude cells 1-2", window, "the zoom is the cells the box spans");
+                yield return Snap.Shot(ctx, "zoomed");
+
+                // the zoomed view's top left cell: the slowest and highest of the box
+                yield return HoverTip(CellCentre(envMap, (1, 2), 1, 2, 1, 2));
+                tip = Tip();
+                Cell zc = r.Envelope[1, 2];
+                Assert.True(tip.StartsWith("M " + Inv(zc.Mach, "F2")) && tip.Contains(Inv(r.AltAxis[2] / 1000, "F1") + " km"),
+                            $"in the zoomed view the hover finds the zoomed cells ({tip.Split('\n')[0]})");
+                yield return HoverTip(CellCentre(stabMap, (2, 1), 1, 2, 1, 2));
+                tip = Tip();
+                Assert.True(tip.StartsWith("M " + Inv(r.MachAxis[2], "F2") + "  ·  " + Inv(r.AltAxis[1] / 1000, "F1") + " km"),
+                            $"the stability map shares the zoom ({tip.Split('\n')[0]})");
+
+                ctx.Step("Reset");
+                yield return Imgui.Click("Reset", Window, exact: true);
+                yield return Wait.Frames(2);
+                Assert.False((bool)GetStatic(typeof(HeatmapRenderer), "_zoomActive"), "Reset zooms out");
+
+                ctx.Step("A middle click on an envelope cell");
+                diagnostics.Clear();
+                yield return Imgui.MouseDown(CellCentre(envMap, cell, 0, 3, 0, 3), button: 2);
+                yield return Wait.Until(() => diagnostics.Count > 0, 15, "FAR's cell diagnostic in the log", shot: false);
+                string diag = diagnostics[0];
+                ctx.Record("diagnostic", diag.Length > 1500 ? diag.Substring(0, 1500) : diag);
+                Assert.True(diag.Contains($"cell [{cell.i},{cell.j}]") && diag.Contains("M " + Inv(c.Mach, "F3")),
+                            "the diagnostic is the clicked cell's");
+                Assert.True(diag.Contains("Engine thrust caps"), "the diagnostic lists the engines' thrust caps");
+            }
+            finally
+            {
+                Application.logMessageReceived -= Listen;
+                Imgui.ReleasePointer();
+                HeatmapRenderer.ResetZoom();
+                if (windowAt != null && Far.Editor != null)
+                    Set(Far.Editor, "guiRect", windowAt.Value);
+                foreach (string path in caches)
+                    DeleteCache(path);
+                CloseWindow();
+            }
+        }
+
+        /// <summary>The screen centre of cell (i, j) of a map showing Mach cells i0-i1 and altitude cells j0-j1 (altitude up).</summary>
+        private static Vector2 CellCentre(Rect map, (int i, int j) cell, int i0, int i1, int j0, int j1)
+        {
+            int nI = i1 - i0 + 1, nJ = j1 - j0 + 1;
+            return new Vector2(map.x + (cell.i - i0 + 0.5f) / nI * map.width,
+                               map.y + (nJ - 1 - (cell.j - j0) + 0.5f) / nJ * map.height);
+        }
+
+        private static string Tip() => (string)GetStatic(typeof(HeatmapAxes), "_pendingText") ?? "";
+
+        private static Rect TipRect() =>
+            Imgui.VisibleWindows().FirstOrDefault(w => w.Id == TooltipWindowId)?.Rect ?? new Rect(-10000, -10000, 0, 0);
+
+        /// <summary>The pointer over a screen point until the tooltip window is drawn beside it.</summary>
+        private static IEnumerator HoverTip(Vector2 screen)
+        {
+            yield return Imgui.Hover(screen);
+            yield return Wait.Until(() => TipBeside(screen), 10, $"the heatmap tooltip beside the pointer at {screen}", shot: false, detail: Imgui.Dump);
+        }
+
+        // HeatmapAxes.DrawQueuedTooltip: 14 px right of and below the pointer, or left of / above it near a screen edge
+        private static bool TipBeside(Vector2 p)
+        {
+            Rect t = TipRect();
+            return t.x > -1000 && (Math.Abs(t.x - (p.x + 14)) < 1.5f || Math.Abs(t.xMax - (p.x - 14)) < 1.5f || t.x <= 4.5f || t.xMax >= Screen.width - 4.5f) &&
+                   (Math.Abs(t.y - (p.y + 14)) < 1.5f || Math.Abs(t.yMax - (p.y - 14)) < 1.5f || t.y <= 4.5f || t.yMax >= Screen.height - 4.5f);
+        }
+
+        private static void AssertTipBeside(Vector2 p) => Assert.True(TipBeside(p), $"the tooltip window beside the pointer ({TipRect()} by {p})");
+
         // ------------------------------------------------------------------------------------------ history
 
         /// <summary>

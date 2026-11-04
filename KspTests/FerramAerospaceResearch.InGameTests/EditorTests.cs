@@ -209,6 +209,140 @@ namespace FerramAerospaceResearch.InGameTests
             Assert.Near(-right.Cy, left.Cy, 0.05 * Math.Abs(right.Cy), "side force is equal and opposite either side");
         }
 
+        private const string CubeRoot = "Kerbal 1 Cube Root";   // crafts/cube_root.py
+
+        private sealed class AxisModel
+        {
+            public string Axis;
+            public double Length, MaxArea, Volume, Thickness, CdSub, CdTrans, Cl, Cm, Cy;
+            public double[] Areas;
+        }
+
+        /// <summary>
+        /// FAR voxelizes an editor craft in its root part's frame and cuts its cross-sections across the axis of that
+        /// frame the craft lies along, by one of three branches of its section code. The stock Kerbal 1 on a cubic strut
+        /// root (crafts/cube_root.py), the strut as the game places it (the stack along the root's y) and turned 90 deg in
+        /// place (along its x, along its z): one shape in three frames, the parts all where they are. Each is cut along its
+        /// own axis, as long as the rocket, every section a real area; each is the same rocket to within 15% in volume and
+        /// largest cross-section, with drag at zero angle of attack that rises through Mach 1.
+        /// Editor_VoxelModelIsTheSameAlongEveryAxis holds the three to the same model.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Vab, Craft = CubeRoot, TimeoutSec = 900)]
+        public static IEnumerator Editor_VoxelModelAlongEachRootAxis(TestContext ctx)
+        {
+            var models = new List<AxisModel>();
+            yield return AxisModels(ctx, models);
+            AxisModel y = models[0];
+            foreach (AxisModel m in models)
+            {
+                string along = $"along the root's {m.Axis}";
+                Assert.Near(y.Volume, m.Volume, 0.15 * y.Volume, "volume " + along + ", the rocket's");
+                Assert.Near(y.MaxArea, m.MaxArea, 0.15 * y.MaxArea, "largest cross-section " + along + ", the rocket's");
+                Assert.True(m.CdSub > 0, $"drag at zero angle of attack {along} ({m.CdSub:F5})");
+                Assert.True(m.CdTrans > 1.3 * m.CdSub, $"Cd at Mach 1.1 ({m.CdTrans:F5}) well above Mach 0.5's ({m.CdSub:F5}) {along}");
+            }
+        }
+
+        /// <summary>
+        /// As Editor_VoxelModelAlongEachRootAxis, and the three models agree: length, volume, largest cross-section, how the
+        /// volume is spread along the rocket, and the static analysis (which flies the craft along the world's axes) at
+        /// zero and at 4 deg angle of attack and sideslip. Explicit: on master the models along the root's x and z come out
+        /// 5-7% fuller (volume) and 7-9% wider (largest cross-section) than along its y, and at 4 deg they lift half as much
+        /// (Cl 0.15 against 0.31) and pitch a sixth as much (Cm -0.04 against -0.25), with half the side force. FAR's voxel
+        /// interior fill (VehicleVoxel.SolidifyVoxel) sweeps along the grid's y axis only, the root's y in the editor, which
+        /// may be why: across the rocket a sweep can close off gaps (between the boosters and the core, say) that one along
+        /// it leaves open.
+        /// </summary>
+        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.Vab, Craft = CubeRoot, TimeoutSec = 900)]
+        public static IEnumerator Editor_VoxelModelIsTheSameAlongEveryAxis(TestContext ctx)
+        {
+            var models = new List<AxisModel>();
+            yield return AxisModels(ctx, models);
+
+            ctx.Step("The three models against each other");
+            AxisModel y = models[0];
+            foreach (AxisModel m in models.Skip(1))
+            {
+                string along = $"along the root's {m.Axis} against its y";
+                Assert.Near(y.Length, m.Length, 2 * Math.Max(y.Thickness, m.Thickness) + 0.01 * y.Length, "length " + along);
+                Assert.Near(y.Volume, m.Volume, 0.02 * y.Volume, "volume " + along);
+                Assert.Near(y.MaxArea, m.MaxArea, 0.03 * y.MaxArea, "largest cross-section " + along);
+                double[] py = Profile(y.Areas, 10), pm = Profile(m.Areas, 10);
+                double same = py.Zip(pm, (a, b) => Math.Abs(a - b)).Max();
+                double reversed = py.Zip(pm.Reverse().Select(p => 1 - p), (a, b) => Math.Abs(a - b)).Max();
+                ctx.Record("profile_" + m.Axis, $"{string.Join(" ", pm.Select(p => p.ToString("F3")))} (y: {string.Join(" ", py.Select(p => p.ToString("F3")))}); " +
+                                                $"off by {same:F4} the same way, {reversed:F4} reversed");
+                Assert.True(Math.Min(same, reversed) < 0.03, $"the volume spread along the rocket {along} (off by {Math.Min(same, reversed):F3} of the volume)");
+                Assert.Near(y.CdSub, m.CdSub, 0.03 * y.CdSub, "Cd at Mach 0.5 " + along);
+                Assert.Near(y.CdTrans, m.CdTrans, 0.03 * y.CdTrans, "Cd at Mach 1.1 " + along);
+                Assert.Near(y.Cl, m.Cl, 0.05 * Math.Abs(y.Cl) + 1e-4, "Cl at 4 deg " + along);
+                Assert.Near(y.Cm, m.Cm, 0.05 * Math.Abs(y.Cm) + 1e-4, "Cm at 4 deg " + along);
+                Assert.Near(y.Cy, m.Cy, 0.05 * Math.Abs(y.Cy) + 1e-4, "Cy at 4 deg sideslip " + along);
+            }
+        }
+
+        /// <summary>The three cube-root crafts loaded in turn, each one's model checked along its own axis and kept.</summary>
+        private static IEnumerator AxisModels(TestContext ctx, List<AxisModel> models)
+        {
+            var crafts = new[] { (CubeRoot, Vector3.up, "y"), (CubeRoot + " X", Vector3.right, "x"), (CubeRoot + " Z", Vector3.forward, "z") };
+            foreach ((string craft, Vector3 axis, string name) in crafts)
+            {
+                ctx.Step($"{craft}: the stack along the root's {name}");
+                if (craft != CubeRoot)
+                    yield return Nav.LoadCraft(ctx, ctx.CraftPath(craft, "VAB"));
+                yield return Wait.Until(() => Far.EditorReady && EditorLogic.RootPart != null && EditorLogic.RootPart.partInfo.name == "strutCube" &&
+                                              EditorLogic.fetch.ship.shipName == craft &&
+                                              Refl.Get<Vector3>(Far.EditorVehicle, "_vehicleMainAxis") == axis,
+                                        120, $"FAR's voxel model of {craft} along its root's {name}", shot: false);
+                yield return Far.Settled(craft);
+
+                Transform root = EditorLogic.RootPart.transform;
+                Assert.True(Vector3.Dot(root.TransformDirection(axis), Vector3.up) > 0.999f,
+                            $"the root's {name} axis is the stack's ({root.TransformDirection(axis):F3})");
+                Assert.Equal(axis, Refl.Get<Vector3>(Far.EditorVehicle, "_vehicleMainAxis"), $"FAR's axis is the root's {name}");
+                VehicleAerodynamics v = Far.EditorVehicle;
+                double extent = CraftExtent(Vector3.up, Vector3.right, Vector3.forward).x;
+                InstantConditionSimOutput aoa = Far.Instant(4, 0.5), beta = Far.Instant(0, 0.5, 4);
+                var m = new AxisModel
+                {
+                    Axis = name, Length = v.Length, MaxArea = v.MaxCrossSectionArea, Volume = Far.Volume(v), Thickness = v.SectionThickness,
+                    Areas = Trimmed(v.GetCrossSectionAreas()), CdSub = Far.Instant(0, 0.5).Cd, CdTrans = Far.Instant(0, 1.1).Cd,
+                    Cl = aoa.Cl, Cm = aoa.Cm, Cy = beta.Cy
+                };
+                ctx.Record("model_" + name, $"length {m.Length:F3} m ({m.Areas.Length} sections of {m.Thickness:F4} m), max cross-section {m.MaxArea:F4} m2, " +
+                                            $"volume {m.Volume:F3} m3; Cd {m.CdSub:F5} / {m.CdTrans:F5}, 4 deg Cl {m.Cl:F5} Cm {m.Cm:F5}, 4 deg sideslip Cy {m.Cy:F5}");
+                Assert.InRange(0.85 * extent, 1.1 * extent, m.Length, $"the model along the root's {name} as long as the rocket ({extent:F2} m)");
+                Assert.True(m.Areas.All(a => a >= 0 && !double.IsNaN(a)), "every cross-section is a real, non-negative area");
+                models.Add(m);
+            }
+        }
+
+        /// <summary>The cross-sections with the empty ones at either end left off.</summary>
+        private static double[] Trimmed(double[] areas)
+        {
+            int a = 0, b = areas.Length - 1;
+            while (a < b && areas[a] <= 0) a++;
+            while (b > a && areas[b] <= 0) b--;
+            return areas.Skip(a).Take(b - a + 1).ToArray();
+        }
+
+        /// <summary>The share of the volume ahead of each of n - 1 evenly spaced cuts along the model.</summary>
+        private static double[] Profile(double[] areas, int n)
+        {
+            var cum = new double[areas.Length + 1];
+            for (int i = 0; i < areas.Length; i++)
+                cum[i + 1] = cum[i] + areas[i];
+            var p = new double[n - 1];
+            for (int k = 1; k < n; k++)
+            {
+                double x = k * areas.Length / (double)n;
+                int i0 = Math.Min((int)x, areas.Length - 1);
+                p[k - 1] = (cum[i0] + (x - i0) * areas[i0]) / cum[areas.Length];
+            }
+
+            return p;
+        }
+
         /// <summary>
         /// A craft loaded in place of another: its parts there, FAR's voxel model as long as the craft (the editor can be
         /// ready, and steady, with the last craft's model for a while after a load), and settled.

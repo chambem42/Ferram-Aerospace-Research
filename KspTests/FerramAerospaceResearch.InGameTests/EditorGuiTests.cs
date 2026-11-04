@@ -24,12 +24,77 @@ namespace FerramAerospaceResearch.InGameTests
     /// stability tab at that point).
     ///
     /// The tabs are picked by setting the tab dropdown's selection: FAR's dropdown list closes itself unless the mouse
-    /// is over it, which it never is in a headless run. Everything after that goes through the window's own controls.
+    /// is over it (EditorGui_TabDropdownUnderTheMouse drives the list itself, with a synthetic mouse). Everything after
+    /// that goes through the window's own controls.
     /// The window is opened with the handler FAR's toolbar button calls. Whatever a test changes in the window (tab,
     /// inputs, toggles, the shared flap/planet selection, the viscous option) is put back when it ends.
     /// </summary>
     public static class EditorGuiTests
     {
+
+        // ------------------------------------------------------------------------------------------ dropdowns
+
+        /// <summary>
+        /// FAR's tab dropdown under a (synthetic) mouse: pressed with the pointer on it, it opens its list of every tab and
+        /// keeps it open while the pointer is over it; a tab picked from the list is the tab shown and the list closes.
+        /// Opened again, the list closes by itself once the pointer leaves it, the tab unchanged. FAR asks whether the
+        /// mouse is over the list through GUIUtils.GetMousePos, which is fed the pointer.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 600)]
+        public static IEnumerator EditorGui_TabDropdownUnderTheMouse(TestContext ctx)
+        {
+            try
+            {
+                yield return OpenWindow("FAREditorModeStatic");
+                Imgui.PointerFeeds(typeof(FARGUI.GUIUtils).GetMethod("GetMousePos", BindingFlags.Public | BindingFlags.Static));
+                object modes = Get(Far.Editor, "modeDropdown");
+                FARGUI.FARGUIDropDownDisplay display = FARGUI.FARGUIDropDownDisplay.Instance;
+                bool ListOpen() => Get(display, "windowFunction") != null;
+                string[] tabs = ((string[])Get(modes, "stringOptions")).Select(s => s.Trim()).ToArray();
+                string from = L("FAREditorModeStatic"), to = L("FAREditorModeDataStab");
+                ctx.Record("tabs", string.Join(" | ", tabs));
+
+                ctx.Step("The dropdown pressed with the pointer on it");
+                string button = "▼ " + from + " ▼";
+                yield return Wait.Until(() => Imgui.ControlRect(button, Window) != null, 15, "the tab dropdown drawn", shot: false, detail: Imgui.Dump);
+                Rect at = Imgui.ControlRect(button, Window).Value;
+                yield return Imgui.Hover(at.center);
+                yield return Imgui.Toggle(button, true, Window);
+                yield return Wait.Until(() => ListOpen() && tabs.All(t => Imgui.ControlRect(t, exact: true) != null), 15,
+                                        "the list of tabs drawn", shot: false, detail: Imgui.Dump);
+                yield return Wait.Frames(10);
+                Assert.True(ListOpen(), "the list stays open while the pointer is on the dropdown");
+                yield return Snap.Shot(ctx, "tab-list");
+
+                ctx.Step("A tab picked from the list");
+                Rect list = Get<Rect>(display, "displayRect");
+                Rect item = Imgui.ControlRect(to, exact: true).Value;
+                ctx.Record("list", $"button {at}, list {list}, '{to}' at {item}");
+                Assert.True(item.y >= at.yMax - 1, $"the list drops below the button ({item} under {at})");
+                yield return Imgui.Hover(item.center);
+                Assert.True(ListOpen(), "the list stays open with the pointer on it");
+                yield return Imgui.Click(to, exact: true);
+                yield return Wait.Until(() => !ListOpen(), 15, "the list to close after the pick", shot: false);
+                yield return Wait.Frames(3);
+                Assert.Equal(to, tabs[Get<int>(modes, "selectedOption")], "the tab picked is the dropdown's selection");
+                Assert.Equal("STABILITY", Get(Far.Editor, "currentMode").ToString(), "the tab picked is the tab shown");
+                Assert.True(Imgui.ControlRect("▼ " + to + " ▼", Window) != null, "the dropdown shows the tab picked");
+
+                ctx.Step("Opened again, then the pointer moved away");
+                Rect again = Imgui.ControlRect("▼ " + to + " ▼", Window).Value;
+                yield return Imgui.Hover(again.center);
+                yield return Imgui.Toggle("▼ " + to + " ▼", true, Window);
+                yield return Wait.Until(ListOpen, 15, "the list open again", shot: false);
+                yield return Imgui.Hover(new Vector2(again.x + 400, again.yMax + 400));
+                yield return Wait.Until(() => !ListOpen(), 15, "the list to close once the pointer leaves it", shot: false);
+                Assert.Equal(to, tabs[Get<int>(modes, "selectedOption")], "leaving the list picks nothing");
+            }
+            finally
+            {
+                Imgui.ReleasePointer();
+                CloseWindow();
+            }
+        }
 
         // ------------------------------------------------------------------------------------------ Static Analysis
 
