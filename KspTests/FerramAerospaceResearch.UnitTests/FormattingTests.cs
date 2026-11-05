@@ -100,10 +100,12 @@ namespace FerramAerospaceResearch.UnitTests
             Assert.Equal("-Infinity", Of(sb => sb.Concat(float.NegativeInfinity, 2u)));
         }
 
-        [Fact(Skip = "FAR bug: Concat(float, places) casts the rounded value to int and throws OverflowException past +-2.1e9")]
+        [Fact] // regression: past the int range the rounded value overflowed its int cast
         public void FloatsBeyondTheIntRange()
         {
             Assert.Equal("3000000000.0", Of(sb => sb.Concat(3e9f, 1u)));
+            Assert.Equal("-3000000000", Of(sb => sb.Concat(-3e9f, 0u)));
+            Assert.Equal("2147483520", Of(sb => sb.Concat(2147483520f, 0u)));
         }
 
         [Fact]
