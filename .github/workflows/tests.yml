@@ -319,7 +319,7 @@ jobs:
           # --linecover: sequence points only (the report counts lines); the branch probes cost about a fifth of the run
           # KSP's own assemblies resolve FAR's references (it needs nothing from the mods it talks to)
           deps=(); for f in "$(cygpath -u "$KSPTEST_GAME")"/KSP_x64_Data/Managed/*.dll; do deps+=("-d=$(cygpath -m "$f")"); done
-          "$WORK/altcover/tools/net472/AltCover.exe" -i="$COV/in" -o="$COV/out" --save --portable --linecover "${deps[@]}" > "$COV/instrument.log" 2>&1 ||
+          "$WORK/altcover/tools/net472/AltCover.exe" -i="$COV/in" -o="$COV/out" --save --portable --linecover -a=ExcludeFromCodeCoverage "${deps[@]}" > "$COV/instrument.log" 2>&1 ||
             { tail -20 "$COV/instrument.log"; exit 1; }
           # the in-game tests' FAR: the build's GameData with the instrumented assemblies, the recorder and its report
           cp -r "$WORK/far/FerramAerospaceResearch" "$COV/overlay/"; rm -f "$COV/overlay/FerramAerospaceResearch/Plugins/"*.pdb
