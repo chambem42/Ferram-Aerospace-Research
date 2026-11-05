@@ -11,6 +11,12 @@ namespace FerramAerospaceResearch.UnitTests
     /// </summary>
     public static class Gas
     {
+        /// <summary>
+        /// The test collection of the tests that take prediction slots: the slots are shared by every thread, and a test
+        /// that takes all of them would find one taken by a test running beside it.
+        /// </summary>
+        public const string Collection = "FAR's prediction slots";
+
         public static IDisposable Gamma(double gamma) => Air(gamma, null);
 
         /// <summary>The adiabatic index, and the body's air (Sutherland's reference viscosity and temperature) too.</summary>

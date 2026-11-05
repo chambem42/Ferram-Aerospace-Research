@@ -13,6 +13,7 @@ namespace FerramAerospaceResearch.UnitTests
     /// threads' slots without waiting, and once those are all in use it gets none (null) rather than wait; ending them
     /// in reverse puts the thread back on the slot it had and frees the slots for the next.
     /// </summary>
+    [Collection(Gas.Collection)]
     public class SimThreadContextTests
     {
         private static readonly PropertyInfo mainThread = typeof(MainThread).GetProperty(nameof(MainThread.Thread));

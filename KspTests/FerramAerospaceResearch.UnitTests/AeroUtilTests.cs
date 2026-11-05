@@ -8,6 +8,7 @@ namespace FerramAerospaceResearch.UnitTests
     /// FARAeroUtil's gas dynamics and skin friction, against the standard relations for a perfect gas (gamma 1.4 unless
     /// said otherwise; values as tabulated in NACA Report 1135).
     /// </summary>
+    [Collection(Gas.Collection)]
     public class AeroUtilTests
     {
         private const double Gamma = 1.4;

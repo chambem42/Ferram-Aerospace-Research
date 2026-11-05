@@ -57,14 +57,14 @@ namespace FerramAerospaceResearch.UnitTests
             Assert.Equal(value, back);
         }
 
-        // FAR bug: the string[] serializer's Save calls ConfigNode.AddValue(string, object) (ConfigNode has no string[]
-        // overload), which writes "System.String[]" instead of the items. No FAR config has a string[] value yet.
-        [SkippableFact(Skip = "FAR bug: Serialization saves a string[] as \"System.String[]\"")]
+        // Regression: the string[] serializer's Save called ConfigNode.AddValue(string, object) (ConfigNode has no
+        // string[] overload), which wrote "System.String[]" instead of the items.
+        [SkippableFact]
         public void AStringArrayRoundTripsAsACommaList()
         {
             var node = new ConfigNode("TEST");
             Serialization.AddValue(node, "v", new[] { "a", "b", "c" }, typeof(string[]));
-            Assert.Equal("a, b, c", node.GetValue("v"));
+            Assert.Equal("a,b,c", node.GetValue("v"));
             Assert.True(Serialization.TryGetValue(node, "v", out object back, typeof(string[])));
             Assert.Equal(new[] { "a", "b", "c" }, (string[])back);
         }
@@ -76,9 +76,9 @@ namespace FerramAerospaceResearch.UnitTests
             Assert.Equal(new[] { "a", "b", "c" }, (string[])back);
         }
 
-        // FAR bug: the Rect serializer's Save writes Rect.ToString() ("(x:1.00, y:2.00, width:30.00, height:40.00)"),
-        // which its own parser (ParseExtensions.TryParseRect, "x,y,w,h") refuses. No FAR config has a Rect value yet.
-        [SkippableFact(Skip = "FAR bug: Serialization saves a Rect in a form it cannot parse back")]
+        // Regression: the Rect serializer's Save wrote Rect.ToString() ("(x:1.00, y:2.00, width:30.00, height:40.00)"),
+        // which its own parser (ParseExtensions.TryParseRect, "x,y,w,h") refuses.
+        [SkippableFact]
         public void ARectRoundTripsThroughAConfigNode()
         {
             var node = new ConfigNode("TEST");

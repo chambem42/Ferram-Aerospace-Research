@@ -23,12 +23,12 @@ namespace FerramAerospaceResearch.InGameTests
         /// it loads, and FAR voxelizes it from its procedural mesh. The asteroid's part has FAR's geometry module with
         /// the asteroid's updater and the rock's meshes, and its voxel model holds about the volume the rock's mesh
         /// encloses: the voxels are at most a few times the volume of a voxel layer over the surface off it.
-        /// FAR BUG: an asteroid's part has no prefab (part.partInfo.partPrefab is null), and GeometryPartModule.OnStart
+        /// Regression: before the fix, an asteroid's part has no prefab (part.partInfo.partPrefab is null), and GeometryPartModule.OnStart
         /// reads part.partInfo.partPrefab.FindModuleImplementingFast unguarded: it throws a NullReferenceException, the
         /// module never builds its meshes (never Ready), and FARVesselAero waits for it for ever: FAR never voxelizes an
         /// asteroid, and ProceduralAsteroidTransforms and the asteroid updater never run.
         /// </summary>
-        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.Flight, Craft = "Kerbal 1", CraftDir = "VAB", TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = "Kerbal 1", CraftDir = "VAB", TimeoutSec = 900)]
         public static IEnumerator Flight_AsteroidIsVoxelized(TestContext ctx)
         {
             yield return Wait.Seconds(3);

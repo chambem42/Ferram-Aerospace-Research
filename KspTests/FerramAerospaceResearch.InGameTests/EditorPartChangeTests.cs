@@ -227,11 +227,11 @@ namespace FerramAerospaceResearch.InGameTests
         /// <summary>
         /// A brake rudder (the Aeris 4A's ailerons with brake rudder 100% and yaw 100%) in the editor's analysis, which
         /// gives the surfaces no yaw input: they stay put, and the craft's yaw and roll moments are those with no brake
-        /// rudder. Given yaw input, the surface on the side of the yaw deflects. FAR BUG: SetControlStateEditor uses the
+        /// rudder. Given yaw input, the surface on the side of the yaw deflects. Regression: before the fix, SetControlStateEditor uses the
         /// yaw tweakable (yawaxis) where the yaw input belongs (BrakeRudderSide * yawaxis; flight and the snapshot use the
         /// input), so in the editor a brake rudder on one side always deflects. Fixed on another branch.
         /// </summary>
-        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
         public static IEnumerator Editor_BrakeRudderNeedsYawInput(TestContext ctx)
         {
             yield return Far.WaitForEditorVoxels();

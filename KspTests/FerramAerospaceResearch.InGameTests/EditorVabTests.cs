@@ -120,11 +120,11 @@ namespace FerramAerospaceResearch.InGameTests
         /// The stability derivatives of a craft with no wing to take the reference from are taken on its body: the
         /// reference area its largest cross-section, the reference chord its length, a unit span. Here the Aeris 4A's
         /// derivatives with its wings left out of the reference.
-        /// Explicit: FAR bug. StabilityDerivCalculator.CalculateStabilityDerivs sets MAC = _bodyLength and b = 1 for a
+        /// Regression: before the fix, StabilityDerivCalculator.CalculateStabilityDerivs sets MAC = _bodyLength and b = 1 for a
         /// wingless craft, then divides both by the area as for the wings' area-weighted sums, so the chord comes out
         /// as length / area (m^-1) and the span as 1 / area.
         /// </summary>
-        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 600)]
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 600)]
         public static IEnumerator Editor_WinglessReferenceIsTheBody(TestContext ctx)
         {
             yield return Far.WaitForEditorVoxels();

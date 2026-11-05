@@ -156,7 +156,7 @@ namespace FerramAerospaceResearch.InGameTests
 
         /// <summary>
         /// As Behaviour_OpenChuteSurvivesAReload, and the capsule sinks as fast under the reloaded canopy as before, FAR's
-        /// voxel model of it the same: the canopy's drag is RealChuteFAR's own, not the voxel model's. FAR BUG: deployed
+        /// voxel model of it the same: the canopy's drag is RealChuteFAR's own, not the voxel model's. Regression: before the fix, deployed
         /// in flight the canopy stays out of the voxel model (FAR does not voxelize the vessel again as it opens), but
         /// loaded deployed it is voxelized with the rest, and its FAR drag comes on top of the chute's: the capsule sinks
         /// at about half the rate (4.6 against 8.8 m/s at 3.5 km; FAR's largest
@@ -164,7 +164,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// way: its transform exceptions name the stock ModuleParachute's canopy (FARPartModuleTransformExceptions.cfg),
         /// not that of RealChuteFAR, which FAR puts in its place.
         /// </summary>
-        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.Flight, Craft = "Kerbal 1", CraftDir = "VAB", TimeoutSec = 1200)]
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = "Kerbal 1", CraftDir = "VAB", TimeoutSec = 1200)]
         public static IEnumerator Behaviour_ReloadedOpenChuteIsNotVoxelized(TestContext ctx) => ReloadOpenChute(ctx, true);
 
         /// <summary>FAR's meshes of the chute's canopy that are out (active).</summary>
