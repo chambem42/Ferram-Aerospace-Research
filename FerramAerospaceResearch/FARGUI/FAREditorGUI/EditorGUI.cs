@@ -715,7 +715,8 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
         private void DebugVisualizationGUI()
         {
             GUILayout.BeginHorizontal();
-            GUI.enabled = !Instance.VoxelizationUpdateQueued;
+            // no model to show while one is queued or being built (the last one's chunks are given back as the next is queued)
+            GUI.enabled = !Instance.VoxelizationUpdateQueued && !_vehicleAero.Voxelizing;
             if (GUILayout.Button(Localizer.Format("FARDebugVoxels")))
                 ShowVoxels();
 
