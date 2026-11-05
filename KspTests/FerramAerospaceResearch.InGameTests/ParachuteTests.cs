@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using FerramAerospaceResearch.FARAeroComponents;
 using FerramAerospaceResearch.RealChuteLite;
 using KSP.Localization;
@@ -143,7 +144,8 @@ namespace FerramAerospaceResearch.InGameTests
         /// The capsule comes down in the sea under its chute: once it floats nearly still the chute cuts itself (no cut
         /// asked for) and cannot deploy again. Its kerbal out on EVA in the water (FAR's model of the kerbal starts
         /// splashed), repacks it: stowed again, one spare canopy fewer, the packed drag cube back in place of the
-        /// deployed one.
+        /// deployed one. In a career a kerbal who is not an engineer of level 1 is refused; a stowed chute is not repacked.
+        /// FAR's start state for the modules it adds to a kerbal is the vessel's situation, for each situation.
         /// </summary>
         [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = "Kerbal 1", CraftDir = "VAB", TimeoutSec = 900)]
         public static IEnumerator Behaviour_ChuteCutsItselfOnSplashdownAndIsRepacked(TestContext ctx)
@@ -183,11 +185,61 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.NotNull(evaAero, "FAR's vessel module on the kerbal");
                 yield return Wait.Until(() => eva.Splashed, 20, "the kerbal in the water", shot: false);
 
+                // the start state FAR gives the geometry and aero modules it adds to a kerbal (or a flag): the vessel's
+                // situation, read as each would be when its vessel is loaded in it
+                MethodInfo startState = typeof(FARVesselAero).GetMethod("StartState", BindingFlags.NonPublic | BindingFlags.Instance);
+                Vessel.Situations situation = eva.situation;
+                var states = new Dictionary<Vessel.Situations, PartModule.StartState>();
+                try
+                {
+                    foreach (Vessel.Situations s in Enum.GetValues(typeof(Vessel.Situations)))
+                    {
+                        eva.situation = s;
+                        states[s] = (PartModule.StartState)startState.Invoke(evaAero, null);
+                    }
+                }
+                finally
+                {
+                    eva.situation = situation;
+                }
+
+                ctx.Record("startStates", string.Join(", ", states.Select(kv => $"{kv.Key}: {kv.Value}")));
+                Assert.Equal(PartModule.StartState.PreLaunch | PartModule.StartState.Landed, states[Vessel.Situations.PRELAUNCH], "on the pad");
+                Assert.Equal(PartModule.StartState.Landed, states[Vessel.Situations.LANDED], "landed");
+                Assert.Equal(PartModule.StartState.Splashed, states[Vessel.Situations.SPLASHED], "splashed");
+                Assert.Equal(PartModule.StartState.Flying, states[Vessel.Situations.FLYING], "flying");
+                Assert.Equal(PartModule.StartState.SubOrbital, states[Vessel.Situations.SUB_ORBITAL], "sub-orbital");
+                Assert.Equal(PartModule.StartState.Orbital, states[Vessel.Situations.ORBITING], "orbiting");
+                Assert.Equal(PartModule.StartState.Orbital, states[Vessel.Situations.ESCAPING], "escaping");
+                Assert.Equal(PartModule.StartState.Docked, states[Vessel.Situations.DOCKED], "docked");
+
                 ctx.Step("repacked");
                 int spares = chute.chuteCount;
                 yield return Wait.Until(() => chute.CanRepack, 20, "the chute repackable from EVA", shot: false,
                                         detail: () => $"capsule {chute.vessel.horizontalSrfSpeed:F2} m/s, splashed {chute.vessel.Splashed}");
                 Assert.True(RealChuteFAR.CanRepackCareer, "a sandbox kerbal may repack");
+                // in a career only an engineer of level 1 or more may
+                ProtoCrewMember kerbal = eva.GetVesselCrew()[0];
+                if (kerbal.experienceTrait.Title == "Engineer" && kerbal.experienceLevel >= 1)
+                    ctx.Record("careerRefusal", $"skipped: {kerbal.name} is a level {kerbal.experienceLevel} engineer");
+                else
+                {
+                    Game.Modes mode = HighLogic.CurrentGame.Mode;
+                    try
+                    {
+                        HighLogic.CurrentGame.Mode = Game.Modes.CAREER;
+                        Assert.False(RealChuteFAR.CanRepackCareer, $"a career {kerbal.experienceTrait.Title} of level {kerbal.experienceLevel} may not repack");
+                        chute.GUIRepack();
+                    }
+                    finally
+                    {
+                        HighLogic.CurrentGame.Mode = mode;
+                    }
+
+                    Assert.Equal(RealChuteFAR.DeploymentStates.CUT, chute.DeploymentState, "the chute refused, still cut");
+                    Assert.Equal(spares, chute.chuteCount, "and no spare used");
+                }
+
                 chute.GUIRepack();
                 Assert.Equal(RealChuteFAR.DeploymentStates.STOWED, chute.DeploymentState, "the repacked chute stowed");
                 Assert.Equal(spares - 1, chute.chuteCount, "one spare canopy used");
@@ -195,6 +247,8 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.Near(1, Weight("PACKED"), 1e-3, "the packed drag cube's weight");
                 Assert.Near(0, Weight("RCDEPLOYED"), 1e-3, "the deployed drag cube's weight");
                 Assert.False(chute.CanRepack, "a stowed chute is not repacked again");
+                chute.GUIRepack();
+                Assert.Equal(spares - 1, chute.chuteCount, "repacking it anyway uses no spare");
             }
             finally
             {

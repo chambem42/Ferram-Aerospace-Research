@@ -373,6 +373,8 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.True(Far.Editor.VoxelizationUpdateQueued, "an unknown change queues a voxelization");
                 yield return Wait.Until(() => Far.EditorReady && Math.Abs(Far.EditorVehicle.Length - length) < 0.05, 120, "the craft voxelized its own length", shot: false);
                 ctx.Record("lengths", $"{length:F3} m, {longer:F3} m moved, {Far.EditorVehicle.Length:F3} m back");
+                // left unsettled, the next test's AoA sweep (under coverage) still had the tail out: Cl 1.7% off
+                yield return Far.Settled("the plane, its nose back");
             }
             finally
             {

@@ -288,7 +288,9 @@ namespace FerramAerospaceResearch.InGameTests
         /// <summary>
         /// The flight debug window's exposure panel (FAR's flight window, Debug): showing a direction's render, it has
         /// the debugger copy each render into a texture of the render's size and draws it, with the parts' areas listed;
-        /// its device drop-down sets the vessel's device. The window closed, the copies stop and nothing throws.
+        /// its device drop-down sets the vessel's device. Its arrow toggle points the debugger's arrow along the render, its
+        /// bounds toggle switches on the flight camera's bounds drawing, its shader toggle the camera's exposure shader, and
+        /// its section folds and unfolds. The window closed, the copies stop and nothing throws.
         /// </summary>
         [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
         public static IEnumerator Pad_ExposureDebugPanelShowsTheRender(TestContext ctx)
@@ -322,6 +324,44 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.True(tex.IsCreated(), "the copy is a live texture");
                 yield return Wait.Frames(5);
                 log.AssertNone("drawing the exposure debug panel");
+
+                ctx.Step("the arrow along the sun's render");
+                string title = KSP.Localization.Localizer.Format("FARDebugWindow");
+                var arrow = (ArrowPointer)Refl.Get(debugger, "debugArrow");
+                yield return Imgui.Toggle(KSP.Localization.Localizer.Format("FARExposureArrowLabel"), true, title, exact: true);
+                yield return Wait.Until(() => arrow.gameObject.activeSelf, 10, "the sun's debug arrow shown", shot: false);
+                yield return Wait.Frames(10);
+                object sun = x.Result("sun");
+                Vector3 forward = Exposure.F3(Refl.Get(sun, "forward")), position = Exposure.F3(Refl.Get(sun, "position"));
+                ctx.Record("arrow", $"at {arrow.transform.position} along {arrow.transform.forward}; render from {position} along {forward}");
+                Assert.True(Vector3.Angle(arrow.transform.forward, forward) < 1, $"the arrow along the render ({arrow.transform.forward} against {forward})");
+                Assert.True((arrow.transform.position - position).magnitude < 0.01f, "the arrow at the render's origin");
+
+                ctx.Step("the vessel's bounds drawn");
+                var bounds = (Behaviour)Refl.Get(x.X, "boundsRenderer");
+                yield return Imgui.Toggle(KSP.Localization.Localizer.Format("FARDrawBoundsLabel"), true, title, exact: true);
+                Assert.True(bounds.enabled, "the bounds renderer on");
+                Assert.True(bounds.gameObject == FlightCamera.fetch.mainCamera.gameObject, "on the flight camera, drawing after it renders");
+                yield return Wait.Frames(10);
+                yield return Imgui.Toggle(KSP.Localization.Localizer.Format("FARDrawBoundsLabel"), false, title, exact: true);
+                Assert.False(bounds.enabled, "and off again");
+
+                ctx.Step("the camera's exposure shader");
+                yield return Imgui.Toggle(KSP.Localization.Localizer.Format("FARExposureShaderLabel"), true, title, exact: true);
+                Assert.True((bool)Refl.Get(x.X, "overrideCameraShader"), "the camera shader override on");
+                yield return Wait.Frames(10);
+                yield return Imgui.Toggle(KSP.Localization.Localizer.Format("FARExposureShaderLabel"), false, title, exact: true);
+                Assert.False((bool)Refl.Get(x.X, "overrideCameraShader"), "and off");
+                yield return Imgui.Toggle(KSP.Localization.Localizer.Format("FARExposureArrowLabel"), false, title, exact: true);
+                Assert.False(arrow.gameObject.activeSelf, "the arrow hidden again");
+
+                ctx.Step("the exposure section folded and unfolded");
+                string section = KSP.Localization.Localizer.Format("FARDebugExposureLabel");
+                yield return Imgui.Toggle(section, false, title);
+                Assert.False((bool)Refl.Get(Refl.Get(gui, "debugGUI"), "exposure"), "the section folded");
+                yield return Imgui.Toggle(section, true, title);
+                yield return Wait.Frames(5);
+                log.AssertNone("the debug panel's toggles");
             }
             finally
             {
@@ -520,13 +560,16 @@ namespace FerramAerospaceResearch.InGameTests
                 double a256 = Exposure.Total(body), app256 = Exposure.AreaPerPixel(body);
                 ctx.Record($"size{device}", $"512: {a512:F4} m2 ({app512:E3} m2/px), 256: {a256:F4} m2 ({app256:E3} m2/px)");
                 // the projection box follows the vessel's bounds, which drift on the pad: area per pixel times the pixel
-                // count went 26.2, 25.4, 24.9, 24.1 m2 over the four measurements (CPU 512, 256, GPU 512, 256)
-                if (Math.Abs(app256 / app512 - 4) > 0.4)
+                // count went 26.2, 25.4, 24.9, 24.1 m2 over the four measurements (CPU 512, 256, GPU 512, 256); under
+                // coverage, slower, the ratio came out 3.73 and 4.43
+                if (Math.Abs(app256 / app512 - 4) > 0.8)
                     failures.Add($"{device}: pixel area at 256 is {app256 / app512:F3} times the one at 512, not 4");
                 // outline pixels: a 256 pixel is twice as wide, an outline of perimeter L moves the area by up to
                 // L * width / 2; the rocket seen end-on is a disc with fins, outline about 4 times its diameter
                 double outline = 4 * 2 * Math.Sqrt(a512 / Math.PI);
-                double tol = 0.05 * a512 + outline * Math.Sqrt(app256);
+                // plus the drift: within 5% in plain runs, but under coverage 2.26 -> 1.87 m2 (CPU) and 1.65 -> 2.09 (GPU).
+                // The bug this guards against is a factor of 4
+                double tol = 0.35 * a512 + outline * Math.Sqrt(app256);
                 if (double.IsNaN(a256) || Math.Abs(a256 - a512) > tol)
                     failures.Add($"{device}: body area {a256:F4} m2 at 256x256 against {a512:F4} at 512x512 (tolerance {tol:F4})");
             }
@@ -819,7 +862,7 @@ namespace FerramAerospaceResearch.InGameTests
                 return v.parts.ToDictionary(p => p, p => perPart.TryGetValue(p, out double a) ? a : double.NaN);
             }
 
-            private static Vector3 F3(object f3)
+            internal static Vector3 F3(object f3)
             {
                 Type t = f3.GetType();
                 return new Vector3((float)t.GetField("x").GetValue(f3), (float)t.GetField("y").GetValue(f3), (float)t.GetField("z").GetValue(f3));

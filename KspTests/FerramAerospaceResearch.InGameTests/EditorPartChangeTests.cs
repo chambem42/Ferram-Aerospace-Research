@@ -313,6 +313,9 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.Near(intake, along.Max(), 1e-6, "the area ducted along the intake's axis (m2)");
             }
 
+            // the reference voxelized the way the comparison is: under coverage the model as loaded, settled in its lift and
+            // volume, still had a Cd of 0.02804 where every voxelization after had 0.02801 (as plain runs have from the start)
+            yield return Far.Revoxelize("the Mallard as loaded");
             VehicleAerodynamics vehicle = Far.EditorVehicle;
             double vol = Far.Volume(vehicle), cd = Far.Instant(2, 0.6).Cd;
             double[] sections = vehicle.GetCrossSectionAreas();

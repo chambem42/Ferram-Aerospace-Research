@@ -146,8 +146,9 @@ namespace FerramAerospaceResearch.InGameTests
             // the request is taken when the voxelization is queued (Voxelizing set on the way), then the thread runs
             yield return Wait.Until(() => !Editor.VoxelizationUpdateQueued, 60, $"FAR's editor to voxelize ({what})", shot: false);
             yield return Wait.Until(() => !v.Voxelizing, 120, $"FAR's voxelization to finish ({what})", shot: false);
-            yield return Wait.Seconds(1);
             yield return WaitForEditorVoxels();
+            // the wings' interactions follow the voxels: a Cd read straight after was 0.1% off under coverage
+            yield return Settled(what);
         }
 
         /// <summary>The voxel model's volume: its cross-sections times their thickness.</summary>

@@ -303,7 +303,9 @@ namespace FerramAerospaceResearch.InGameTests
         /// <summary>
         /// FARAPI's contract for other mods off the main thread and with nothing to work on. From a worker thread the
         /// altitude prediction is zero and a snapshot is refused (null); their warnings are not logged on the worker
-        /// (Unity's log is not safe there) but on the main thread a frame later, the prediction's once only. A null vessel
+        /// (Unity's log is not safe there) but on the main thread a frame later, the prediction's once only; FARVesselAero's
+        /// own guards, for a mod calling it directly, do the same. A prediction with every slot taken (one made inside
+        /// another on the main thread) is zero, with a warning once, and has its force again once they are free. A null vessel
         /// or snapshot gives zero, null or false without throwing. On a rocket (fins, but no flaps or spoilers) the flap setting is
         /// -1 and the spoilers off; a vessel FAR has no flight GUI for cannot have its airspeed display toggled; the gas
         /// at another altitude above the vessel is the body's there.
@@ -319,7 +321,8 @@ namespace FerramAerospaceResearch.InGameTests
             var logged = new List<(LogType Type, string Text, bool MainThread)>();
             void OnLog(string condition, string stackTrace, LogType type)
             {
-                if (condition.StartsWith("[FAR") && (condition.Contains("off the main thread") || condition.Contains("API Error")))
+                if (condition.StartsWith("[FAR") && (condition.Contains("off the main thread") || condition.Contains("API Error") ||
+                                                     condition.Contains("no prediction slot free")))
                     lock (logged)
                         logged.Add((type, condition, Threading.MainThread.IsMainThread));
             }
@@ -338,24 +341,35 @@ namespace FerramAerospaceResearch.InGameTests
                 ctx.Record("mainThreadForce", $"{onMain.magnitude:F2} kN");
                 Assert.True(onMain.magnitude > 0, "the prediction on the main thread has a force");
                 bool warnedBefore = (bool)Refl.GetStatic(typeof(FARAPI), "loggedOffMainThread");
+                // FARVesselAero's own guards, for a mod calling it directly (FARAPI checks the thread before them)
+                FARVesselAero aero = v.GetComponent<FARVesselAero>();
+                bool directWarnedBefore = (bool)Refl.GetStatic(typeof(FARVesselAero), "loggedOffMainThread");
+                bool directSnapshotWarnedBefore = (bool)Refl.GetStatic(typeof(FARVesselAero), "loggedSnapshotOffMainThread");
                 var worker = System.Threading.Tasks.Task.Run(() =>
                 {
                     FARAPI.CalculateVesselAeroForces(v, out Vector3 f1, out Vector3 t1, vel, 1000);
                     FARAPI.CalculateVesselAeroForces(v, out Vector3 f2, out Vector3 t2, vel, 1000);
                     FARVesselSnapshot s = FARAPI.CaptureVesselSnapshot(v);
-                    return (f1, t1, f2, t2, s);
+                    aero.SimulateAeroProperties(out Vector3 f3, out Vector3 t3, vel, 1000);
+                    FARVesselSnapshot s3 = aero.CaptureSnapshot();
+                    return (f1, t1, f2, t2, s, f3, t3, s3);
                 });
                 var r = worker.Result;
                 Assert.True(r.f1 == Vector3.zero && r.t1 == Vector3.zero && r.f2 == Vector3.zero && r.t2 == Vector3.zero,
                             $"the prediction off the main thread is zero ({r.f1}, {r.f2})");
                 Assert.True(r.s == null, "no snapshot off the main thread");
+                Assert.True(r.f3 == Vector3.zero && r.t3 == Vector3.zero, $"FARVesselAero's prediction off the main thread is zero ({r.f3})");
+                Assert.True(r.s3 == null, "and FARVesselAero's snapshot null");
                 Assert.Equal(0, Logged("off the main thread"), "nothing logged on the worker thread");
 
                 yield return Wait.Frames(3);
                 ctx.Record("offThreadWarnings", string.Join(" | ", logged.Select(l => $"{l.Type} main={l.MainThread}: {l.Text}")));
                 Assert.Equal(warnedBefore ? 0 : 1, Logged("CalculateVesselAeroForces called off the main thread"),
                              "the prediction's warning, once (if not already given this session)");
-                Assert.Equal(1, Logged("CaptureVesselSnapshot called off the main thread"), "the snapshot's warning");
+                Assert.Equal(directWarnedBefore ? 0 : 1, Logged("FARVesselAero.SimulateAeroProperties called off the main thread"),
+                             "FARVesselAero's prediction warning, once a session");
+                Assert.Equal(directSnapshotWarnedBefore ? 1 : 2, Logged("CaptureVesselSnapshot called off the main thread"),
+                             "the snapshot's warning: FARAPI's every time, FARVesselAero's once a session");
                 lock (logged)
                     Assert.True(logged.All(l => l.MainThread && l.Type == LogType.Warning), "the warnings logged on the main thread");
 
@@ -371,6 +385,33 @@ namespace FerramAerospaceResearch.InGameTests
                              "no prediction with controls from no snapshot");
                 Assert.True(fs == Vector3.zero && fc == Vector3.zero, "and zero force");
                 Assert.False(FARAPI.VesselVoxelizationCompletedEver(null), "no voxelization of no vessel");
+
+                ctx.Step("every prediction slot taken");
+                // a prediction made from inside another on the main thread, with all the others' slots busy, gets none:
+                // the main thread does not wait. Holding them all here is that, without another thread
+                bool noSlotWarnedBefore = (bool)Refl.GetStatic(typeof(FARVesselAero), "loggedNoSlot");
+                var held = new List<ferram4.SimThreadContext.PredictionCall>();
+                try
+                {
+                    ferram4.SimThreadContext.PredictionCall c;
+                    while ((c = ferram4.SimThreadContext.BeginPrediction(vel)) != null)
+                        held.Add(c);
+                    ctx.Record("slotsHeld", held.Count.ToString());
+                    Assert.True(held.Count >= 2, $"the main thread's slot and the pool's ({held.Count})");
+                    // a velocity not asked for before: a remembered result would be given without a slot
+                    aero.SimulateAeroProperties(out Vector3 fBusy, out Vector3 tBusy, vel * 1.37f, 1000);
+                    Assert.True(fBusy == Vector3.zero && tBusy == Vector3.zero, $"no slot, no prediction ({fBusy})");
+                }
+                finally
+                {
+                    for (int i = held.Count - 1; i >= 0; i--)
+                        ferram4.SimThreadContext.EndPrediction(held[i]);
+                }
+
+                aero.SimulateAeroProperties(out Vector3 fFree, out _, vel * 1.37f, 1000);
+                Assert.True(fFree.magnitude > 0, "with the slots given back, the same prediction has a force");
+                yield return Wait.Frames(2);
+                Assert.Equal(noSlotWarnedBefore ? 0 : 1, Logged("no prediction slot free"), "the warning, once a session");
             }
             finally
             {

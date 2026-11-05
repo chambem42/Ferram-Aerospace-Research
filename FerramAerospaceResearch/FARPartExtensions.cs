@@ -43,6 +43,7 @@ Copyright 2022, Michael Ferrara, aka Ferram4
  */
 
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using UnityEngine;
 
 namespace FerramAerospaceResearch
@@ -52,6 +53,9 @@ namespace FerramAerospaceResearch
         public static class FARPartExtensions
         {
             // ReSharper disable once UnusedMember.Global
+            // coverage: never called: part.GetPartColliders() resolves to KSP's Part.GetPartColliders, an instance method,
+            // which C# picks over an extension method
+            [ExcludeFromCodeCoverage]
             public static Collider[] GetPartColliders(this Part part)
             {
                 Collider[] colliders;
