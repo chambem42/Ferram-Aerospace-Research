@@ -734,6 +734,40 @@ namespace FerramAerospaceResearch.InGameTests
             Assert.True(b.size.sqrMagnitude > 0, "the exposure has the vessel's voxel bounds (without debugInFlight)");
         }
 
+        /// <summary>
+        /// Regression: the vessel's parts set up again for the exposure (VehicleExposure.ResetParts, on every vessel
+        /// modification) leave its renderer one renderer set per part. Before the fix Renderer.Reset gave the sets back
+        /// to the pool (shared by every vessel's renderer) but kept them in its list, and the new ones went after them: the
+        /// list grew with each reset and drew sets that other renderers took from the pool, renderers of parts long
+        /// destroyed among them, each logged as null every frame (tens of thousands of warnings late in a session, the
+        /// game slowed to a crawl: Flight_AirstreamAreaIsBracketedByTheVoxels's "vessel off rails" timeouts).
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
+        public static IEnumerator Pad_ExposureResetKeepsOneRendererSetPerPart(TestContext ctx)
+        {
+            yield return Exposure.OnPad(ctx);
+            using var x = new Exposure(ctx, FlightGlobals.ActiveVessel);
+            Vessel v = x.Vessel;
+            object rendererObject = Refl.Get(x.X, "exposureRenderer");
+            var indices = (IReadOnlyDictionary<Part, int>)rendererObject;
+            var sets = Refl.Get<List<HashSet<UnityEngine.Renderer>>>(rendererObject, "renderers");
+            int n = v.parts.Count;
+            string State() => $"{indices.Count} parts indexed, {sets.Count} renderer sets ({sets.Distinct().Count()} distinct)";
+            ctx.Record("before", State());
+            for (int k = 1; k <= 3; k++)
+            {
+                ctx.Step($"the parts set up again ({k})");
+                x.X.ResetParts(v.parts);
+                ctx.Record($"reset{k}", State());
+                Assert.Equal(n, indices.Count, "every part indexed once");
+                Assert.Equal(n, sets.Count, "a renderer set per part");
+                Assert.Equal(n, sets.Distinct().Count(), "no set twice");
+                Assert.True(v.parts.All(p => sets[indices[p]].Count > 0), "each part's set holds its renderers");
+            }
+
+            yield return Wait.Frames(5);
+        }
+
         // ------------------------------------------------------------------ access
 
         /// <summary>The active vessel's VehicleExposure, its renderer and results, and the settings a test changes.</summary>
