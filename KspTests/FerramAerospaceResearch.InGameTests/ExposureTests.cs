@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using FerramAerospaceResearch.FARAeroComponents;
+using HarmonyLib;
 using KspTest;
 using UnityEngine;
 
@@ -290,6 +291,69 @@ namespace FerramAerospaceResearch.InGameTests
 
             Assert.True(failures.Count == 0, string.Join("; ", failures));
             log.AssertNone("changing the render size");
+        }
+
+        // ------------------------------------------------------------------ leaving flight
+
+        private const string HarmonyId = "FerramAerospaceResearch.InGameTests.Exposure";
+
+        /// <summary>
+        /// Leaving flight while the CPU device counts. The vessel's exposure goes with the vessel: its jobs are
+        /// cancelled, their readbacks waited for, and the arrays they read back into and count in freed. FAR's job
+        /// executor outlives the scene, so a cancelled job is still updated after that, and must not go on to count the
+        /// pixels (Renderer.CountPixels) in the freed arrays: that writes to freed memory, and KSP crashes in UnityPlayer
+        /// seconds or a scene or two later (an access violation in FindObjectsOfType, or wherever the damage is next
+        /// touched). The pixels are counted in flight, and none once the game has left it.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
+        public static IEnumerator Pad_LeftWhileCountingOnTheCpu(TestContext ctx)
+        {
+            var harmony = new Harmony(HarmonyId);
+            try
+            {
+                harmony.Patch(AccessTools.Method(typeof(FerramAerospaceResearch.Geometry.Exposure.Renderer), "CountPixels"),
+                              prefix: new HarmonyMethod(typeof(PixelCounts), nameof(PixelCounts.Prefix)));
+                yield return Exposure.OnPad(ctx);
+                using var x = new Exposure(ctx, FlightGlobals.ActiveVessel);
+                using var log = new ExceptionLog();
+                yield return x.KeepVoxel();
+                object sun = x.Result("sun"), body = x.Result("body");
+
+                ctx.Step("Sun and body exposure counted on the CPU");
+                x.Directions(airstream: false, sun: true, body: true);
+                x.X.ComputeDevice = Device.CPU;
+                yield return Exposure.Fresh("sun and body exposure on the CPU device", sun, body);
+                PixelCounts.Reset();
+                yield return Wait.Frames(10);
+
+                ctx.Step("Left flight with the exposure counting");
+                yield return Nav.ToSpaceCenter(ctx);
+                yield return Wait.Seconds(2);
+                ctx.Record("counts", $"{PixelCounts.InFlight} in flight over 10 frames and the way out, {PixelCounts.Outside} once out of flight");
+                Assert.True(PixelCounts.InFlight > 0, "the CPU device counts the pixels in flight");
+                Assert.Equal(0, PixelCounts.Outside, "no pixels counted once the game has left flight (the vessel's arrays are freed)");
+                log.AssertNone("leaving flight while counting on the CPU");
+            }
+            finally
+            {
+                harmony.UnpatchAll(HarmonyId);
+            }
+        }
+
+        /// <summary>Renderer.CountPixels calls, in flight and out of it (FAR's job executor counts on the main thread).</summary>
+        private static class PixelCounts
+        {
+            public static int InFlight, Outside;
+
+            public static void Reset() => InFlight = Outside = 0;
+
+            public static void Prefix()
+            {
+                if (HighLogic.LoadedScene == GameScenes.FLIGHT)
+                    ++InFlight;
+                else
+                    ++Outside;
+            }
         }
 
         // ------------------------------------------------------------------ the airstream in flight
