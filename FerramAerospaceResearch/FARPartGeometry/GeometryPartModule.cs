@@ -384,7 +384,12 @@ namespace FerramAerospaceResearch.FARPartGeometry
 
             if (t.gameObject.layer != ignoreLayer0)
             {
-                Transform prefabTransform = part.partInfo.partPrefab?.FindModelTransform(t.gameObject.name);
+                // Part.FindModelTransform, from the prefab's transform: it looks under partTransform, which a prefab that
+                // never woke does not have (the female EVA kerbal's, kerbalEVA_female_Exp, is not PartLoader's prefab)
+                Part prefab = part.partInfo.partPrefab;
+                Transform prefabTransform = prefab is null
+                                                ? null
+                                                : Part.FindHeirarchyTransform(prefab.transform.Find("model"), t.gameObject.name);
                 if (prefabTransform is null || prefabTransform.gameObject.layer != ignoreLayer0)
                     return false;
             }
