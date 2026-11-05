@@ -43,6 +43,7 @@ Copyright 2022, Michael Ferrara, aka Ferram4
  */
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using FerramAerospaceResearch.Settings;
 using ModularFI;
 using KSPCommunityFixes;
@@ -205,6 +206,8 @@ namespace FerramAerospaceResearch.FARAeroComponents
             return radArea > 0 ? radArea : fi.BaseFICalculateAreaRadiative(part);
         }
 
+        // coverage: MFI only calls it from the UpdateThermodynamicsPre that FAR replaces
+        [ExcludeFromCodeCoverage]
         private static double CalculateAreaExposed(ModularFlightIntegrator fi, Part part)
         {
             FARAeroPartModule module = part.FindModuleImplementingFast<FARAeroPartModule>();

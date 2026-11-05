@@ -43,6 +43,7 @@ Copyright 2022, Michael Ferrara, aka Ferram4
  */
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using FerramAerospaceResearch;
 using FerramAerospaceResearch.Settings;
@@ -972,6 +973,8 @@ namespace ferram4
 
         // Had to add this one since the parent class don't use AoAoffset and adding it would break GetWingInFrontOf
         // ReSharper disable once UnusedMember.Global
+        // coverage: overload FAR does not call
+        [ExcludeFromCodeCoverage]
         public double CalculateAoA(Vector3d velocity, double offset)
         {
             double radAoAoffset = offset * FARMathUtil.deg2rad * ctrlSurfFrac;

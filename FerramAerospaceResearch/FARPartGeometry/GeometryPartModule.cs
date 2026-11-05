@@ -45,6 +45,7 @@ Copyright 2022, Michael Ferrara, aka Ferram4
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -158,6 +159,8 @@ namespace FerramAerospaceResearch.FARPartGeometry
             get { return config.ignoreForMainAxis; }
         }
 
+        // coverage: TweakScale interop, an optional mod the tests do not install
+        [ExcludeFromCodeCoverage]
         public void OnRescale(ScalingFactor factor)
         {
             if (meshDataList == null)
@@ -1040,12 +1043,16 @@ namespace FerramAerospaceResearch.FARPartGeometry
             return CreateBoxMeshFromBoxCollider(new Vector3(0.5f, 0.8f, 0.5f), Vector3.zero);
         }
 
+        // coverage: RealChute (full mod) interop, an optional mod the tests do not install
+        [ExcludeFromCodeCoverage]
         public void RC_Rescale(Vector3 relativeRescaleFactor)
         {
             //this is currently just a wrapper, in the future if Rescale changes this can change to maintain compatibility
             Rescale(relativeRescaleFactor);
         }
 
+        // coverage: only reached from the RealChute/TweakScale rescale hooks
+        [ExcludeFromCodeCoverage]
         public void Rescale(Vector3 relativeRescaleFactor)
         {
             RebuildAllMeshData();
@@ -1097,6 +1104,8 @@ namespace FerramAerospaceResearch.FARPartGeometry
                 noRenderer = new List<string>();
             }
 
+            // coverage: only called at Debug log level (developer diagnostics)
+            [ExcludeFromCodeCoverage]
             public void Clear()
             {
                 meshes.Clear();
@@ -1104,6 +1113,8 @@ namespace FerramAerospaceResearch.FARPartGeometry
                 noRenderer.Clear();
             }
 
+            // coverage: only called at Debug log level (developer diagnostics)
+            [ExcludeFromCodeCoverage]
             public void Print(Part p)
             {
                 StringBuilder sb = StringBuilderCache.Acquire();

@@ -44,6 +44,7 @@ Copyright 2022, Michael Ferrara, aka Ferram4
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using ferram4;
 using FerramAerospaceResearch.FARGUI.FARFlightGUI;
@@ -604,6 +605,8 @@ namespace FerramAerospaceResearch.FARAeroComponents
             return true;
         }
 
+        // coverage: only for planet packs whose atmosphere curves are not exactly reproducible; the tests use stock bodies
+        [ExcludeFromCodeCoverage]
         private static void WarnSnapshotAtmosphere(CelestialBody body, string why)
         {
             if (loggedSnapshotAtmosphere)

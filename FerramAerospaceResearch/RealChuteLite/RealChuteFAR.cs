@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
 using System.Text;
@@ -500,6 +501,8 @@ namespace FerramAerospaceResearch.RealChuteLite
             return (float)Math.Round(DeployedArea * areaCost);
         }
 
+        // coverage: IPartCostModifier member returning a constant; no tested KSP flow queries it
+        [ExcludeFromCodeCoverage]
         public ModifierChangeWhen GetModuleCostChangeWhen()
         {
             return ModifierChangeWhen.FIXED;

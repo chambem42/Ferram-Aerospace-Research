@@ -45,6 +45,7 @@ Copyright 2022, Michael Ferrara, aka Ferram4
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using UnityEngine;
 
 namespace FerramAerospaceResearch.FARThreading
@@ -98,27 +99,33 @@ namespace FerramAerospaceResearch.FARThreading
             }
         }
 
-        [Conditional("LOG_TRACE")]
-        public static void Trace(string message)
-        {
-            Log(LogLevel.Trace, message);
-        }
+        // Unused: nothing in FAR calls it (commented out after the test suite's coverage run)
+        // [Conditional("LOG_TRACE")]
+        // public static void Trace(string message)
+        // {
+        //     Log(LogLevel.Trace, message);
+        // }
 
-        public static void Debug(string message)
-        {
-            Log(LogLevel.Debug, message);
-        }
+        // Unused: nothing in FAR calls it (commented out after the test suite's coverage run)
+        // public static void Debug(string message)
+        // {
+        //     Log(LogLevel.Debug, message);
+        // }
 
         public static void Info(string message)
         {
             Log(LogLevel.Info, message);
         }
 
+        // coverage: only reached from fault paths (voxel chunks given back twice)
+        [ExcludeFromCodeCoverage]
         public static void Warning(string message)
         {
             Log(LogLevel.Warning, message);
         }
 
+        // coverage: only reached from fault paths (NaN or infinite voxel data, mesh errors)
+        [ExcludeFromCodeCoverage]
         public static void Error(string message)
         {
             Log(LogLevel.Error, message);

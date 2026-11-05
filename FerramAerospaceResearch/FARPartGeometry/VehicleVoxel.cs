@@ -1657,11 +1657,12 @@ namespace FerramAerospaceResearch.FARPartGeometry
             return voxelChunks[iSec, jSec, kSec]?.GetVoxelPartGlobalIndex(i + j * 8 + k * 64);
         }
 
-        // ReSharper disable once UnusedMember.Local
-        private Part GetPartAtVoxelPos(int i, int j, int k, ref VoxelChunk section)
-        {
-            return section.GetVoxelPartGlobalIndex(i + j * 8 + k * 64);
-        }
+        // Unused: nothing in FAR calls it (commented out after the test suite's coverage run)
+        // // ReSharper disable once UnusedMember.Local
+        // private Part GetPartAtVoxelPos(int i, int j, int k, ref VoxelChunk section)
+        // {
+        //     return section.GetVoxelPartGlobalIndex(i + j * 8 + k * 64);
+        // }
 
         private void UpdateFromMesh(object meshParamsObject)
         {

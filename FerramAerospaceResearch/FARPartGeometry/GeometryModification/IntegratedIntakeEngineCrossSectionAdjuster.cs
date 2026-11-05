@@ -43,6 +43,7 @@ Copyright 2022, Michael Ferrara, aka Ferram4
  */
 
 
+using System.Diagnostics.CodeAnalysis;
 using UnityEngine;
 
 namespace FerramAerospaceResearch.FARPartGeometry.GeometryModification
@@ -102,6 +103,8 @@ namespace FerramAerospaceResearch.FARPartGeometry.GeometryModification
             sign = direction;
         }
 
+        // coverage: interface member nothing calls
+        [ExcludeFromCodeCoverage]
         public int GetForwardBackwardNoFlowSign()
         {
             return sign;
@@ -126,6 +129,8 @@ namespace FerramAerospaceResearch.FARPartGeometry.GeometryModification
         {
         }
 
+        // coverage: unreachable: every intake FAR sees is a ModuleResourceIntake (AJEInlet derives from it)
+        [ExcludeFromCodeCoverage]
         public static IntegratedIntakeEngineCrossSectionAdjuster CreateAdjuster(
             PartModule intake,
             Matrix4x4 worldToVesselMatrix
@@ -148,6 +153,8 @@ namespace FerramAerospaceResearch.FARPartGeometry.GeometryModification
             return adjuster;
         }
 
+        // coverage: unreachable: every intake FAR sees is a ModuleResourceIntake (AJEInlet derives from it)
+        [ExcludeFromCodeCoverage]
         public void SetupAdjuster(PartModule intake, Matrix4x4 worldToVesselMatrix)
         {
             if (intake is ModuleResourceIntake module)

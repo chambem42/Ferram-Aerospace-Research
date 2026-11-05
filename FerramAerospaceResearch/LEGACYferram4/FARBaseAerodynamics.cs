@@ -43,6 +43,7 @@ Copyright 2022, Michael Ferrara, aka Ferram4
  */
 
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using FerramAerospaceResearch;
 using FerramAerospaceResearch.FARGUI.FAREditorGUI;
 using KSPCommunityFixes;
@@ -129,6 +130,8 @@ namespace ferram4
         }
 
         // ReSharper disable once UnusedMember.Global
+        // coverage: overload FAR does not call
+        [ExcludeFromCodeCoverage]
         public Vector3d GetVelocity(Vector3 refPoint)
         {
             Vector3d velocity = Vector3.zero;
@@ -143,11 +146,15 @@ namespace ferram4
             return velocity;
         }
 
+        // coverage: base virtual: the only subclass overrides it and no cfg uses FARBaseAerodynamics as a module
+        [ExcludeFromCodeCoverage]
         protected virtual void ResetCenterOfLift()
         {
             // Clear state when preparing CoL computation
         }
 
+        // coverage: base virtual: the only subclass overrides it and no cfg uses FARBaseAerodynamics as a module
+        [ExcludeFromCodeCoverage]
         public virtual Vector3d PrecomputeCenterOfLift(
             Vector3d velocity,
             double MachNumber,
