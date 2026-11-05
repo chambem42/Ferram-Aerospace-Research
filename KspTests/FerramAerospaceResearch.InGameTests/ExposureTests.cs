@@ -662,11 +662,14 @@ namespace FerramAerospaceResearch.InGameTests
             FarFlightProbe.Condition c = Far.At(0.5, 3000, 2, "exposure");
             using var x = new Exposure(ctx, FlightGlobals.ActiveVessel);
             using var log = new ExceptionLog();
-            x.Directions(airstream: true, sun: false, body: false);
-            x.X.ComputeDevice = Device.CPU;
             yield return FlightTests.Airborne(c);
             yield return x.KeepVoxel();
             yield return FarFlightProbe.Place(c);
+            // on only once placed: FAR's pixel-count job is not Burst-compiled (KSPBurst builds none of FAR's jobs), and
+            // under coverage each pixel of each render is a recorded visit, which slowed the game so much the placement's
+            // wait for the vessel off rails timed out
+            x.Directions(airstream: true, sun: false, body: false);
+            x.X.ComputeDevice = Device.CPU;
             var samples = new List<FarFlightProbe.Sample>();
             yield return FarFlightProbe.Hold(c, 25, 10, samples, predict: false);
             Vessel v = FlightGlobals.ActiveVessel;
@@ -828,7 +831,14 @@ namespace FerramAerospaceResearch.InGameTests
             {
                 ctx.Record("boundsAsShipped", $"{X.VesselBounds}");
                 FARConfig.Voxelization.DebugInFlight = true;
-                Vessel.GetComponent<FARVesselAero>().VesselUpdateEvent(Vessel);
+                FARVesselAero vesselAero = Vessel.GetComponent<FARVesselAero>();
+                vesselAero.VesselUpdateEvent(Vessel);
+                // the voxelization asked for done, not just bounds there: an earlier test's (the debug setting kept the
+                // voxel) left other bounds, which frame the renders differently from the ones after this voxel
+                VehicleAerodynamics va = Refl.Get<VehicleAerodynamics>(vesselAero, "_vehicleAero");
+                yield return Wait.Frames(2);
+                yield return Wait.Until(() => !Refl.Get<bool>(vesselAero, "_updateQueued") && !va.Voxelizing && Refl.Get<object>(va, "_voxel") != null,
+                                        60, "FAR's voxelization of the vessel", shot: false);
                 yield return Wait.Until(() => X.VesselBounds.size.sqrMagnitude > 0, 60, "the exposure given the vessel's voxel bounds", shot: false);
                 yield return Wait.Frames(5);
                 ctx.Record("bounds", $"{X.VesselBounds}");
