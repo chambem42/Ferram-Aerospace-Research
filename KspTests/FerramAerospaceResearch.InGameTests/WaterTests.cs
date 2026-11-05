@@ -64,7 +64,10 @@ namespace FerramAerospaceResearch.InGameTests
                 // around FAR's update), so a wing counts only when both were part-submerged
                 var lastSub = new Dictionary<FARWingAerodynamicModel, double>();
                 var seen = new List<string>();
-                while (Planetarium.GetUniversalTime() - t0 < 1.5 && frames < 400)
+                var partFrames = new Dictionary<string, (int n, double maxLift)>();   // any frame part-submerged, per wing part
+                // 3 s: at 9 m/s down a wing crosses the surface inside a frame, and only the winglets, bobbing, sat
+                // part-submerged two frames running: 2 to 8 such frames in 1.5 s, once none
+                while (Planetarium.GetUniversalTime() - t0 < 3 && frames < 400)
                 {
                     yield return fixedWait;
                     frames++;
@@ -91,11 +94,20 @@ namespace FerramAerospaceResearch.InGameTests
                         double sub = w.part.submergedPortion;
                         bool before = lastSub.TryGetValue(w, out double prev) && prev > 0.06 && prev < 0.94;
                         lastSub[w] = sub;
+                        if (sub > 0.06 && sub < 0.94)
+                        {
+                            string wn = w.part.partInfo.name;
+                            partFrames.TryGetValue(wn, out (int n, double maxLift) pf);
+                            partFrames[wn] = (pf.n + 1, Math.Max(pf.maxLift, w.liftForceWing));
+                        }
                         if (!before || sub < 0.06 || sub > 0.94 || w.liftForceWing < 0.05)
                             continue;
-                        Vector3 flow = ((Vector3)(w.part.Rigidbody.velocity + Krakensbane.GetFrameVelocity())).normalized;
-                        Vector3 f = w.worldSpaceForce;
-                        double lift = (f - Vector3.Dot(f, flow) * flow).magnitude;
+                        // the force along FAR's own lift direction this frame (perpendicular to the flow at the wing's
+                        // centroid): the water drag, a thousand times the air's, drops out of it exactly. Taken across
+                        // the part's velocity after the physics step instead, a few degrees of a bouncing plane's turn
+                        // read 15% of the lift kept (22.6 of 148 kN, at 0.23 under)
+                        Vector3 liftDir = ((Vector3)w.GetLiftDirection()).normalized;
+                        double lift = Math.Abs(Vector3.Dot(w.worldSpaceForce, liftDir));
                         double ratio = lift / w.liftForceWing;
                         dipped++;
                         if (seen.Count < 12)
@@ -113,6 +125,7 @@ namespace FerramAerospaceResearch.InGameTests
                 ctx.Record("water", $"{speed1:F1} m/s after {dt:F2} s: {waterDecel:F2} m/s2 (air {airDecel:F3}); splashed {v.Splashed}");
                 ctx.Record("wings", $"{dipped} part-submerged wing frames, the most lift kept {worstRatio:F4} ({worstWing})");
                 ctx.Record("dippedWings", string.Join("; ", seen));
+                ctx.Record("partSubmerged", string.Join(", ", partFrames.Select(kv => $"{kv.Key} {kv.Value.n} frames (lift up to {kv.Value.maxLift:F2} kN)")));
                 ctx.Record("waterDragSlow", $"{dragSlowMin:G4} to {dragSlowMax:G4} over {wetFrames} wet frames (stock {waterDragWas:G4})");
 
                 Assert.True(dipped > 0, "a wing partly in the water at some frame");
