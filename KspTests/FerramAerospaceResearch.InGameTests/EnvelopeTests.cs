@@ -517,7 +517,6 @@ namespace FerramAerospaceResearch.InGameTests
         {
             var caches = new List<string>();
             var diagnostics = new List<string>();
-            Rect? windowAt = null;
             void Listen(string message, string trace, LogType type)
             {
                 if (message != null && message.Contains("FAR heatmap cell diagnostic")) diagnostics.Add(message);
@@ -542,11 +541,6 @@ namespace FerramAerospaceResearch.InGameTests
                 HeatmapRenderer stab = Get<HeatmapRenderer>(hm, "_stabRenderer");
                 var envTex = Get<Texture2D>(env, "_envTex");
                 var stabTex = Get<Texture2D>(stab, "_stabTex");
-                // IMGUI takes a press only inside a window that holds the real mouse (KspTest's Imgui mouse): the window
-                // over it
-                windowAt = Get<Rect>(Far.Editor, "guiRect");
-                Set(Far.Editor, "guiRect", Imgui.OverRealMouse(windowAt.Value.width, windowAt.Value.height));
-                yield return Wait.Frames(3);
                 yield return Wait.Until(() => Imgui.ImageRect(envTex, Window) != null && Imgui.ImageRect(stabTex, Window) != null, 15,
                                         "both maps drawn", shot: false, detail: Imgui.Dump);
                 Rect envMap = Imgui.ImageRect(envTex, Window).Value, stabMap = Imgui.ImageRect(stabTex, Window).Value;
@@ -623,8 +617,6 @@ namespace FerramAerospaceResearch.InGameTests
                 Application.logMessageReceived -= Listen;
                 Imgui.ReleasePointer();
                 HeatmapRenderer.ResetZoom();
-                if (windowAt != null && Far.Editor != null)
-                    Set(Far.Editor, "guiRect", windowAt.Value);
                 foreach (string path in caches)
                     DeleteCache(path);
                 CloseWindow();

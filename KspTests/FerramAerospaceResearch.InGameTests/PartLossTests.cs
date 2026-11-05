@@ -90,12 +90,25 @@ namespace FerramAerospaceResearch.InGameTests
             GeometryPartModule lostGeo = lost.part.Modules.GetModule<GeometryPartModule>();
             using var exceptions = new ExceptionLog();
 
-            ctx.Step($"{lost.part.partInfo.name} destroyed");
-            lost.part.explode();
-            // 2 s was enough in plain runs, not under coverage
-            yield return Wait.Until(() => !Refl.Get<List<GeometryPartModule>>(aero, "_currentGeoModules").Any(g => g == null || ReferenceEquals(g, lostGeo)),
-                                    30, "FAR's vessel to drop the destroyed part's geometry module", shot: false);
-            yield return Wait.Seconds(1);
+            // FAR prunes a lost neighbour when it computes the wing's interactions, and it does not below 0.1 m/s
+            // airspeed: the parked plane gets a light breeze, or it prunes only while it still settles
+            Vector3 breeze = -2 * v.transform.up;
+            FARAtmosphere.SetWindFunction((b, p, pos) => breeze);
+            try
+            {
+                ctx.Step($"{lost.part.partInfo.name} destroyed");
+                lost.part.explode();
+                // 2 s was enough in plain runs, not under coverage
+                yield return Wait.Until(() => !Refl.Get<List<GeometryPartModule>>(aero, "_currentGeoModules").Any(g => g == null || ReferenceEquals(g, lostGeo)),
+                                        30, "FAR's vessel to drop the destroyed part's geometry module", shot: false);
+                yield return Wait.Until(() => !Neighbours(wi, dir).Any(x => x == null || ReferenceEquals(x, lost)), 30,
+                                        $"{neighbour.part.partInfo.name} to drop the destroyed panel as a neighbour", shot: false);
+            }
+            finally
+            {
+                FARAtmosphere.SetWindFunction(null);
+            }
+
             List<FARWingAerodynamicModel> left = Neighbours(wi, dir);
             List<double> after = Influences(wi, dir);
             ctx.Record("after", $"{string.Join(", ", left.Select(x => x == null ? "(destroyed)" : x.part.partInfo.name))}; influences " +

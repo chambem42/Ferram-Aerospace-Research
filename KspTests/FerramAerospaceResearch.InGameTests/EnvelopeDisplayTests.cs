@@ -31,7 +31,6 @@ namespace FerramAerospaceResearch.InGameTests
         public static IEnumerator Envelope_MapDisplayControls(TestContext ctx)
         {
             string cache = null;
-            Rect? windowAt = null;
             HeatmapRenderer.Metric metric = HeatmapRenderer.ColorMetric;
             bool rescale = HeatmapRenderer.RescaleColorsToView;
             try
@@ -82,9 +81,6 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.Equal(rescale, HeatmapRenderer.RescaleColorsToView, "and back");
 
                 ctx.Step("A box dragged on the stability map");
-                windowAt = Get<Rect>(Far.Editor, "guiRect");
-                Set(Far.Editor, "guiRect", Imgui.OverRealMouse(windowAt.Value.width, windowAt.Value.height));
-                yield return Wait.Frames(3);
                 var stabTex = Get<Texture2D>(stab, "_stabTex");
                 yield return Wait.Until(() => Imgui.ImageRect(stabTex, Window) != null, 15, "the stability map drawn", shot: false, detail: Imgui.Dump);
                 Rect map = Imgui.ImageRect(stabTex, Window).Value;
@@ -108,8 +104,6 @@ namespace FerramAerospaceResearch.InGameTests
                 HeatmapRenderer.ColorMetric = metric;
                 HeatmapRenderer.RescaleColorsToView = rescale;
                 HeatmapRenderer.InvalidateColors();
-                if (windowAt != null && EditorGUI.Instance != null)
-                    Set(Far.Editor, "guiRect", windowAt.Value);
                 DeleteCache(cache);
                 CloseWindow();
             }

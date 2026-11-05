@@ -70,7 +70,6 @@ namespace FerramAerospaceResearch.InGameTests
             FlightGUI gui = Far.FlightGui(v);
             object heatmapGui = Get(gui, "_heatmapGUI");
             bool shown = Far.FlightGuiShown, heatmapOpen = Get<bool>(gui, "showHeatmapWindow");
-            Rect windowAt = (Rect)GetStatic(typeof(FlightGUI), "heatmapGuiRect");
             HeatmapRenderer.Metric metric = HeatmapRenderer.ColorMetric;
             string vesselName = v.vesselName;
             string title = L("FARFlightHeatmapTitle");
@@ -151,9 +150,6 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.True(hereCell.Feasible, $"the vessel's cell is flyable ({Maps.Describe(hereCell)})");
                 Assert.True(AtmosphereAutopilotInterop.Available, "FAR found AtmosphereAutopilot");
                 AaCreateControllers(v);
-                // IMGUI takes a press only in a window that holds the real mouse (KspTest's Imgui mouse)
-                SetStatic(typeof(FlightGUI), "heatmapGuiRect", Imgui.OverRealMouse(windowAt.width, windowAt.height));
-                yield return Wait.Frames(3);
                 var envTex = Get<Texture2D>(env, "_envTex");
                 yield return Wait.Until(() => Imgui.ImageRect(envTex, title) != null, 10, "the envelope map drawn", shot: false, detail: Imgui.Dump);
                 Rect map = Imgui.ImageRect(envTex, title).Value;
@@ -191,7 +187,6 @@ namespace FerramAerospaceResearch.InGameTests
                 HeatmapRenderer.ResetZoom();
                 HeatmapRenderer.ColorMetric = metric;
                 HeatmapRenderer.InvalidateColors();
-                SetStatic(typeof(FlightGUI), "heatmapGuiRect", windowAt);
                 if (v != null)
                     v.vesselName = vesselName;
                 try
