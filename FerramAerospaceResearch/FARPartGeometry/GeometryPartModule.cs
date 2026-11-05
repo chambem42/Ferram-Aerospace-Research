@@ -355,7 +355,9 @@ namespace FerramAerospaceResearch.FARPartGeometry
             meshTransforms.RemoveAll(IgnoredPredicate);
             List<MeshData> geometryMeshes = CreateMeshListFromTransforms(ref meshTransforms);
 
-            meshDataList = new List<GeometryMesh>();
+            // filled here and only then published: a voxelization thread may take meshDataList at any time and enumerate
+            // it, and a list it holds must not change under it
+            var meshes = new List<GeometryMesh>();
 
             Matrix4x4 worldToVesselMatrix = HighLogic.LoadedSceneIsFlight
                                                 ? vessel.vesselTransform.worldToLocalMatrix
@@ -372,8 +374,10 @@ namespace FerramAerospaceResearch.FARPartGeometry
                 }
 
                 var geoMesh = new GeometryMesh(m, meshTransforms[i], worldToVesselMatrix, this);
-                meshDataList.Add(geoMesh);
+                meshes.Add(geoMesh);
             }
+
+            meshDataList = meshes;
 
             _meshesToUpdate = 0;
             _started = true;
@@ -716,25 +720,31 @@ namespace FerramAerospaceResearch.FARPartGeometry
                         return;
                 _ready = false;
 
-                _meshesToUpdate = meshDataList.Count;
-                for (int i = 0; i < meshDataList.Count; ++i)
+                List<GeometryMesh> meshes = meshDataList;
+                _meshesToUpdate = meshes.Count;
+                List<GeometryMesh> kept = null;   // a copy without the gone meshes, once there is one
+                for (int i = 0; i < meshes.Count; ++i)
                 {
-                    GeometryMesh mesh = meshDataList[i];
+                    GeometryMesh mesh = meshes[i];
                     if (mesh.TrySetThisToVesselMatrixForTransform())
                     {
                         mesh.TransformBasis(worldToVesselMatrix);
+                        kept?.Add(mesh);
                     }
                     else
                     {
                         FARLogger.Info("A mesh on " + part.partInfo.title + " did not exist and was removed");
-                        meshDataList.RemoveAt(i);
-                        --i;
+                        // not removed from the list in place: a voxelization thread may be enumerating it
+                        if (kept == null) kept = meshes.GetRange(0, i);
                         lock (this)
                         {
                             --_meshesToUpdate;
                         }
                     }
                 }
+
+                if (kept != null)
+                    meshDataList = kept;
             }
 
             if (crossSectionAdjusters == null)
