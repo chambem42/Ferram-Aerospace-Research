@@ -249,6 +249,11 @@ namespace FerramAerospaceResearch.FARAeroComponents
                 BumpSnapshotVersion();
             }
 
+            // the body FAR's shock and wind math takes (FARAeroUtil.CurrentBody): the active vessel's, kept up to date here
+            // on the main thread, where its curves may be rebuilt (the editor's analysis windows set the body they analyse,
+            // which flight otherwise kept, as it kept Kerbin past the first SOI change)
+            if (FlightGlobals.ready && vessel && vessel == FlightGlobals.ActiveVessel && vessel.mainBody != null)
+                FARAeroUtil.UpdateCurrentActiveBody(vessel.mainBody);
             if (FlightGlobals.ready && _currentAeroSections != null && vessel)
                 CalculateAndApplyVesselAeroProperties();
             if (_currentGeoModules.Count > geoModulesReady)
