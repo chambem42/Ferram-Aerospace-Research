@@ -241,7 +241,9 @@ namespace FerramAerospaceResearch.FARPartGeometry
             if (ignoreLayer0 < 0)
                 ignoreLayer0 = LayerMask.NameToLayer("TransparentFX");
 
-            GeometryPartModule modulePrefab = part.partInfo.partPrefab.FindModuleImplementingFast<GeometryPartModule>();
+            // a spawned asteroid's part has no prefab
+            Part prefab = part.partInfo?.partPrefab;
+            GeometryPartModule modulePrefab = prefab != null ? prefab.FindModuleImplementingFast<GeometryPartModule>() : null;
             if (modulePrefab is not null)
                 config = modulePrefab.config;
 
