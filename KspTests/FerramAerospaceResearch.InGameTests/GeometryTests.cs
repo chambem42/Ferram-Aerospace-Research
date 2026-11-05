@@ -16,7 +16,11 @@ namespace FerramAerospaceResearch.InGameTests
         /// <summary>
         /// A kerbal out on EVA from the stock Kerbal 1 on the pad: FAR gives the kerbal, whose part has no meshes FAR can
         /// use, its geometry and aero modules as it comes out, and models it as a 0.5 x 0.8 x 0.5 m box: 0.8 m long along
-        /// its height, 0.25 m2 across, 0.2 m3.
+        /// its height, 0.25 m2 across, 0.2 m3. The same kerbal goes out as each EVA part there is: male and female, in the
+        /// default and the slim suit (the vintage and future suits need the Making History and Breaking Ground expansions,
+        /// and are the slim ones without them). The female kerbal in the default suit is the odd one: her part's prefab
+        /// (part.partInfo.partPrefab, kerbalEVA_female_Exp) is not PartLoader's and never woke, so it has no
+        /// partTransform, which Part.FindModelTransform needs.
         /// </summary>
         [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = "Kerbal 1", CraftDir = "VAB", TimeoutSec = 600)]
         public static IEnumerator Flight_KerbalOnEvaIsABox(TestContext ctx)
@@ -40,29 +44,53 @@ namespace FerramAerospaceResearch.InGameTests
             }
 
             ProtoCrewMember crew = pod.protoModuleCrew[0];
+            ProtoCrewMember.Gender gender0 = crew.gender;
+            ProtoCrewMember.KerbalSuit suit0 = crew.suit;
+            try
+            {
+                foreach (ProtoCrewMember.Gender gender in new[] { ProtoCrewMember.Gender.Male, ProtoCrewMember.Gender.Female })
+                foreach (ProtoCrewMember.KerbalSuit suit in new[] { ProtoCrewMember.KerbalSuit.Default, ProtoCrewMember.KerbalSuit.Slim })
+                    yield return KerbalOutOnEva(ctx, pod, crew, gender, suit);
+            }
+            finally
+            {
+                crew.gender = gender0;
+                crew.suit = suit0;
+            }
+        }
 
-            ctx.Step(crew.name + " out on EVA");
+        private static IEnumerator KerbalOutOnEva(TestContext ctx, Part pod, ProtoCrewMember crew, ProtoCrewMember.Gender gender, ProtoCrewMember.KerbalSuit suit)
+        {
+            crew.gender = gender;
+            crew.suit = suit;
+            string partName = crew.GetKerbalEVAPartName();
+            using var log = new ExceptionLog();
+
+            ctx.Step($"{crew.name} out on EVA as {partName}");
             Assert.True(FlightEVA.fetch.spawnEVA(crew, pod, pod.airlock, true), "the kerbal went out on EVA");
             yield return Wait.Until(() => FlightGlobals.ActiveVessel != null && FlightGlobals.ActiveVessel.isEVA, 30, "the kerbal on EVA", shot: false);
             Vessel eva = FlightGlobals.ActiveVessel;
             Part kerbal = eva.rootPart;
+            Assert.Equal(partName, kerbal.partInfo.name, "the kerbal's EVA part");
             var aero = eva.GetComponent<FARVesselAero>();
             Assert.NotNull(aero, "FAR's vessel module on the kerbal");
             yield return Wait.Until(() => aero.isValid && aero.VehicleAero.Length > 0 && FARAPI.VesselVoxelizationCompletedEver(eva), 60,
-                                    "FAR's model of the kerbal", shot: false);
+                                    $"FAR's model of the kerbal ({partName})", shot: false);
             yield return Wait.Seconds(1);
             Assert.NotNull(kerbal.FindModuleImplementing<GeometryPartModule>(), "FAR's geometry module on the kerbal");
             Assert.NotNull(kerbal.FindModuleImplementing<FARAeroPartModule>(), "FAR's aero module on the kerbal");
             double volume = Far.Volume(aero.VehicleAero), length = aero.Length, area = aero.MaxCrossSectionArea;
-            ctx.Record("kerbal", $"length {length:F3} m, max cross-section {area:F4} m2, volume {volume:F4} m3");
+            ctx.Record(partName, $"length {length:F3} m, max cross-section {area:F4} m2, volume {volume:F4} m3");
             Assert.Near(0.8, length, 0.12, "the box's height along its axis");
             Assert.Near(0.25, area, 0.25 * 0.25, "the box's 0.5 x 0.5 m cross-section");
             Assert.Near(0.2, volume, 0.25 * 0.2, "the box's volume");
+            log.AssertNone($"the kerbal out on EVA as {partName}");
 
             ctx.Step("Back aboard");
-            KerbalEVA k = kerbal.FindModuleImplementing<KerbalEVA>();
-            k?.BoardPart(pod);
-            yield return Wait.Seconds(2);
+            kerbal.FindModuleImplementing<KerbalEVA>()?.BoardPart(pod);
+            yield return Wait.Until(() => FlightGlobals.ActiveVessel != null && !FlightGlobals.ActiveVessel.isEVA && pod.protoModuleCrew.Contains(crew),
+                                    30, "the kerbal back aboard", shot: false);
+            yield return Wait.Seconds(1);
         }
 
         /// <summary>

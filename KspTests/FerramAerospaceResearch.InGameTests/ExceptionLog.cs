@@ -22,6 +22,8 @@ namespace FerramAerospaceResearch.InGameTests
                 messages.Add(condition);
         }
 
+        public int Count => messages.Count;
+
         public void Dispose() => Application.logMessageReceived -= OnLog;
 
         public void AssertNone(string what) =>
