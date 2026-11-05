@@ -160,6 +160,12 @@ namespace FerramAerospaceResearch.InGameTests
                 string sent = Get<string>(heatmapGui, "_logMessage");
                 ctx.Record("clicked", $"at {at} on {map}: {sent}");
                 yield return Wait.Frames(3);
+                if (!Imgui.IsVisible(sent, title))
+                    // once (coverage, 4 KSPs) every FAR window was gone here: which of FlightGUI's conditions to draw failed
+                    ctx.Record("guiGone", $"showGUI {GetStatic(typeof(FlightGUI), "showGUI")}, showAllGUI {FlightGUI.showAllGUI}, " +
+                                          $"its vessel active {ReferenceEquals(gui.Vessel, FlightGlobals.ActiveVessel)}, " +
+                                          $"drawn GUIs {((System.Collections.ICollection)GetStatic(typeof(FlightGUIDrawer), "activeGUIs")).Count}, " +
+                                          $"heatmap window {Get<bool>(gui, "showHeatmapWindow")}, gui enabled {gui.enabled}");
                 Assert.True(Imgui.IsVisible(sent, title), "the window says what it sent");
                 AaCruiseTargets(v, out float aaAlt, out float aaSpeed);
                 Assert.Near(flight.AltAxis[here.cj], aaAlt, 1, "AA's cruise altitude is the cell's (m)");
