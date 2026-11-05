@@ -101,7 +101,7 @@ namespace FerramAerospaceResearch.InGameTests
 
         /// <summary>
         /// FAR's model of the craft done changing: its lift at 2 deg and its voxel volume the same over two seconds, with
-        /// no voxelization queued. A craft just loaded is voxelized again as its parts finish starting, and
+        /// no voxelization queued or running. A craft just loaded is voxelized again as its parts finish starting, and
         /// the wings' interactions follow; read before, a craft comes out a few percent off.
         /// </summary>
         public static IEnumerator Settled(string what)
@@ -112,7 +112,9 @@ namespace FerramAerospaceResearch.InGameTests
             while (UnityEngine.Time.realtimeSinceStartup < deadline)
             {
                 yield return Wait.Seconds(0.5);
-                if (!EditorReady)
+                // a voxelization on its way leaves the last model's numbers standing still (a slow one, under coverage
+                // beside other KSPs, for tens of seconds): not settled until it is done
+                if (!EditorReady || EditorVehicle?.Voxelizing == true)
                 {
                     notReady++;
                     stableSince = float.MaxValue;

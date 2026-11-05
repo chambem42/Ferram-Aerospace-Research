@@ -67,6 +67,8 @@ namespace FerramAerospaceResearch.InGameTests
                 yield return Snap.Shot(ctx, "tab-list");
 
                 ctx.Step("A tab picked from the list");
+                // the item as the list draws it now (after the screenshot's pass, a slow game may not have drawn it again)
+                yield return Wait.Until(() => Imgui.ControlRect(to, exact: true) != null, 15, $"'{to}' in the list", shot: false, detail: Imgui.Dump);
                 Rect list = Get<Rect>(display, "displayRect");
                 Rect item = Imgui.ControlRect(to, exact: true).Value;
                 ctx.Record("list", $"button {at}, list {list}, '{to}' at {item}");
@@ -81,6 +83,7 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.True(Imgui.ControlRect("▼ " + to + " ▼", Window) != null, "the dropdown shows the tab picked");
 
                 ctx.Step("Opened again, then the pointer moved away");
+                yield return Wait.Until(() => Imgui.ControlRect("▼ " + to + " ▼", Window) != null, 15, "the dropdown with the tab picked", shot: false, detail: Imgui.Dump);
                 Rect again = Imgui.ControlRect("▼ " + to + " ▼", Window).Value;
                 yield return Imgui.Hover(again.center);
                 yield return Imgui.Toggle("▼ " + to + " ▼", true, Window);
@@ -630,6 +633,8 @@ namespace FerramAerospaceResearch.InGameTests
                 }
 
                 ctx.Step("Show and hide the debug voxels");
+                // the button shows the model there is: none while a voxelization runs
+                yield return Far.Settled("the craft");
                 yield return Imgui.Click(L("FARDebugVoxels"), Window);
                 Assert.Equal(!voxelsShown, Get<bool>(vehicle, "visualizing"), "the debug voxels after their button");
                 yield return Imgui.Click(L("FARDebugVoxels"), Window);
@@ -678,6 +683,8 @@ namespace FerramAerospaceResearch.InGameTests
                     yield return Far.WaitForEditorVoxels();
                 }
 
+                // the model with the gear down done (a slow voxelization, under coverage, can still be on its way)
+                yield return Far.Settled("the craft with the gear down");
                 double cdDown = Far.Instant(2, 0.3).Cd;
                 ctx.Record("CdGearDown", cdDown);
 

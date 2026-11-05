@@ -132,7 +132,9 @@ namespace FerramAerospaceResearch.InGameTests
 
             ctx.Step("Device None again");
             x.X.ComputeDevice = Device.None;
-            yield return Wait.Frames(10);   // batches already submitted finish
+            // batches already submitted finish (some frames; many more under coverage)
+            yield return Wait.Until(() => x.ActiveBatches == 0, 30, "the batches submitted before the device None to finish", shot: false);
+            yield return Wait.Frames(2);
             Exposure.Areas(sun).Clear();
             Exposure.Areas(body).Clear();
             yield return Wait.Frames(30);
@@ -202,6 +204,13 @@ namespace FerramAerospaceResearch.InGameTests
                 yield return Wait.Frames(2);
             }
             yield return Wait.Seconds(3);   // FAR revoxelizes on the event too; the bounds come back the same
+            // once that voxelization is done: a slow one (under coverage beside other KSPs) still on its way leaves the
+            // exposure fitted to other bounds
+            FARVesselAero vesselAero = v.GetComponent<FARVesselAero>();
+            VehicleAerodynamics va = Refl.Get<VehicleAerodynamics>(vesselAero, "_vehicleAero");
+            yield return Wait.Until(() => !Refl.Get<bool>(vesselAero, "_updateQueued") && !va.Voxelizing && Refl.Get<object>(va, "_voxel") != null,
+                                    60, "FAR's voxelization after the modifications", shot: false);
+            yield return Wait.Frames(5);   // FARVesselAero hands the voxel bounds to the exposure in FixedUpdate
             yield return x.RenderViews(ctx, "modified", r => views = r);
             Exposure.AssertSameAreas(side, Exposure.Snapshot(views[2], v), Exposure.AreaPerPixel(views[2]), "from the side, before and after a vessel modification");
             ctx.Record("rendererSets", $"{x.RendererSetCount} renderer sets for {x.ObjectCount} parts ({v.parts.Count} in the vessel) after 3 modifications");
