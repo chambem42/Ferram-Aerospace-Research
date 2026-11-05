@@ -1,3 +1,4 @@
+using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -123,6 +124,115 @@ namespace FerramAerospaceResearch.InGameTests
             ctx.Record("afterJettison", $"{stillShielded} payload parts still shielded");
             Assert.True(core.Modules.GetModule<FARAeroPartModule>().ProjectedAreas.totalArea > 0, "the exposed core has area in the airflow");
             Assert.True(stillShielded < shielded, $"fewer payload parts shielded after the jettison ({stillShielded}, from {shielded})");
+        }
+
+        /// <summary>
+        /// Regression: a part's mesh list rebuilt while a voxelization thread reads it. RebuildAllMeshData put a new,
+        /// empty list in meshDataList and added the meshes to it there, so a worker that took the list then enumerated one
+        /// being added to: "Collection was modified" in VehicleVoxel.UpdateFromMesh (seen inflating the HIAD, whose
+        /// animation rebuilds its meshes as voxelizations run). A thread enumerates the Kerbal 1's part with the most
+        /// meshes while the main thread rebuilds them, 300 times: the list it takes is never added to.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = "Kerbal 1", CraftDir = "VAB", TimeoutSec = 600)]
+        public static IEnumerator Flight_MeshListRebuiltWhileAThreadReadsIt(TestContext ctx)
+        {
+            yield return Wait.Seconds(3);
+            Vessel v = FlightGlobals.ActiveVessel;
+            GeometryPartModule g = v.parts.Select(p => p.FindModuleImplementing<GeometryPartModule>())
+                                    .Where(m => m != null && m.meshDataList != null).OrderByDescending(m => m.meshDataList.Count).FirstOrDefault();
+            Assert.NotNull(g, "a part with FAR meshes");
+            ctx.Record("part", $"{g.part.partInfo.name}, {g.meshDataList.Count} meshes");
+            int errors = 0, reads = 0;
+            string first = null;
+            bool stop = false;
+            var reader = new System.Threading.Thread(() =>
+            {
+                while (!System.Threading.Volatile.Read(ref stop))
+                {
+                    try
+                    {
+                        List<GeometryMesh> list = g.meshDataList;
+                        if (list == null) continue;
+                        int n = 0;
+                        foreach (GeometryMesh m in list)
+                            n += m == null ? 0 : 1;
+                        System.Threading.Interlocked.Increment(ref reads);
+                    }
+                    catch (System.InvalidOperationException x)
+                    {
+                        if (System.Threading.Interlocked.Increment(ref errors) == 1) first = x.Message;
+                    }
+                }
+            }) { IsBackground = true };
+            reader.Start();
+            try
+            {
+                for (int k = 0; k < 300; k++)
+                {
+                    g.RebuildAllMeshData();
+                    if (k % 25 == 24)
+                        yield return null;
+                }
+            }
+            finally
+            {
+                System.Threading.Volatile.Write(ref stop, true);
+                reader.Join(5000);
+            }
+
+            ctx.Record("reads", $"{reads} enumerations, {errors} of them broken ({first})");
+            Assert.True(reads > 0, "the thread read the list");
+            Assert.Equal(0, errors, "enumerations broken by the rebuild");
+        }
+
+        /// <summary>
+        /// Regression: a mesh gone from a part (its transform destroyed) taken out of the list a voxelization thread may be
+        /// reading. UpdateTransformMatrixList removed it from the list in place; an enumeration of the list as it was
+        /// broke on its next step. Now the list is replaced by one without it, and the old one stays whole.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = "Kerbal 1", CraftDir = "VAB", TimeoutSec = 600)]
+        public static IEnumerator Flight_GoneMeshLeavesTheListBeingRead(TestContext ctx)
+        {
+            yield return Wait.Seconds(3);
+            Vessel v = FlightGlobals.ActiveVessel;
+            GeometryMesh leaf = null;
+            GeometryPartModule g = null;
+            foreach (Part p in v.parts)
+            {
+                GeometryPartModule m = p.FindModuleImplementing<GeometryPartModule>();
+                if (m?.meshDataList == null || m.meshDataList.Count < 2) continue;
+                leaf = m.meshDataList.FirstOrDefault(x => x.meshTransform != null && x.meshTransform.childCount == 0 && x.meshTransform != p.transform);
+                if (leaf == null) continue;
+                g = m;
+                break;
+            }
+
+            Assert.NotNull(g, "a part with two meshes or more, one on a transform of its own");
+            List<GeometryMesh> before = g.meshDataList;
+            int count = before.Count;
+            ctx.Record("part", $"{g.part.partInfo.name}: {count} meshes, {leaf.meshTransform.name} destroyed");
+            List<GeometryMesh>.Enumerator reading = before.GetEnumerator();
+            Assert.True(reading.MoveNext(), "the list read from its first mesh");
+            Object.Destroy(leaf.meshTransform.gameObject);
+            yield return null;
+            Assert.True(leaf.meshTransform == null, "the mesh's transform gone");
+            g.UpdateTransformMatrixList(v.vesselTransform.worldToLocalMatrix);
+            int rest = 0;
+            string broke = null;
+            try
+            {
+                while (reading.MoveNext())
+                    rest++;
+            }
+            catch (System.InvalidOperationException x)
+            {
+                broke = x.Message;
+            }
+
+            ctx.Record("after", $"{g.meshDataList.Count} meshes now; the old list read on: {(broke ?? $"{rest} more")}");
+            Assert.True(broke == null, $"the list being read is not changed under it ({broke})");
+            Assert.Equal(count - 1, g.meshDataList.Count, "the gone mesh out of the part's list");
+            Assert.False(g.meshDataList.Contains(leaf), "and not in it");
         }
     }
 }
