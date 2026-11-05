@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using ferram4;
 using FerramAerospaceResearch.FARAeroComponents;
 using FerramAerospaceResearch.FARGUI.FARFlightGUI;
 using KspTest;
@@ -256,7 +257,308 @@ namespace FerramAerospaceResearch.InGameTests
             // FAR's: per hour, 1 / the thrust-weighted Isp
             Assert.Near(3600 * thrust / thrustIsp, tsfc, 0.03 * tsfc, "TSFC is 3600 / Isp per hour");
             Assert.Equal(tsfc, FARAPI.ActiveVesselTSFC(), "the active vessel's TSFC");
+
+            ctx.Step("RasterPropMonitor's FAR variables (FARPM)");
+            // RPM finds the module on a part and asks it for its variables by name, in the frame it draws
+            FARPM rpm = v.rootPart.gameObject.AddComponent<FARPM>();
+            try
+            {
+                var expected = new Dictionary<string, object>
+                {
+                    ["FARPM_DYNAMIC_PRESSURE_Q"] = FARAPI.ActiveVesselDynPres(),
+                    ["FARPM_LIFT_COEFFICIENT_CL"] = FARAPI.ActiveVesselLiftCoeff(),
+                    ["FARPM_DRAG_COEFFICIENT_CD"] = FARAPI.ActiveVesselDragCoeff(),
+                    ["FARPM_REFAREA"] = FARAPI.ActiveVesselRefArea(),
+                    ["FARPM_MACHNUMBER"] = v.mach,
+                    ["FARPM_TERMINALVELOCITY"] = FARAPI.ActiveVesselTermVelEst(),
+                    ["FARPM_BALLISTIC_COEFFICIENT"] = FARAPI.ActiveVesselBallisticCoeff(),
+                    ["FARPM_ANGLE_OF_ATTACK"] = FARAPI.ActiveVesselAoA(),
+                    ["FARPM_SIDESLIP"] = FARAPI.ActiveVesselSideslip(),
+                    ["FARPM_THRUST_SPECIFIC_FUEL_CONSUMPTION"] = FARAPI.ActiveVesselTSFC(),
+                    ["FARPM_STALL_FRACTION"] = FARAPI.ActiveVesselStallFrac(),
+                };
+                foreach (KeyValuePair<string, object> pair in expected)
+                    Assert.Equal(pair.Value, rpm.ProcessVariable(pair.Key), pair.Key);
+                Assert.True(rpm.ProcessVariable("FARPM_NO_SUCH_VARIABLE") == null, "an unknown variable is null");
+                Assert.True(rpm.ProcessVariable("FARPM_MACHNUMBER") is double mach && mach > 0.3, "the Mach number in flight");
+            }
+            finally
+            {
+                UnityEngine.Object.Destroy(rpm);
+            }
+
             Ctrl.SetThrottle(0f);
+        }
+
+        private const string Rocket = "ComSat Lx Unclamped";   // stock, its launch clamp taken off (crafts/)
+
+        /// <summary>The rocket on the pad, voxelized.</summary>
+        private static IEnumerator RocketOnPad()
+        {
+            yield return Wait.Seconds(6);   // FAR voxelizes the vessel once it is on the pad
+            Vessel v = FlightGlobals.ActiveVessel;
+            yield return Wait.Until(() => FARAPI.VesselVoxelizationCompletedEver(v), 60, "the vessel voxelized", shot: false);
+        }
+
+        /// <summary>
+        /// FARAPI's contract for other mods off the main thread and with nothing to work on. From a worker thread the
+        /// altitude prediction is zero and a snapshot is refused (null); their warnings are not logged on the worker
+        /// (Unity's log is not safe there) but on the main thread a frame later, the prediction's once only. A null vessel
+        /// or snapshot gives zero, null or false without throwing. On a rocket (fins, but no flaps or spoilers) the flap setting is
+        /// -1 and the spoilers off; a vessel FAR has no flight GUI for cannot have its airspeed display toggled; the gas
+        /// at another altitude above the vessel is the body's there.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
+        public static IEnumerator Pad_ApiOffTheMainThreadAndWithoutAVessel(TestContext ctx)
+        {
+            yield return RocketOnPad();
+            Vessel v = FlightGlobals.ActiveVessel;
+            Vector3 vel = (Vector3)v.upAxis * 150;
+            using var exceptions = new ExceptionLog();
+
+            var logged = new List<(LogType Type, string Text, bool MainThread)>();
+            void OnLog(string condition, string stackTrace, LogType type)
+            {
+                if (condition.StartsWith("[FAR") && (condition.Contains("off the main thread") || condition.Contains("API Error")))
+                    lock (logged)
+                        logged.Add((type, condition, Threading.MainThread.IsMainThread));
+            }
+
+            int Logged(string text)
+            {
+                lock (logged)
+                    return logged.Count(l => l.Text.Contains(text));
+            }
+
+            Application.logMessageReceivedThreaded += OnLog;
+            try
+            {
+                ctx.Step("from a worker thread");
+                FARAPI.CalculateVesselAeroForces(v, out Vector3 onMain, out _, vel, 1000);
+                ctx.Record("mainThreadForce", $"{onMain.magnitude:F2} kN");
+                Assert.True(onMain.magnitude > 0, "the prediction on the main thread has a force");
+                bool warnedBefore = (bool)Refl.GetStatic(typeof(FARAPI), "loggedOffMainThread");
+                var worker = System.Threading.Tasks.Task.Run(() =>
+                {
+                    FARAPI.CalculateVesselAeroForces(v, out Vector3 f1, out Vector3 t1, vel, 1000);
+                    FARAPI.CalculateVesselAeroForces(v, out Vector3 f2, out Vector3 t2, vel, 1000);
+                    FARVesselSnapshot s = FARAPI.CaptureVesselSnapshot(v);
+                    return (f1, t1, f2, t2, s);
+                });
+                var r = worker.Result;
+                Assert.True(r.f1 == Vector3.zero && r.t1 == Vector3.zero && r.f2 == Vector3.zero && r.t2 == Vector3.zero,
+                            $"the prediction off the main thread is zero ({r.f1}, {r.f2})");
+                Assert.True(r.s == null, "no snapshot off the main thread");
+                Assert.Equal(0, Logged("off the main thread"), "nothing logged on the worker thread");
+
+                yield return Wait.Frames(3);
+                ctx.Record("offThreadWarnings", string.Join(" | ", logged.Select(l => $"{l.Type} main={l.MainThread}: {l.Text}")));
+                Assert.Equal(warnedBefore ? 0 : 1, Logged("CalculateVesselAeroForces called off the main thread"),
+                             "the prediction's warning, once (if not already given this session)");
+                Assert.Equal(1, Logged("CaptureVesselSnapshot called off the main thread"), "the snapshot's warning");
+                lock (logged)
+                    Assert.True(logged.All(l => l.MainThread && l.Type == LogType.Warning), "the warnings logged on the main thread");
+
+                ctx.Step("no vessel, no snapshot");
+                FARAPI.CalculateVesselAeroForces(null, out Vector3 fn, out Vector3 tn, vel, 1000);
+                Assert.True(fn == Vector3.zero && tn == Vector3.zero, "no force for no vessel");
+                Assert.Equal(1, Logged("attempted to simulate aerodynamics of null vessel"), "the null vessel is reported");
+                Assert.True(FARAPI.CaptureVesselSnapshot(null) == null, "no snapshot of no vessel");
+                var where = new Vector3d(v.latitude, v.longitude, 1000);
+                double ut = Planetarium.GetUniversalTime();
+                Assert.False(FARAPI.CalculateSnapshotAeroForcesAt(null, out Vector3 fs, out _, vel, where, ut), "no prediction from no snapshot");
+                Assert.False(FARAPI.CalculateSnapshotAeroForcesWithControlsAt(null, out Vector3 fc, out _, vel, where, ut, 1, 0, 0),
+                             "no prediction with controls from no snapshot");
+                Assert.True(fs == Vector3.zero && fc == Vector3.zero, "and zero force");
+                Assert.False(FARAPI.VesselVoxelizationCompletedEver(null), "no voxelization of no vessel");
+            }
+            finally
+            {
+                Application.logMessageReceivedThreaded -= OnLog;
+            }
+
+            ctx.Step("a rocket's fins: no flaps, no spoilers");
+            FARControllableSurface[] surfaces = v.parts.Select(p => p.FindModuleImplementing<FARControllableSurface>()).Where(s => s != null).ToArray();
+            ctx.Record("controlSurfaces", surfaces.Length);
+            Assert.False(surfaces.Any(s => s.isFlap || s.isSpoiler), "none of the rocket's control surfaces is a flap or a spoiler");
+            Assert.Equal(-1, FARAPI.VesselFlapSetting(v), "no flap setting without flaps");
+            Assert.False(FARAPI.VesselSpoilerSetting(v), "no spoilers out without spoilers");
+
+            ctx.Step("the airspeed display of a vessel without FAR's flight GUI");
+            FlightGUI gui = Far.FlightGui(v);
+            bool shown = gui.airSpeedGUI.enabled;
+            FlightGUI.vesselFlightGUI.Remove(v);
+            try
+            {
+                Assert.False(FARAPI.ToggleAirspeedDisplay(true, v), "no airspeed display to switch");
+            }
+            finally
+            {
+                FlightGUI.vesselFlightGUI[v] = gui;
+            }
+            Assert.Equal(shown, gui.airSpeedGUI.enabled, "the vessel's display untouched");
+
+            ctx.Step("the gas at another altitude");
+            double ut2 = Planetarium.GetUniversalTime();
+            GasProperties high = FARAtmosphere.GetGasProperties(v, 5000, ut2), here = FARAtmosphere.GetGasProperties(v, ut2);
+            GasProperties body = FARAtmosphere.GetGasProperties(v.mainBody, new Vector3d(v.latitude, v.longitude, 5000), ut2);
+            ctx.Record("gas5km", $"{high.Pressure:F0} Pa {high.Temperature:F1} K (here {here.Pressure:F0} Pa)");
+            Assert.Equal(body.Pressure, high.Pressure, "the pressure at 5 km above the vessel's place");
+            Assert.Equal(body.Temperature, high.Temperature, "the temperature at 5 km above the vessel's place");
+            Assert.Near(v.mainBody.GetPressure(5000) * 1000, high.Pressure, 1e-3 * high.Pressure, "the body's pressure at 5 km");
+            Assert.True(high.Pressure < 0.7 * here.Pressure, "lower than on the pad");
+            exceptions.AssertNone("calling FARAPI off the main thread and with nulls");
+        }
+
+        /// <summary>
+        /// A snapshot's atmosphere at its edges. Above the atmosphere there is no force (a trajectory mod predicting
+        /// from orbit). Under a custom pressure function not set as thread-safe a worker thread's prediction is
+        /// refused; under a thread-safe one that throws the prediction fails (false) and nothing escapes. The atmosphere a
+        /// snapshot reproduces (AtmosphereSnapshot) is the body's with each way a body may describe it: a pressure and a
+        /// temperature curve in metres (Kerbin's), normalized curves, and no curves (the lapse-rate formulas).
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
+        public static IEnumerator Pad_SnapshotAtmosphereAtItsEdges(TestContext ctx)
+        {
+            yield return RocketOnPad();
+            Vessel v = FlightGlobals.ActiveVessel;
+            CelestialBody kerbin = v.mainBody;
+            Vector3 vel = (Vector3)v.upAxis * 300;
+            double ut = Planetarium.GetUniversalTime();
+            Vector3d At(double alt) => new Vector3d(v.latitude, v.longitude, alt);
+            // the lapse-rate formula runs to NaN above the altitude where its temperature would be negative
+            bool Same(double game, double snapshot) =>
+                double.IsNaN(game) ? double.IsNaN(snapshot) : Math.Abs(game - snapshot) <= 1e-5 * Math.Abs(game) + 1e-9;
+
+            ctx.Step("above the atmosphere");
+            FARVesselSnapshot snap = FARAPI.CaptureVesselSnapshot(v);
+            Assert.NotNull(snap, "a snapshot of the rocket");
+            Assert.True(snap.OffMainThread, "the default atmosphere: predictions on any thread");
+            Assert.True(FARAPI.CalculateSnapshotAeroForcesAt(snap, out Vector3 low, out _, vel, At(2000), ut), "a prediction at 2 km");
+            Assert.True(low.magnitude > 0, "a force at 2 km");
+            bool ok = FARAPI.CalculateSnapshotAeroForcesAt(snap, out Vector3 space, out Vector3 spaceTorque, vel, At(kerbin.atmosphereDepth + 10000), ut);
+            ctx.Record("aboveAtmosphere", $"returned {ok}, force {space}, torque {spaceTorque}");
+            Assert.True(space == Vector3.zero && spaceTorque == Vector3.zero, "no force or torque above the atmosphere");
+
+            try
+            {
+                ctx.Step("a custom pressure function, not thread-safe");
+                FARAtmosphere.SetPressureFunction((b, lla, t) => b.GetPressure(lla.z) * 1000);
+                FARVesselSnapshot custom = FARAPI.CaptureVesselSnapshot(v);
+                Assert.False(custom.OffMainThread, "predictions on the main thread only");
+                Assert.True(FARAPI.CalculateSnapshotAeroForcesAt(custom, out Vector3 main, out _, vel, At(2000), ut), "it predicts on the main thread");
+                Assert.Near(0, (main - low).magnitude, 1e-3 * low.magnitude, "the same force as the default atmosphere's");
+                var worker = System.Threading.Tasks.Task.Run(() =>
+                {
+                    bool r = FARAPI.CalculateSnapshotAeroForcesAt(custom, out Vector3 f, out _, vel, At(2000), ut);
+                    return (r, f);
+                }).Result;
+                Assert.False(worker.r, "refused on a worker thread");
+                Assert.True(worker.f == Vector3.zero, "with zero force");
+
+                ctx.Step("a thread-safe custom pressure function that throws where the prediction asks");
+                // it answers where the snapshot checks it at capture (the pad, half way up), not between 1 and 3 km
+                FARAtmosphere.SetPressureFunctionThreadSafe((b, lla, t) => lla.z > 1000 && lla.z < 3000 ? throw new InvalidOperationException("test") : b.GetPressure(lla.z) * 1000);
+                FARVesselSnapshot throwing = FARAPI.CaptureVesselSnapshot(v);
+                Assert.True(throwing.OffMainThread, "a thread-safe function: predictions on any thread");
+                Assert.False(FARAPI.CalculateSnapshotAeroForcesAt(throwing, out Vector3 tf, out _, vel, At(2000), ut), "the prediction fails");
+                Assert.True(tf == Vector3.zero, "with zero force");
+                var w2 = System.Threading.Tasks.Task.Run(() => FARAPI.CalculateSnapshotAeroForcesAt(throwing, out _, out _, vel, At(2000), ut));
+                Assert.False(w2.Result, "and fails on a worker thread, without an exception");
+            }
+            finally
+            {
+                FARAtmosphere.SetPressureFunction(null);
+            }
+
+            ctx.Step("the reproduced atmosphere against the body's, each way a body describes it");
+            bool usePressure = kerbin.atmosphereUsePressureCurve, pressureNormalized = kerbin.atmospherePressureCurveIsNormalized;
+            bool useTemperature = kerbin.atmosphereUseTemperatureCurve, temperatureNormalized = kerbin.atmosphereTemperatureCurveIsNormalized;
+            var cases = new[] { (true, false, "curves in metres"), (true, true, "normalized curves"), (false, false, "no curves") };
+            try
+            {
+                foreach ((bool useCurve, bool normalized, string what) in cases)
+                {
+                    kerbin.atmosphereUsePressureCurve = kerbin.atmosphereUseTemperatureCurve = useCurve;
+                    kerbin.atmospherePressureCurveIsNormalized = kerbin.atmosphereTemperatureCurveIsNormalized = normalized;
+                    var atm = new AtmosphereSnapshot(kerbin);
+                    var rows = new List<string>();
+                    foreach (double alt in new[] { 0.0, 1500, 12000, 35000, 69000, kerbin.atmosphereDepth, kerbin.atmosphereDepth + 5000 })
+                    {
+                        double p = kerbin.GetPressure(alt), t = kerbin.GetTemperature(alt);
+                        double ps = atm.GetPressureKPa(alt), ts = atm.GetBaseTemperature(alt);
+                        rows.Add($"{alt / 1000:0.#} km {ps:G5}/{p:G5} kPa {ts:F2}/{t:F2} K");
+                        Assert.True(Same(p, ps), $"{what}: the pressure at {alt} m ({ps} against {p} kPa)");
+                        Assert.True(Same(t, ts), $"{what}: the temperature at {alt} m ({ts} against {t} K)");
+                    }
+                    ctx.Record(what, string.Join("; ", rows));
+                }
+            }
+            finally
+            {
+                kerbin.atmosphereUsePressureCurve = usePressure;
+                kerbin.atmospherePressureCurveIsNormalized = pressureNormalized;
+                kerbin.atmosphereUseTemperatureCurve = useTemperature;
+                kerbin.atmosphereTemperatureCurveIsNormalized = temperatureNormalized;
+            }
+        }
+
+        /// <summary>
+        /// The debug voxels with the difficulty setting "32 bit indices" (DebugVoxelMesh.Use32BitIndices, a player option
+        /// for big craft): the vessel's voxel mesh made after it is switched on has 32-bit indices and all its voxels in
+        /// one submesh; with 16-bit indices the same voxels are split into submeshes of at most 65535 vertices. Both
+        /// show the same vertices and triangles.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
+        public static IEnumerator Pad_DebugVoxelsWith32BitIndices(TestContext ctx)
+        {
+            yield return RocketOnPad();
+            Vessel v = FlightGlobals.ActiveVessel;
+            FARVesselAero aero = v.GetComponent<FARVesselAero>();
+            bool use32 = Geometry.DebugVoxelMesh.Use32BitIndices, debugInFlight = FARConfig.Voxelization.DebugInFlight;
+            using var exceptions = new ExceptionLog();
+            var meshes = new Dictionary<bool, (int Vertices, int Indices, int Submeshes, UnityEngine.Rendering.IndexFormat Format)>();
+            try
+            {
+                // in flight FAR drops the voxel once made unless debugInFlight (what the debug voxel button needs)
+                FARConfig.Voxelization.DebugInFlight = true;
+                foreach (bool wide in new[] { true, false })
+                {
+                    ctx.Step(wide ? "32-bit indices" : "16-bit indices");
+                    Geometry.DebugVoxelMesh.Use32BitIndices = wide;
+                    object old = Refl.TryGet<object>(aero.VehicleAero, "_voxel");
+                    aero.VesselUpdateEvent(v);
+                    yield return Wait.Until(() => Refl.TryGet<object>(aero.VehicleAero, "_voxel") is { } nv && !ReferenceEquals(nv, old) &&
+                                                  !aero.VehicleAero.Voxelizing, 60, "a new voxel", shot: false);
+                    aero.VehicleAero.DebugVisualizeVoxels(v.transform.localToWorldMatrix);
+                    var mesh = (Component)Refl.Get(Refl.Get(aero.VehicleAero, "_voxel"), "voxelMesh");
+                    yield return Wait.Until(() => mesh.gameObject.activeSelf, 30, "the debug voxels shown", shot: false);
+                    Mesh m = ((MeshFilter)mesh.GetComponent(typeof(MeshFilter))).sharedMesh;
+                    int indices = Enumerable.Range(0, m.subMeshCount).Sum(i => m.GetIndices(i).Length);
+                    int maxIndex = Enumerable.Range(0, m.subMeshCount).Max(i => m.GetIndices(i).DefaultIfEmpty(0).Max());
+                    meshes[wide] = (m.vertexCount, indices, m.subMeshCount, m.indexFormat);
+                    ctx.Record(wide ? "mesh32" : "mesh16", $"{m.vertexCount} vertices, {indices} indices in {m.subMeshCount} submeshes, {m.indexFormat}");
+                    Assert.True(m.vertexCount > 0 && indices > 0, "voxels to show");
+                    Assert.True(maxIndex < m.vertexCount, "every index names a vertex");
+                    aero.VehicleAero.DebugVisualizeVoxels(v.transform.localToWorldMatrix);   // hidden again
+                    yield return Wait.Frames(3);
+                }
+            }
+            finally
+            {
+                Geometry.DebugVoxelMesh.Use32BitIndices = use32;
+                FARConfig.Voxelization.DebugInFlight = debugInFlight;
+            }
+
+            var m32 = meshes[true];
+            var m16 = meshes[false];
+            Assert.Equal(UnityEngine.Rendering.IndexFormat.UInt32, m32.Format, "32-bit indices when switched on");
+            Assert.Equal(1, m32.Submeshes, "one submesh with 32-bit indices");
+            Assert.Equal(UnityEngine.Rendering.IndexFormat.UInt16, m16.Format, "16-bit indices when off");
+            Assert.True(m16.Submeshes >= (m16.Vertices + 65534) / 65535, $"16-bit submeshes of at most 65535 vertices ({m16.Submeshes} for {m16.Vertices})");
+            Assert.Equal(m32.Vertices, m16.Vertices, "the same vertices either way");
+            Assert.Equal(m32.Indices, m16.Indices, "the same primitives either way");
+            exceptions.AssertNone("showing the debug voxels");
         }
 
         /// <summary>

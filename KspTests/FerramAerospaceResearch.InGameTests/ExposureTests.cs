@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using FerramAerospaceResearch.FARAeroComponents;
+using FerramAerospaceResearch.FARGUI.FARFlightGUI;
 using HarmonyLib;
 using KspTest;
 using UnityEngine;
@@ -142,6 +143,237 @@ namespace FerramAerospaceResearch.InGameTests
                         "nothing rendered after the device is None again");
 
             log.AssertNone("exposure on and off");
+        }
+
+        /// <summary>
+        /// A render's result reads as a dictionary from part to area (how the debug window lists it): enumerated every way
+        /// (foreach, the non-generic enumerator with its dictionary entries, its own enumerator, LINQ)
+        /// it gives each of the vessel's parts once, with the area the result has for it; its keys, values and
+        /// count agree, and a part not on the vessel is not in it. The renderer itself reads as a dictionary from part to
+        /// index, 0 to n-1. The device PreferGPU counts on the GPU where compute shaders are supported, else on the CPU.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
+        public static IEnumerator Pad_ExposureResultIsADictionary(TestContext ctx)
+        {
+            yield return Exposure.OnPad(ctx);
+            using var x = new Exposure(ctx, FlightGlobals.ActiveVessel);
+            using var log = new ExceptionLog();
+            yield return x.KeepVoxel();
+            Vessel v = x.Vessel;
+            object sun = x.Result("sun");
+            x.Directions(airstream: false, sun: true, body: false);
+            x.X.ComputeDevice = Device.CPU;
+            yield return Exposure.Fresh("sun exposure on the CPU device", sun);
+
+            ctx.Step("the result as a dictionary");
+            var dict = (IReadOnlyDictionary<Part, double>)sun;
+            int n = v.parts.Count;
+            Assert.Equal(n, dict.Count, "one entry per part");
+            Assert.Equal(n, dict.Keys.Count(), "one key per part");
+            Assert.Equal(n, dict.Values.Count(), "one value per part");
+            Assert.True(v.parts.All(dict.ContainsKey), "every part of the vessel is a key");
+            Part notOnVessel = v.parts[0].partInfo.partPrefab;
+            Assert.False(dict.ContainsKey(notOnVessel), "a part not on the vessel is not a key");
+            Assert.False(dict.TryGetValue(notOnVessel, out double none), "nor has an area");
+            Assert.Equal(0.0, none, "zero for no area");
+            Assert.True(dict.Keys.Select(p => dict[p]).SequenceEqual(dict.Values), "the values in the keys' order");
+
+            void AssertPairs(IEnumerable<KeyValuePair<Part, double>> pairs, string how)
+            {
+                List<KeyValuePair<Part, double>> list = pairs.ToList();
+                Assert.Equal(n, list.Count, $"{how}: one pair per part");
+                Assert.Equal(n, list.Select(kv => kv.Key).Distinct().Count(), $"{how}: each part once");
+                foreach (KeyValuePair<Part, double> kv in list)
+                    Assert.Equal(dict[kv.Key], kv.Value, $"{how}: {kv.Key.partInfo.name}'s area");
+            }
+
+            var foreachPairs = new List<KeyValuePair<Part, double>>();
+            foreach (KeyValuePair<Part, double> kv in dict)
+                foreachPairs.Add(kv);
+            AssertPairs(foreachPairs, "foreach");
+            AssertPairs(dict.ToDictionary(kv => kv.Key, kv => kv.Value), "ToDictionary");
+
+            // the non-generic enumerator is the result's own, a dictionary enumerator
+            var e = (IDictionaryEnumerator)((IEnumerable)sun).GetEnumerator();
+            AssertPairs(Entries(e), "IDictionaryEnumerator");
+            ((IDisposable)e).Dispose();
+
+            // and the public members the debug window uses (typed with Unity.Mathematics' assembly: by reflection here)
+            Type resultType = sun.GetType();
+            var own = (IEnumerator<KeyValuePair<Part, double>>)resultType.GetMethod("GetEnumerator", Type.EmptyTypes).Invoke(sun, null);
+            var ownPairs = new List<KeyValuePair<Part, double>>();
+            while (own.MoveNext())
+            {
+                ownPairs.Add(own.Current);
+                Type et = own.GetType();
+                Assert.True(ReferenceEquals(own.Current.Key, et.GetProperty("Key").GetValue(own)), "the enumerator's key");
+                Assert.Equal(own.Current.Value, (double)et.GetProperty("Value").GetValue(own), "the enumerator's value");
+            }
+            own.Dispose();
+            AssertPairs(ownPairs, "the result's enumerator");
+            Assert.Equal(n, ((ICollection)resultType.GetProperty("Keys").GetValue(sun)).Count, "Keys");
+            Assert.True(ReferenceEquals(Exposure.Areas(sun), resultType.GetProperty("Values").GetValue(sun)), "Values are the areas");
+
+            ctx.Step("the renderer as a dictionary of part indices");
+            object rendererObject = Refl.Get(x.X, "exposureRenderer");
+            var indices = (IReadOnlyDictionary<Part, int>)rendererObject;
+            Assert.Equal(n, indices.Count, "the renderer has every part");
+            Assert.True(Enumerable.Range(0, n).SequenceEqual(indices.Values.OrderBy(i => i)), "indices 0 to n-1");
+            Assert.True(v.parts.All(p => indices.ContainsKey(p) && indices.Keys.Contains(p)), "every part is a key");
+            var indexPairs = new List<KeyValuePair<Part, int>>();
+            foreach (KeyValuePair<Part, int> kv in indices)
+                indexPairs.Add(kv);
+            Assert.True(indexPairs.All(kv => indices[kv.Key] == kv.Value), "the pairs are the indices");
+            int nonGeneric = 0;
+            foreach (object _ in (IEnumerable)indices)
+                nonGeneric++;
+            Assert.Equal(n, nonGeneric, "the non-generic enumerator's count");
+            Type rt = rendererObject.GetType();
+            Assert.Equal(n, ((ICollection)rt.GetProperty("Keys").GetValue(rendererObject)).Count, "the renderer's Keys");
+            Assert.Equal(n, ((ICollection)rt.GetProperty("Values").GetValue(rendererObject)).Count, "the renderer's Values");
+            var rendererOwn = (IEnumerator)rt.GetMethod("GetEnumerator", Type.EmptyTypes).Invoke(rendererObject, null);
+            int ownCount = 0;
+            while (rendererOwn.MoveNext())
+                ownCount++;
+            Assert.Equal(n, ownCount, "the renderer's own enumerator's count");
+
+            ctx.Step("the device PreferGPU");
+            x.X.ComputeDevice = Device.PreferGPU;
+            ctx.Record("preferGpu", $"{x.ActualDevice}, compute shaders {SystemInfo.supportsComputeShaders}");
+            Assert.Equal(SystemInfo.supportsComputeShaders ? "GPU" : "CPU", x.ActualDevice, "PreferGPU counts on the GPU where it can");
+            yield return Exposure.Fresh("sun exposure on the preferred device", sun);
+            Assert.True(Exposure.Total(sun) > 0, "it renders");
+
+            log.AssertNone("reading the exposure results");
+        }
+
+        /// <summary>The pairs left in a result's non-generic enumerator, each entry checked against its key and value.</summary>
+        private static List<KeyValuePair<Part, double>> Entries(IDictionaryEnumerator e)
+        {
+            var entries = new List<KeyValuePair<Part, double>>();
+            while (e.MoveNext())
+            {
+                DictionaryEntry entry = e.Entry;
+                Assert.True(ReferenceEquals(entry.Key, e.Key) && Equals(entry.Value, e.Value), "the entry is the key and value");
+                Assert.Equal(new KeyValuePair<Part, double>((Part)e.Key, (double)e.Value), (KeyValuePair<Part, double>)e.Current, "the current pair");
+                entries.Add(new KeyValuePair<Part, double>((Part)entry.Key, (double)entry.Value));
+            }
+            return entries;
+        }
+
+        /// <summary>
+        /// A result's enumerator reset enumerates every part again. Explicit: RenderResult&lt;T&gt;.Enumerator.Reset calls
+        /// Reset on boxed copies of its key and value enumerators (struct fields cast to IEnumerator), so it resets
+        /// nothing and the enumerator stays at its end.
+        /// </summary>
+        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
+        public static IEnumerator Pad_ExposureResultEnumeratorResets(TestContext ctx)
+        {
+            yield return Exposure.OnPad(ctx);
+            using var x = new Exposure(ctx, FlightGlobals.ActiveVessel);
+            yield return x.KeepVoxel();
+            object sun = x.Result("sun");
+            x.Directions(airstream: false, sun: true, body: false);
+            x.X.ComputeDevice = Device.CPU;
+            yield return Exposure.Fresh("sun exposure on the CPU device", sun);
+            var e = (IDictionaryEnumerator)((IEnumerable)sun).GetEnumerator();
+            int first = Entries(e).Count;
+            e.Reset();
+            int again = Entries(e).Count;
+            ctx.Record("pairs", $"{first}, after Reset {again}");
+            Assert.Equal(x.Vessel.parts.Count, first, "every part the first time");
+            Assert.Equal(first, again, "every part again after Reset");
+        }
+
+        /// <summary>
+        /// The flight debug window's exposure panel (FAR's flight window, Debug): showing a direction's render, it has
+        /// the debugger copy each render into a texture of the render's size and draws it, with the parts' areas listed;
+        /// its device drop-down sets the vessel's device. The window closed, the copies stop and nothing throws.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
+        public static IEnumerator Pad_ExposureDebugPanelShowsTheRender(TestContext ctx)
+        {
+            yield return Exposure.OnPad(ctx);
+            using var x = new Exposure(ctx, FlightGlobals.ActiveVessel);
+            using var log = new ExceptionLog();
+            yield return x.KeepVoxel();
+            x.Directions(airstream: false, sun: true, body: false);
+            FlightGUI gui = Far.FlightGui(x.Vessel);
+            bool shown = Far.FlightGuiShown, debugShown = Far.SubWindowOpen(gui, "showDebugWindow");
+            object deviceSelect = Refl.Get(x.X, "deviceSelect"), directionSelect = Refl.Get(x.X, "directionSelect");
+            int device0 = (int)Refl.Get(deviceSelect, "selectedOption"), direction0 = (int)Refl.Get(directionSelect, "selectedOption");
+            object debugger = Refl.Get(Refl.Get(x.X, "sunRequest"), "debugger");
+            try
+            {
+                ctx.Step("the debug window on the sun's render, device CPU");
+                // the drop-downs' lists close without a mouse over them: set as their buttons would
+                Refl.Set(deviceSelect, "selectedOption", Array.IndexOf(VehicleExposure.DeviceOptions, Device.CPU));
+                Refl.Set(directionSelect, "selectedOption", Array.IndexOf(VehicleExposure.DirectionOptions, VehicleExposure.Direction.Sun));
+                Far.FlightGuiShown = true;
+                Far.SetSubWindow(gui, "showDebugWindow", true);
+                yield return Wait.Until(() => Refl.Get(debugger, "texture") != null, 30, "the debugger's copy of the sun's render", shot: false);
+                Assert.Equal(Device.CPU, x.X.ComputeDevice, "the panel's device is the vessel's");
+                yield return Wait.Frames(10);
+                var tex = (RenderTexture)Refl.Get(debugger, "texture");
+                object size = typeof(VehicleExposure).GetProperty("RenderSize", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance).GetValue(x.X);
+                int w = (int)size.GetType().GetField("x").GetValue(size), h = (int)size.GetType().GetField("y").GetValue(size);
+                ctx.Record("debugTexture", $"{tex.width} x {tex.height}, render size {w} x {h}");
+                Assert.True(tex.width == w && tex.height == h, $"the copy is the render's size ({tex.width} x {tex.height} against {w} x {h})");
+                Assert.True(tex.IsCreated(), "the copy is a live texture");
+                yield return Wait.Frames(5);
+                log.AssertNone("drawing the exposure debug panel");
+            }
+            finally
+            {
+                Far.SetSubWindow(gui, "showDebugWindow", debugShown);
+                Far.FlightGuiShown = shown;
+                Refl.Set(deviceSelect, "selectedOption", device0);
+                Refl.Set(directionSelect, "selectedOption", direction0);
+            }
+
+            ctx.Step("the window closed");
+            yield return Wait.Frames(10);
+            log.AssertNone("after closing the exposure debug panel");
+        }
+
+        /// <summary>
+        /// Asking for the GPU device where compute shaders are not supported counts on the CPU instead and warns once.
+        /// Explicit: FAR's PhysicalDeviceExtensions.Select(PhysicalDevice) has the warning's test inverted
+        /// (if (!computeWarningIssued) return CPU), so the warning is never logged. The test makes FAR believe compute
+        /// shaders are not supported (its cached SystemInfo.supportsComputeShaders) and puts it back.
+        /// </summary>
+        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
+        public static IEnumerator Pad_GpuWithoutComputeShadersWarnsOnce(TestContext ctx)
+        {
+            yield return Exposure.OnPad(ctx);
+            using var x = new Exposure(ctx, FlightGlobals.ActiveVessel);
+            Type ext = typeof(Device).Assembly.GetType("FerramAerospaceResearch.Resources.PhysicalDeviceExtensions", true);
+            object supported = Refl.GetStatic(ext, "supportsComputeShaders"), warned = Refl.GetStatic(ext, "computeWarningIssued");
+            int warnings = 0;
+            void OnLog(string condition, string stackTrace, LogType type)
+            {
+                if (type == LogType.Warning && condition.Contains("Compute shaders are not supported"))
+                    warnings++;
+            }
+
+            Application.logMessageReceived += OnLog;
+            try
+            {
+                Refl.SetStatic(ext, "supportsComputeShaders", false);
+                Refl.SetStatic(ext, "computeWarningIssued", false);
+                x.X.ComputeDevice = Device.GPU;
+                ctx.Record("device", x.ActualDevice);
+                Assert.SkipUnless(x.ActualDevice == "CPU", "the runtime kept FAR's cached compute shader support (a readonly static)");
+                x.X.ComputeDevice = Device.CPU;
+                x.X.ComputeDevice = Device.GPU;
+                Assert.Equal(1, warnings, "one warning that compute shaders are not supported");
+            }
+            finally
+            {
+                Application.logMessageReceived -= OnLog;
+                Refl.SetStatic(ext, "supportsComputeShaders", supported);
+                Refl.SetStatic(ext, "computeWarningIssued", warned);
+            }
         }
 
         // ------------------------------------------------------------------ occlusion: the fairing

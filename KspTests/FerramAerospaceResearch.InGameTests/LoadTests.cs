@@ -6,6 +6,7 @@ using FerramAerospaceResearch.FARAeroComponents;
 using FerramAerospaceResearch.FARPartGeometry;
 using FerramAerospaceResearch.Settings;
 using KspTest;
+using UnityEngine;
 
 namespace FerramAerospaceResearch.InGameTests
 {
@@ -137,6 +138,128 @@ namespace FerramAerospaceResearch.InGameTests
                         FARAtmosphere.GetAdiabaticIndex(home, new Vector3d(0, 0, 0), Planetarium.GetUniversalTime()), 1e-9,
                         "FAR's adiabatic index at Kerbin's surface is the body's");
             yield break;
+        }
+
+        /// <summary>
+        /// A shader whose config url names no shader (a typo in FARConfig.cfg, or a shader another mod removed): the
+        /// default loader (Shader.Find) reports it, the asset keeps the shader it had and nothing throws; the url put
+        /// back, it loads again. A loader name no loader has, or none, falls back to the default loader.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.MainMenu, TimeoutSec = 300)]
+        public static IEnumerator Load_ABadShaderUrlIsReported(TestContext ctx)
+        {
+            var configFile = new FarConfigFile();
+            Config.ShaderNode node = FARConfig.Shaders.LineRenderer;
+            Resources.FARShaderCache.ShaderAssetRequest asset = Resources.FARAssets.Instance.Shaders.LineRenderer;
+            string url = node.Url.Value, loader = node.Loader.Value;
+            Shader shader = asset.Asset;
+            Assert.True(shader != null && shader.name == url, $"the line renderer's shader as shipped ({url})");
+
+            var errors = new List<string>();
+            void OnError(string key, Resources.Loading.AssetRequest<Shader> request) => errors.Add($"{key} {request.Url}");
+            var logged = new List<string>();
+            void OnLog(string condition, string stackTrace, LogType type)
+            {
+                if (type == LogType.Error || type == LogType.Exception)
+                    logged.Add($"{type}: {condition}");
+            }
+
+            asset.OnAssetLoadError += OnError;
+            Application.logMessageReceived += OnLog;
+            try
+            {
+                ctx.Step("a url that names no shader");
+                const string bad = "FAR Tests/No Such Shader";
+                node.Url.Value = bad;
+                yield return Wait.Until(() => asset.State != Resources.Loading.Progress.InProgress && asset.Url == bad, 10, "the bad url tried", shot: false);
+                yield return Wait.Frames(2);
+                ctx.Record("badUrl", $"{asset.State}; errors {string.Join(", ", errors)}; log {string.Join(" | ", logged)}");
+                Assert.Equal(Resources.Loading.Progress.Error, asset.State, "the load failed");
+                Assert.Equal(1, errors.Count, "one load error raised");
+                Assert.True(errors[0] == $"line_renderer {bad}", $"for the line renderer's url ({errors[0]})");
+                Assert.True(logged.Any(l => l.StartsWith("Error") && l.Contains("Failed to load asset from " + bad)), "the failure is logged");
+                Assert.False(logged.Any(l => l.StartsWith("Exception")), "no exception");
+                Assert.True(asset.Asset == shader, "the shader it had is kept");
+
+                ctx.Step("the url put back");
+                node.Url.Value = url;
+                yield return Wait.Until(() => asset.State == Resources.Loading.Progress.Completed, 10, "the shader loaded again", shot: false);
+                Assert.True(asset.Asset == shader, "the same shader");
+
+                ctx.Step("an unknown loader, and none");
+                node.Loader.Value = "no such loader";
+                yield return Wait.Frames(2);
+                Assert.Equal("default", asset.Loader.Name, "an unknown loader name falls back to the default loader");
+                Assert.Equal(Resources.Loading.Progress.Completed, asset.State, "which loads it");
+                node.Loader.Value = "";
+                yield return Wait.Frames(2);
+                Assert.Equal("default", asset.Loader.Name, "no loader name is the default loader");
+                Assert.True(asset.Asset == shader && errors.Count == 1, "still the same shader, no more errors");
+            }
+            finally
+            {
+                asset.OnAssetLoadError -= OnError;
+                Application.logMessageReceived -= OnLog;
+                node.Loader.Value = loader;
+                node.Url.Value = url;
+                configFile.Restore();
+            }
+        }
+
+        /// <summary>
+        /// ModuleManager's reload (its "reload database", which calls FAR's ModuleManagerPostLoad) has FAR reload every
+        /// reloadable part of it: its assets, already loaded, report done at once; its configs load again, and
+        /// FARAeroData drops the atmosphere settings it had and makes them again (stopping the load it started the
+        /// first time). Afterwards every body has the same settings and FAR's config is as it was, with no errors.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.MainMenu, TimeoutSec = 300)]
+        public static IEnumerator Load_AReloadKeepsFarsSettings(TestContext ctx)
+        {
+            var configFile = new FarConfigFile();
+            Dictionary<int, (double, double)> before =
+                FARAeroData.AtmosphericConfiguration.ToDictionary(p => p.Key,
+                                                                  p => ((double)p.Value.ReferenceViscosity, (double)p.Value.ReferenceTemperature));
+            int period = FARConfig.FlightLog.LogPeriod.Value;
+            Color cl = FARConfig.GUIColors.ClColor;
+            var logged = new List<string>();
+            void OnLog(string condition, string stackTrace, LogType type)
+            {
+                if (type == LogType.Error || type == LogType.Exception)
+                    lock (logged)
+                        logged.Add($"{type}: {condition} {stackTrace?.Split('\n').FirstOrDefault()}");
+            }
+
+            Application.logMessageReceivedThreaded += OnLog;
+            try
+            {
+                ctx.Step("reload");
+                Assert.True(before.Count >= 5, $"the bodies' settings before ({before.Count})");
+                List<Interfaces.IReloadable> reloadables = FARAddonLoader.Instance.ReloadableObjects;
+                ctx.Record("reloadables", string.Join(", ", reloadables.Select(r => $"{r.GetType().Name} ({r.Priority})")));
+                yield return FARAddonLoader.Instance.Reload();
+                Assert.True(reloadables.All(r => r.Completed), "every reloadable done");
+                Assert.True(Resources.FARAssets.Instance.Completed, "the assets done");
+                // the atmosphere settings come back on the main thread, once the reloaded config is in
+                yield return Wait.Until(() => FARAeroData.AtmosphericConfiguration.Count == before.Count, 30,
+                                        "the bodies' atmosphere settings made again", shot: false);
+                yield return Wait.Frames(5);
+                lock (logged)
+                    ctx.Record("logged", string.Join(" | ", logged));
+                foreach (KeyValuePair<int, (double, double)> b in before)
+                {
+                    Assert.True(FARAeroData.AtmosphericConfiguration.TryGetValue(b.Key, out BodySettings s), $"body {b.Key}'s settings");
+                    Assert.Equal(b.Value, ((double)s.ReferenceViscosity, (double)s.ReferenceTemperature), $"body {b.Key}'s settings as before");
+                }
+                Assert.Equal(period, FARConfig.FlightLog.LogPeriod.Value, "FAR's config as before");
+                Assert.Equal(cl, FARConfig.GUIColors.ClColor, "FAR's colours as before");
+                lock (logged)
+                    Assert.True(logged.Count == 0, $"no errors or exceptions in the reload ({string.Join(" | ", logged.Take(3))})");
+            }
+            finally
+            {
+                Application.logMessageReceivedThreaded -= OnLog;
+                configFile.Restore();
+            }
         }
     }
 }
