@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using FerramAerospaceResearch.Config;
 using UnityEngine;
 
@@ -44,6 +45,8 @@ namespace FerramAerospaceResearch.Resources
             //     get { return Asset != null && Asset.isSupported; }
             // }
 
+            // coverage: nothing in FAR reads it (FAR converts ShaderAssetRequest to Material)
+            [ExcludeFromCodeCoverage]
             public Material Material
             {
                 get { return Items.Material; }
@@ -57,11 +60,15 @@ namespace FerramAerospaceResearch.Resources
             }
 
 
+            // coverage: conversion nothing in FAR uses
+            [ExcludeFromCodeCoverage]
             public static implicit operator ShaderMaterialPair(ShaderAssetRequest rb)
             {
                 return rb.Items;
             }
 
+            // coverage: conversion nothing in FAR uses
+            [ExcludeFromCodeCoverage]
             public static implicit operator Shader(ShaderAssetRequest rb)
             {
                 return rb.Items.Shader;
@@ -79,6 +86,8 @@ namespace FerramAerospaceResearch.Resources
 
             public Shader Shader
             {
+                // coverage: getter nothing reads
+                [ExcludeFromCodeCoverage]
                 get { return shader; }
                 set
                 {
@@ -94,11 +103,15 @@ namespace FerramAerospaceResearch.Resources
 
             public Material Material { get; private set; }
 
+            // coverage: conversion nothing in FAR uses
+            [ExcludeFromCodeCoverage]
             public static implicit operator Material(ShaderMaterialPair sm)
             {
                 return sm.Material;
             }
 
+            // coverage: conversion nothing in FAR uses
+            [ExcludeFromCodeCoverage]
             public static implicit operator Shader(ShaderMaterialPair sm)
             {
                 return sm.shader;

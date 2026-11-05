@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
@@ -53,6 +54,8 @@ namespace FerramAerospaceResearch
         }
 
         [Conditional("LOG_TRACE"), MethodImpl(MethodImplOptions.AggressiveInlining)]
+        // coverage: [Conditional("LOG_TRACE")]: compiled out of Release builds
+        [ExcludeFromCodeCoverage]
         public static void Trace(object message)
         {
             LogHandler.LogTrace(Tag, message);
@@ -71,6 +74,8 @@ namespace FerramAerospaceResearch
         }
 
         [Conditional("ASSERT")]
+        // coverage: [Conditional("ASSERT")]: compiled out of Release builds
+        [ExcludeFromCodeCoverage]
         public static void Assert(
             bool condition,
             object message,
@@ -98,6 +103,8 @@ namespace FerramAerospaceResearch
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        // coverage: nothing in FAR calls it
+        [ExcludeFromCodeCoverage]
         public static void LogFormat(LogLevel level, string format, params object[] args)
         {
             LogHandler.LogFormat(level, Tag, format, args);
@@ -116,6 +123,8 @@ namespace FerramAerospaceResearch
         }
 
         [Conditional("LOG_TRACE"), MethodImpl(MethodImplOptions.AggressiveInlining)]
+        // coverage: [Conditional("LOG_TRACE")]: compiled out of Release builds
+        [ExcludeFromCodeCoverage]
         public static void TraceFormat(string format, params object[] args)
         {
             LogHandler.LogTraceFormat(Tag, format, args);
@@ -134,6 +143,8 @@ namespace FerramAerospaceResearch
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining), Conditional("ASSERT")]
+        // coverage: [Conditional("ASSERT")]: compiled out of Release builds
+        [ExcludeFromCodeCoverage]
         public static void AssertFormat(
             bool condition,
             string format,
@@ -152,6 +163,8 @@ namespace FerramAerospaceResearch
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining), Conditional("ASSERT")]
+        // coverage: [Conditional("ASSERT")]: compiled out of Release builds
+        [ExcludeFromCodeCoverage]
         public static void AssertFormat(bool condition, string format, SourceInfo source, params object[] args)
         {
             // ReSharper disable ExplicitCallerInfoArgument

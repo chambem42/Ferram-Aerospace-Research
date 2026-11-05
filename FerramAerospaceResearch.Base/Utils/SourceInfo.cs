@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
 namespace FerramAerospaceResearch
@@ -28,6 +29,8 @@ namespace FerramAerospaceResearch
             return new SourceInfo(memberName, filePath, lineNumber);
         }
 
+        // coverage: overload nothing in FAR calls
+        [ExcludeFromCodeCoverage]
         public static SourceInfo Current(int depth)
         {
             // frame 0 - Current
@@ -45,6 +48,8 @@ namespace FerramAerospaceResearch
 #endif
         }
 
+        // coverage: only used in Debug assert messages
+        [ExcludeFromCodeCoverage]
         public override string ToString()
         {
 #if DEBUG

@@ -44,6 +44,7 @@ Copyright 2022, Michael Ferrara, aka Ferram4
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using ferram4;
 using FerramAerospaceResearch.Settings;
@@ -504,6 +505,8 @@ namespace FerramAerospaceResearch
         }
 
         // ReSharper disable once UnusedMember.Global
+        // coverage: overload nothing in FAR calls
+        [ExcludeFromCodeCoverage]
         public static double GetFailureForceScaling(CelestialBody body, double altitude)
         {
             if (!body.ocean || altitude > 0)

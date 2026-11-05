@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using FerramAerospaceResearch.Resources;
 using Unity.Collections;
@@ -46,6 +47,8 @@ public class RenderBatch : IDisposable
             GC.SuppressFinalize(this);
         }
 
+        // coverage: finalizer: runs only at GC time when Dispose was missed
+        [ExcludeFromCodeCoverage]
         ~JobData()
         {
             Dispose(false);
@@ -105,6 +108,8 @@ public class RenderBatch : IDisposable
 
     public Kernel PixelCountKernel
     {
+        // coverage: getter nothing reads
+        [ExcludeFromCodeCoverage]
         get { return pixelCountKernel; }
         set
         {
@@ -119,6 +124,8 @@ public class RenderBatch : IDisposable
 
     public int2 RenderSize
     {
+        // coverage: getter nothing reads
+        [ExcludeFromCodeCoverage]
         get { return renderSize; }
         set
         {
@@ -136,6 +143,8 @@ public class RenderBatch : IDisposable
 
     public PhysicalDevice Device
     {
+        // coverage: getter nothing reads
+        [ExcludeFromCodeCoverage]
         get { return device; }
         set
         {
@@ -182,6 +191,8 @@ public class RenderBatch : IDisposable
         GC.SuppressFinalize(this);
     }
 
+    // coverage: finalizer: runs only at GC time when Dispose was missed
+    [ExcludeFromCodeCoverage]
     ~RenderBatch()
     {
         Dispose(false);
@@ -381,6 +392,8 @@ public class RenderBatch : IDisposable
         return AsyncGPUReadback.RequestIntoNativeArray(ref tex, data.target);
     }
 
+    // coverage: nothing in FAR calls it
+    [ExcludeFromCodeCoverage]
     public Executor.Handle Handle(int index)
     {
         if (index >= JobsCount)

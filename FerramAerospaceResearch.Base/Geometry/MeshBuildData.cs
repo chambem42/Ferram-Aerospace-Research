@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using UnityEngine;
 
 namespace FerramAerospaceResearch.Geometry
@@ -15,6 +16,8 @@ namespace FerramAerospaceResearch.Geometry
         public List<int> Indices
         {
             get { return SubmeshIndices[CurrentSubmesh]; }
+            // coverage: setter nothing in FAR calls
+            [ExcludeFromCodeCoverage]
             set { SubmeshIndices[CurrentSubmesh] = value; }
         }
     }

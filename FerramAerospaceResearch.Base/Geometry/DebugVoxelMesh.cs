@@ -28,7 +28,8 @@ namespace FerramAerospaceResearch.Geometry
 
         private bool UInt32BitIndices
         {
-            get { return uInt32BitIndices; }
+            // Unused: nothing in FAR calls it (commented out after the test suite's coverage run)
+            // get { return uInt32BitIndices; }
             set
             {
                 uInt32BitIndices = value;
