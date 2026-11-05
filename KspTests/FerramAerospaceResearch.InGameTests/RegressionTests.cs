@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using FerramAerospaceResearch.FARAeroComponents;
@@ -91,6 +92,32 @@ namespace FerramAerospaceResearch.InGameTests
             Assert.True(FlightLogger.eventLog.Skip(logBefore).Any(m => m.Contains(leaf.partInfo.title)), "the flight log records the failure");
             yield return Wait.Frames(3);
             exceptions.AssertNone("failing a part under aero stress");
+        }
+
+        /// <summary>
+        /// A part with several parts on it that fails under aero stress sheds all of them: each decouples from it.
+        /// (The loop over its children counted up while each decouple took a child out of the list, so every second
+        /// one stayed on.) On the plane on the runway, the part with the most children.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 600)]
+        public static IEnumerator Regression_OverstressedPartShedsEveryChild(TestContext ctx)
+        {
+            yield return Wait.Seconds(3);
+            Vessel v = FlightGlobals.ActiveVessel;
+            Part hub = v.parts.Where(p => p.Modules.Contains<FARAeroPartModule>()).OrderByDescending(p => p.children.Count).First();
+            List<Part> children = hub.children.ToList();
+            ctx.Record("hub", $"{hub.partInfo.name}: {string.Join(", ", children.Select(c => c.partInfo.name))}");
+            Assert.True(children.Count >= 2, $"a part with several on it ({hub.partInfo.name}, {children.Count})");
+            MethodInfo fail = typeof(FARAeroPartModule).GetMethod("ApplyAeroStressFailure", BindingFlags.Instance | BindingFlags.NonPublic);
+            using var exceptions = new ExceptionLog();
+
+            ctx.Step($"{hub.partInfo.name} failed under aero stress");
+            fail.Invoke(hub.Modules.GetModule<FARAeroPartModule>(), null);
+            yield return Wait.Frames(5);
+            List<Part> kept = children.Where(c => c.parent == hub).ToList();
+            ctx.Record("kept", string.Join(", ", kept.Select(c => c.partInfo.name)));
+            Assert.Equal(0, kept.Count, $"every child came off {hub.partInfo.name} (still on it: {string.Join(", ", kept.Select(c => c.partInfo.name))})");
+            exceptions.AssertNone("failing a part with several children under aero stress");
         }
 
         /// <summary>

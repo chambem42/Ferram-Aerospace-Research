@@ -101,6 +101,39 @@ namespace FerramAerospaceResearch.InGameTests
         }
 
         /// <summary>
+        /// The debug window open at the Space Center with the mouse over it (the Space Center locked), and the game
+        /// leaves for the main menu: the window closes and its lock goes with it.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.SpaceCenter, TimeoutSec = 600)]
+        public static IEnumerator Settings_DebugLockGoesWithTheSpaceCenter(TestContext ctx)
+        {
+            try
+            {
+                Imgui.PointerFeeds(typeof(FARGUI.GUIUtils).GetMethod("GetMousePos", BindingFlags.Public | BindingFlags.Static));
+                yield return Imgui.Hover(Away);
+                if (!DebugMenuOpen)
+                    FARDebugAndSettings.FARDebugButtonStock.SetTrue(true);
+                yield return Imgui.WaitWindow(DebugWindow);
+                Rect at = Get<Rect>(DebugInstance, "debugWinPos");
+                yield return Imgui.Hover(at.center);
+                yield return Wait.Until(() => Locked(DebugLock), 10, "the Space Center locked under the debug window", shot: false);
+
+                ctx.Step("To the main menu, the mouse still over the window");
+                yield return Nav.ToMainMenu(ctx);
+                yield return Wait.Frames(5);
+                Assert.False(DebugMenuOpen, "the debug window closed away from the Space Center");
+                Assert.False(Get<bool>(DebugInstance, "inputLocked"), "FAR holds no lock any more");
+                Assert.False(Locked(DebugLock), "and the lock is gone");
+            }
+            finally
+            {
+                Imgui.ReleasePointer();
+                if (DebugMenuOpen)
+                    FARDebugAndSettings.ForceCloseDebugWindow();
+            }
+        }
+
+        /// <summary>
         /// In the editor: the model options window locks the editor while the mouse is over it and unlocks it off it.
         /// Its whole-wing aspect ratio switched off has the Components tab recompute with the panels' aspect ratios
         /// changed; switched on again, they are what they were.

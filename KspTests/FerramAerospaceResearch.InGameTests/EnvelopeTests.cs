@@ -243,6 +243,21 @@ namespace FerramAerospaceResearch.InGameTests
                             Assert.InRange(Math.Min(a.DragN, b.DragN) - 1e-6, Math.Max(a.DragN, b.DragN) + 1e-6, m.DragN,
                                            $"the drag half way between the samples at Mach {machs[i]}, {alts[j] / 1000} km (N)");
                         }
+
+                    ctx.Step("The fuel slider moved: between set points it says interpolated, near one it snaps to it");
+                    int last = r.SampleMassesKg.Length - 1;
+                    string Tonnes(double kg) => (kg / 1000.0).ToString("0.00", CultureInfo.InvariantCulture) + " t";
+                    yield return Imgui.SetSliderAfterLabel("Fuel:", last - 0.5f, Window);
+                    yield return Wait.Frames(3);
+                    Assert.Near(last - 0.5f, Get<float>(hm, "_fuelPos"), 1e-6, "the tab's fuel position after the slider");
+                    double between = 0.5 * (r.SampleMassesKg[last - 1] + r.SampleMassesKg[last]);
+                    Assert.True(Imgui.IsVisible("interp — " + Tonnes(between), Window), $"the slider's label: interpolated, {Tonnes(between)}");
+                    Assert.Near(between, r.MassKg, 1e-3 * between, "the maps shown at the mass half way between (kg)");
+                    yield return Imgui.SetSliderAfterLabel("Fuel:", last - 0.01f, Window);
+                    yield return Wait.Frames(3);
+                    Assert.True(Imgui.IsVisible("full — " + Tonnes(r.SampleMassesKg[last]), Window), "a hair short of full it says full");
+                    yield return Imgui.SetSliderAfterLabel("Fuel:", last, Window);
+                    yield return Wait.Frames(3);
                 }
                 finally
                 {

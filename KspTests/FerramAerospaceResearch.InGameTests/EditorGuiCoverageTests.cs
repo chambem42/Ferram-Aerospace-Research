@@ -30,7 +30,8 @@ namespace FerramAerospaceResearch.InGameTests
         /// quantity's by the opacity. Parts: every part a color, rows and the rest (engines, structure) alike, no two
         /// rows the same, "One color per part". Aspect ratio: only the wing panels, the highest aspect ratio red and
         /// lower ones toward blue, the legend's scale up to the largest. Wings: one color per wing (panels of a wing
-        /// alike), the legend listing each wing's aspect ratio. Shielded: exposed panels green, shielded red. Cd and Cm:
+        /// alike), the legend listing each wing's aspect ratio. Shielded: exposed panels green, shielded red, retinted at
+        /// the opacity its slider is moved to. Cd and Cm:
         /// every row tinted white to red (and blue where a part takes from the craft's), the legend a scale of the part's
         /// share. A part's row clicked lights it white, clicked again lets it go. Spoilers extended on a surface set as a
         /// spoiler add drag. Show Voxels shows the voxel model and hides it again. Leaving the tab takes every color
@@ -133,6 +134,22 @@ namespace FerramAerospaceResearch.InGameTests
                     AssertTint(Get<Part>(r, "Part"), shielded ? new Color(1, 0.1f, 0.1f) : new Color(0.1f, 0.8f, 0.1f), opacity,
                                $"{Get<string>(r, "Name")}, {(shielded ? "shielded, red" : "exposed, green")}");
                 }
+
+                ctx.Step("The opacity slider");
+                float slid = opacity < 0.5f ? 0.8f : 0.3f;
+                yield return Imgui.SetSliderAfterLabel("Opacity", slid, Window);
+                yield return Wait.Frames(2);
+                Assert.Near(slid, Get<float>(comp, "opacity"), 1e-6, "the tab's opacity after the slider");
+                foreach (object r in wingRows)
+                {
+                    bool shielded = Get<bool>(r, "Shielded");
+                    AssertTint(Get<Part>(r, "Part"), shielded ? new Color(1, 0.1f, 0.1f) : new Color(0.1f, 0.8f, 0.1f), slid,
+                               $"{Get<string>(r, "Name")} retinted at the new opacity");
+                }
+
+                yield return Imgui.SetSliderAfterLabel("Opacity", opacity, Window);
+                yield return Wait.Frames(2);
+                Assert.Near(opacity, Get<float>(comp, "opacity"), 1e-6, "and back");
 
                 foreach (string q in new[] { "Cd", "Cm" })
                 {

@@ -46,6 +46,8 @@ namespace FerramAerospaceResearch.InGameTests
         {
             Assert.NotNull(DetachPart, "EditorLogic.detachPart");
             DetachPart.Invoke(EditorLogic.fetch, new object[] { p });
+            // the part's own detach callback, as the editor's pick-up fires it (detachPart alone does not)
+            p.OnEditorDetach?.Invoke();
             GameEvents.onEditorPartEvent.Fire(ConstructionEventType.PartDetached, p);
             GameEvents.onEditorShipModified.Fire(EditorLogic.fetch.ship);
         }
@@ -66,6 +68,7 @@ namespace FerramAerospaceResearch.InGameTests
             Put("position", p.transform.position);
             Put("rotation", p.transform.rotation);
             AttachPart.Invoke(EditorLogic.fetch, new[] { p, attach });
+            p.OnEditorAttach?.Invoke();
             GameEvents.onEditorPartEvent.Fire(ConstructionEventType.PartAttached, p);
             GameEvents.onEditorShipModified.Fire(EditorLogic.fetch.ship);
         }
