@@ -1,10 +1,13 @@
 using System.Collections;
+using System.Diagnostics.CodeAnalysis;
 using UnityEngine;
 
 namespace FerramAerospaceResearch.Resources.Loading
 {
     public class ComputeShaderLoader : IAssetLoader<ComputeShader>
     {
+        // coverage: Resources.Load fallback; FAR's shipped config loads CountPixels from the shader bundle
+        [ExcludeFromCodeCoverage]
         public IEnumerator Load(IAssetRequest<ComputeShader> assetRequest)
         {
             assetRequest.State = Progress.InProgress;

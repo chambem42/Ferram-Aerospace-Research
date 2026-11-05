@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 
 namespace FerramAerospaceResearch
@@ -22,6 +23,8 @@ namespace FerramAerospaceResearch
             get { return Writer != null; }
         }
 
+        // coverage: nothing in FAR calls it (FlightDataLogger closes with Close())
+        [ExcludeFromCodeCoverage]
         public void Dispose()
         {
             Writer?.Dispose();
@@ -78,6 +81,8 @@ namespace FerramAerospaceResearch
             Writer.WriteLine();
         }
 
+        // coverage: nothing in FAR calls it
+        [ExcludeFromCodeCoverage]
         public void WriteLine()
         {
             Writer.WriteLine();

@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 
 // ReSharper disable UnusedMember.Global
 
@@ -65,6 +66,8 @@ namespace FerramAerospaceResearch.RealChuteLite
         /// <summary>
         ///     The amount of milliseconds elapsed to the current watch
         /// </summary>
+        // coverage: stopwatch API FAR does not call
+        [ExcludeFromCodeCoverage]
         public long ElapsedMilliseconds
         {
             get
@@ -102,6 +105,8 @@ namespace FerramAerospaceResearch.RealChuteLite
         /// <summary>
         ///     Stops the watch
         /// </summary>
+        // coverage: stopwatch API FAR does not call
+        [ExcludeFromCodeCoverage]
         public void Stop()
         {
             if (!IsRunning)
@@ -143,6 +148,8 @@ namespace FerramAerospaceResearch.RealChuteLite
         /// <summary>
         ///     Returns a string representation fo this instance
         /// </summary>
+        // coverage: debug formatting FAR does not call
+        [ExcludeFromCodeCoverage]
         public override string ToString()
         {
             return Elapsed.ToString();
@@ -151,6 +158,8 @@ namespace FerramAerospaceResearch.RealChuteLite
         /// <summary>
         ///     Creates a new PhysicsWatch, starts it, and returns the current instance
         /// </summary>
+        // coverage: stopwatch API FAR does not call
+        [ExcludeFromCodeCoverage]
         public static PhysicsWatch StartNew()
         {
             var watch = new PhysicsWatch();

@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using UnityEngine;
 
@@ -78,6 +79,8 @@ namespace FerramAerospaceResearch.Threading
             return task;
         }
 
+        // coverage: its only caller (StartTaskWait) is commented out
+        [ExcludeFromCodeCoverage]
         public static void Wait(TaskBase task)
         {
             CheckStatus();

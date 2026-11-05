@@ -45,6 +45,7 @@ Copyright 2022, Michael Ferrara, aka Ferram4
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using ferram4;
@@ -835,6 +836,8 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
             }
         }
 
+        // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+        [ExcludeFromCodeCoverage]
         private static void GenerateBlizzyToolbarButton()
         {
             if (blizzyEditorGUIButton != null)
@@ -918,6 +921,8 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
             gearToggle = !gearToggle;
         }
 
+        // coverage: KSPWheel interop, an optional mod the tests do not install
+        [ExcludeFromCodeCoverage]
         private void ToggleGearDeploymentOnKSPWheelPM(PartModule pm, string methodName)
         {
             MethodInfo method = pm.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public);

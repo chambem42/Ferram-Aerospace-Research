@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using FerramAerospaceResearch.Resources;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -17,6 +18,8 @@ public class RenderResources : IDisposable
     public ComputeBuffer outputBuffer;
     public Kernel mainKernel;
 
+    // coverage: only set for cached jobs when the kernel changes; FAR sets the kernel before the first job
+    [ExcludeFromCodeCoverage]
     public Kernel MainKernel
     {
         get { return mainKernel; }
@@ -141,6 +144,8 @@ public class RenderResources : IDisposable
         PrepareForNextJob(count, compute);
     }
 
+    // coverage: nothing in FAR calls it
+    [ExcludeFromCodeCoverage]
     public void SetupTexture(ref RenderTexture tex)
     {
         SetupTexture(ref tex, ActualTexSize);
@@ -159,6 +164,8 @@ public class RenderResources : IDisposable
         };
     }
 
+    // coverage: nothing in FAR calls it
+    [ExcludeFromCodeCoverage]
     public static void SetupTexture(ref Texture2D tex, int2 size)
     {
         if (tex is not null && tex.width == size.x && tex.height == size.y)
@@ -194,6 +201,8 @@ public class RenderResources : IDisposable
         GC.SuppressFinalize(this);
     }
 
+    // coverage: finalizer: runs only at GC time when Dispose was missed
+    [ExcludeFromCodeCoverage]
     ~RenderResources()
     {
         Dispose(false);

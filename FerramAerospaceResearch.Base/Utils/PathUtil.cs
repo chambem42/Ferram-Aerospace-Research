@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using FerramAerospaceResearch.Reflection;
 
@@ -33,11 +34,15 @@ namespace FerramAerospaceResearch
             return IsAbsolute(filename) ? filename : Path.Combine(path, dir1, filename);
         }
 
+        // coverage: overload nothing in FAR calls
+        [ExcludeFromCodeCoverage]
         public static string Combine(string path, string dir1, string dir2, string filename)
         {
             return IsAbsolute(filename) ? filename : Path.Combine(path, dir1, dir2, filename);
         }
 
+        // coverage: overload nothing in FAR calls
+        [ExcludeFromCodeCoverage]
         public static string Combine(params string[] paths)
         {
             return IsAbsolute(paths[paths.Length - 1]) ? paths[paths.Length - 1] : Path.Combine(paths);

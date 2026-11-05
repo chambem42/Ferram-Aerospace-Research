@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -242,6 +243,8 @@ public class Renderer<T> : IDisposable, IReadOnlyDictionary<T, int> where T : Ob
 
     public PhysicalDevice Device
     {
+        // coverage: getter nothing reads (FAR only sets Device)
+        [ExcludeFromCodeCoverage]
         get { return device; }
         set
         {
@@ -254,6 +257,8 @@ public class Renderer<T> : IDisposable, IReadOnlyDictionary<T, int> where T : Ob
     // actual device pixels are counted on
     public PhysicalDevice ActualDevice { get; private set; }
 
+    // coverage: nothing in FAR reads it
+    [ExcludeFromCodeCoverage]
     public float AspectRatio
     {
         get { return (float)renderSize.x / renderSize.y; }
@@ -364,6 +369,8 @@ public class Renderer<T> : IDisposable, IReadOnlyDictionary<T, int> where T : Ob
         GC.SuppressFinalize(this);
     }
 
+    // coverage: finalizer: runs only at GC time when Dispose was missed
+    [ExcludeFromCodeCoverage]
     ~Renderer()
     {
         Dispose(false);
@@ -377,6 +384,8 @@ public class Renderer<T> : IDisposable, IReadOnlyDictionary<T, int> where T : Ob
             func(job, value);
     }
 
+    // coverage: nothing in FAR calls it
+    [ExcludeFromCodeCoverage]
     public Color ColorOf(T obj)
     {
         return ColorUintConverter.AsColor((uint)objects[obj]);
@@ -415,6 +424,8 @@ public class Renderer<T> : IDisposable, IReadOnlyDictionary<T, int> where T : Ob
         return color;
     }
 
+    // coverage: overload nothing in FAR calls (FAR uses SetupRenderers)
+    [ExcludeFromCodeCoverage]
     public Color SetupRenderer(T obj, UnityEngine.Renderer renderer, MaterialPropertyBlock propertyBlock = null)
     {
         Color color = GetObjColor(obj);

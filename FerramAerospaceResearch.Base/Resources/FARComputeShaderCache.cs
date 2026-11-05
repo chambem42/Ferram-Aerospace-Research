@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using FerramAerospaceResearch.Config;
 using Unity.Mathematics;
 using UnityEngine;
@@ -12,6 +13,8 @@ namespace FerramAerospaceResearch.Resources
         public int index;
         public uint3 threadGroupSizes;
 
+        // coverage: nothing in FAR reads it
+        [ExcludeFromCodeCoverage]
         public bool IsValid
         {
             get { return index >= 0 && !string.IsNullOrEmpty(name); }

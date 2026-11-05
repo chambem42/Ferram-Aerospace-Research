@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace FerramAerospaceResearch.FARAeroComponents
 {
     public sealed class DummyAirstreamShield : IAirstreamShield
@@ -17,6 +19,8 @@ namespace FerramAerospaceResearch.FARAeroComponents
         }
 
         /// <inheritdoc />
+        // coverage: IAirstreamShield member KSP never calls
+        [ExcludeFromCodeCoverage]
         public Part GetPart()
         {
             return part;

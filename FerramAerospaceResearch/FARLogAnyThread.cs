@@ -12,6 +12,7 @@ Logging from any thread.
  */
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using FerramAerospaceResearch.Threading;
 
 namespace FerramAerospaceResearch
@@ -33,6 +34,8 @@ namespace FerramAerospaceResearch
             OnMainThread(() => FARLogger.Warning(message));
         }
 
+        // coverage: only logs an exception escaping a snapshot prediction (a fault the tests cannot inject)
+        [ExcludeFromCodeCoverage]
         public static void Exception(Exception exception, object message = null)
         {
             OnMainThread(() => FARLogger.Exception(exception, message));

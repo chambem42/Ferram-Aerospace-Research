@@ -1,13 +1,20 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 
 namespace FerramAerospaceResearch
 {
     internal class GenericValueEqualityComparer<T> : EqualityComparer<T> where T : struct, IEquatable<T>
     {
         public override bool Equals(T x, T y) => x.Equals(y);
+        // coverage: override nothing calls (only Equals(x, y) is used)
+        [ExcludeFromCodeCoverage]
         public override int GetHashCode(T obj) => obj.GetHashCode();
+        // coverage: override nothing calls (only Equals(x, y) is used)
+        [ExcludeFromCodeCoverage]
         public override bool Equals(object obj) => obj is GenericValueEqualityComparer<T>;
+        // coverage: override nothing calls (only Equals(x, y) is used)
+        [ExcludeFromCodeCoverage]
         public override int GetHashCode() => GetType().Name.GetHashCode();
     }
 
@@ -36,6 +43,8 @@ namespace FerramAerospaceResearch
             return CustomEqualityComparer<T>.Default.Equals(a, b);
         }
 
+        // coverage: nothing in FAR calls it (FARMathUtil.Swap is used)
+        [ExcludeFromCodeCoverage]
         public static void Swap<T>(ref T a, ref T b)
         {
             (b, a) = (a, b);

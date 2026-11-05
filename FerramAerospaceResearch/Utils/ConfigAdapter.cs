@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 using FerramAerospaceResearch.Interfaces;
@@ -143,12 +144,16 @@ namespace FerramAerospaceResearch
                 FARLogger.ErrorFormat("{0} errors while loading {1}", errors.ToString(), reflection.Id);
         }
 
+        // coverage: generic wrapper nothing in FAR calls (it loads through ConfigReflection.Configs)
+        [ExcludeFromCodeCoverage]
         public static void Load<T>(ref T instance, ConfigNode node = null)
         {
             var reflection = NodeReflection.GetReflection(instance?.GetType() ?? typeof(T));
             Load(reflection, ref instance, node);
         }
 
+        // coverage: generic wrapper nothing in FAR calls (it loads through ConfigReflection.Configs)
+        [ExcludeFromCodeCoverage]
         public static T Load<T>(ConfigNode node)
         {
             var instance = (T)ReflectionUtils.CreateInstance(typeof(T));
@@ -164,6 +169,8 @@ namespace FerramAerospaceResearch
         /// <param name="asPatch">if true, save all values as MM patch, otherwise as KSP config</param>
         /// <typeparam name="T"></typeparam>
         /// <returns></returns>
+        // coverage: generic wrapper nothing in FAR calls (it saves through ConfigReflection.Configs)
+        [ExcludeFromCodeCoverage]
         public static ConfigNode Save<T>(T instance, ConfigNode node = null, bool asPatch = false)
         {
             node ??= new ConfigNode();
@@ -177,6 +184,8 @@ namespace FerramAerospaceResearch
             return node;
         }
 
+        // coverage: generic wrapper nothing in FAR calls (it saves through ConfigReflection.Configs)
+        [ExcludeFromCodeCoverage]
         public static ConfigNode Save<T>(ConfigNode node = null, bool asPatch = false)
         {
             var instance = (T)ReflectionUtils.FindInstance(typeof(T));

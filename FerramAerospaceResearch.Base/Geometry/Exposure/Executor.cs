@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using FerramAerospaceResearch.Resources;
 using Unity.Collections;
 using Unity.Jobs;
@@ -45,6 +46,8 @@ public class Executor : MonoSingleton<Executor>
             get { return job is not null; }
         }
 
+        // coverage: nothing in FAR reads it
+        [ExcludeFromCodeCoverage]
         public bool IsDone
         {
             get { return job.done; }
@@ -210,6 +213,8 @@ public class Executor : MonoSingleton<Executor>
             job.Cancel();
     }
 
+    // coverage: nothing in FAR reads it
+    [ExcludeFromCodeCoverage]
     public static int JobsCount
     {
         get { return activeJobs.Count; }

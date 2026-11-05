@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using FerramAerospaceResearch.Interfaces;
 
@@ -48,6 +49,8 @@ namespace FerramAerospaceResearch.Reflection
         /// <summary>
         /// Whether this value is contained in static class
         /// </summary>
+        // coverage: only read inside a FARLogger.AssertFormat argument, [Conditional("ASSERT")]
+        [ExcludeFromCodeCoverage]
         protected bool StaticParser
         {
             get { return DeclaringType == null || DeclaringType.IsStatic(); }
