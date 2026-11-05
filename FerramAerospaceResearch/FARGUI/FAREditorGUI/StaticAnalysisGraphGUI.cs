@@ -44,6 +44,7 @@ Copyright 2022, Michael Ferrara, aka Ferram4
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -112,6 +113,8 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
             _graph.Update();
         }
 
+        // coverage: IDisposable member nothing calls (EditorGUI drops the reference)
+        [ExcludeFromCodeCoverage]
         public void Dispose()
         {
             aoASweepInputs = machSweepInputs = null;

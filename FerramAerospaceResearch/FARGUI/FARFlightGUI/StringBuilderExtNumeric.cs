@@ -10,6 +10,7 @@
 
 using System;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
 // ReSharper disable All
@@ -86,6 +87,8 @@ namespace StringLeakTest
         }
 
         //! Convert a given unsigned integer value to a string and concatenate onto the stringbuilder. Assume no padding and base ten.
+        // coverage: convenience overload FAR does not call
+        [ExcludeFromCodeCoverage]
         public static StringBuilder Concat(this StringBuilder string_builder, uint uint_val)
         {
             string_builder.Concat(uint_val, 0, ms_default_pad_char, 10);
@@ -93,6 +96,8 @@ namespace StringLeakTest
         }
 
         //! Convert a given unsigned integer value to a string and concatenate onto the stringbuilder. Assume base ten.
+        // coverage: convenience overload FAR does not call
+        [ExcludeFromCodeCoverage]
         public static StringBuilder Concat(this StringBuilder string_builder, uint uint_val, uint pad_amount)
         {
             string_builder.Concat(uint_val, pad_amount, ms_default_pad_char, 10);
@@ -100,6 +105,8 @@ namespace StringLeakTest
         }
 
         //! Convert a given unsigned integer value to a string and concatenate onto the stringbuilder. Assume base ten.
+        // coverage: convenience overload FAR does not call
+        [ExcludeFromCodeCoverage]
         public static StringBuilder Concat(
             this StringBuilder string_builder,
             uint uint_val,
@@ -146,6 +153,8 @@ namespace StringLeakTest
         }
 
         //! Convert a given signed integer value to a string and concatenate onto the stringbuilder. Assume base ten.
+        // coverage: convenience overload FAR does not call
+        [ExcludeFromCodeCoverage]
         public static StringBuilder Concat(this StringBuilder string_builder, int int_val, uint pad_amount)
         {
             string_builder.Concat(int_val, pad_amount, ms_default_pad_char, 10);
@@ -153,6 +162,8 @@ namespace StringLeakTest
         }
 
         //! Convert a given signed integer value to a string and concatenate onto the stringbuilder. Assume base ten.
+        // coverage: convenience overload FAR does not call
+        [ExcludeFromCodeCoverage]
         public static StringBuilder Concat(
             this StringBuilder string_builder,
             int int_val,

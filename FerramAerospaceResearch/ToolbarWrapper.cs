@@ -26,6 +26,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
@@ -391,6 +392,8 @@ namespace FerramAerospaceResearch
     /// </code>
     /// </example>
     /// <seealso cref="IButton.Visibility" />
+    // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+    [ExcludeFromCodeCoverage]
     public class GameScenesVisibility : IVisibility
     {
         private object realGameScenesVisibility;
@@ -412,6 +415,8 @@ namespace FerramAerospaceResearch
     /// <summary>
     ///     A drawable that draws a popup menu.
     /// </summary>
+    // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+    [ExcludeFromCodeCoverage]
     public class PopupMenuDrawable : IDrawable
     {
         private object realPopupMenuDrawable;
@@ -491,6 +496,8 @@ namespace FerramAerospaceResearch
         private Dictionary<object, IButton> buttons = new Dictionary<object, IButton>();
         private ToolbarTypes types = new ToolbarTypes();
 
+        // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+        [ExcludeFromCodeCoverage]
         private ToolbarManager(object realToolbarManager)
         {
             this.realToolbarManager = realToolbarManager;
@@ -498,6 +505,8 @@ namespace FerramAerospaceResearch
             addMethod = ToolbarTypes.getMethod(types.iToolbarManagerType, "add");
         }
 
+        // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+        [ExcludeFromCodeCoverage]
         public IButton add(string ns, string id)
         {
             object realButton = addMethod.Invoke(realToolbarManager, new object[] {ns, id});
@@ -507,6 +516,8 @@ namespace FerramAerospaceResearch
         }
     }
 
+    // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+    [ExcludeFromCodeCoverage]
     internal class Button : IButton
     {
         private object realButton;
@@ -666,6 +677,8 @@ namespace FerramAerospaceResearch
 
     public partial class ClickEvent : EventArgs
     {
+        // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+        [ExcludeFromCodeCoverage]
         internal ClickEvent(object realEvent, IButton button)
         {
             Type type = realEvent.GetType();
@@ -677,6 +690,8 @@ namespace FerramAerospaceResearch
 
     public abstract partial class MouseMoveEvent : EventArgs
     {
+        // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+        [ExcludeFromCodeCoverage]
         internal MouseMoveEvent(IButton button)
         {
             this.button = button;
@@ -685,6 +700,8 @@ namespace FerramAerospaceResearch
 
     public partial class MouseEnterEvent : MouseMoveEvent
     {
+        // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+        [ExcludeFromCodeCoverage]
         internal MouseEnterEvent(IButton button) : base(button)
         {
         }
@@ -692,6 +709,8 @@ namespace FerramAerospaceResearch
 
     public partial class MouseLeaveEvent : MouseMoveEvent
     {
+        // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+        [ExcludeFromCodeCoverage]
         internal MouseLeaveEvent(IButton button) : base(button)
         {
         }
@@ -704,6 +723,8 @@ namespace FerramAerospaceResearch
         internal readonly Type functionDrawableType;
         internal readonly ButtonTypes button;
 
+        // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+        [ExcludeFromCodeCoverage]
         internal ToolbarTypes()
         {
             iToolbarManagerType = getType("Toolbar.IToolbarManager");
@@ -720,27 +741,37 @@ namespace FerramAerospaceResearch
                                  .SingleOrDefault(t => t.FullName == name);
         }
 
+        // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+        [ExcludeFromCodeCoverage]
         internal static PropertyInfo getProperty(Type type, string name)
         {
             return type.GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
         }
 
+        // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+        [ExcludeFromCodeCoverage]
         internal static PropertyInfo getStaticProperty(Type type, string name)
         {
             return type.GetProperty(name, BindingFlags.Public | BindingFlags.Static);
         }
 
+        // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+        [ExcludeFromCodeCoverage]
         internal static EventInfo getEvent(Type type, string name)
         {
             return type.GetEvent(name, BindingFlags.Public | BindingFlags.Instance);
         }
 
+        // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+        [ExcludeFromCodeCoverage]
         internal static MethodInfo getMethod(Type type, string name)
         {
             return type.GetMethod(name, BindingFlags.Public | BindingFlags.Instance);
         }
     }
 
+    // coverage: Blizzy toolbar interop, an optional mod the tests do not install
+    [ExcludeFromCodeCoverage]
     internal class ButtonTypes
     {
         internal readonly Type iButtonType;
