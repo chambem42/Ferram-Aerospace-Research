@@ -390,6 +390,9 @@ namespace FerramAerospaceResearch.InGameTests
                 // a prediction made from inside another on the main thread, with all the others' slots busy, gets none:
                 // the main thread does not wait. Holding them all here is that, without another thread
                 bool noSlotWarnedBefore = (bool)Refl.GetStatic(typeof(FARVesselAero), "loggedNoSlot");
+                FARVesselSnapshot slotSnap = FARAPI.CaptureVesselSnapshot(v);
+                Assert.NotNull(slotSnap, "a snapshot of the vessel");
+                var slotWhere = new Vector3d(v.latitude, v.longitude, v.altitude);
                 var held = new List<ferram4.SimThreadContext.PredictionCall>();
                 try
                 {
@@ -401,6 +404,8 @@ namespace FerramAerospaceResearch.InGameTests
                     // a velocity not asked for before: a remembered result would be given without a slot
                     aero.SimulateAeroProperties(out Vector3 fBusy, out Vector3 tBusy, vel * 1.37f, 1000);
                     Assert.True(fBusy == Vector3.zero && tBusy == Vector3.zero, $"no slot, no prediction ({fBusy})");
+                    bool snapBusy = FARAPI.CalculateSnapshotAeroForcesAt(slotSnap, out Vector3 fSnapBusy, out _, vel, slotWhere, Planetarium.GetUniversalTime());
+                    Assert.True(!snapBusy && fSnapBusy == Vector3.zero, $"no slot, no snapshot prediction ({fSnapBusy})");
                 }
                 finally
                 {
@@ -410,6 +415,8 @@ namespace FerramAerospaceResearch.InGameTests
 
                 aero.SimulateAeroProperties(out Vector3 fFree, out _, vel * 1.37f, 1000);
                 Assert.True(fFree.magnitude > 0, "with the slots given back, the same prediction has a force");
+                Assert.True(FARAPI.CalculateSnapshotAeroForcesAt(slotSnap, out Vector3 fSnapFree, out _, vel, slotWhere, Planetarium.GetUniversalTime()) &&
+                            fSnapFree.magnitude > 0, $"and the snapshot's ({fSnapFree})");
                 yield return Wait.Frames(2);
                 Assert.Equal(noSlotWarnedBefore ? 0 : 1, Logged("no prediction slot free"), "the warning, once a session");
             }

@@ -527,10 +527,10 @@ namespace FerramAerospaceResearch.InGameTests
                 HeatmapRenderer stab = Get<HeatmapRenderer>(hm, "_stabRenderer");
                 var envTex = Get<Texture2D>(env, "_envTex");
                 var stabTex = Get<Texture2D>(stab, "_stabTex");
-                // IMGUI takes a press only inside a window that holds the real mouse, at the screen's top left in
-                // batchmode (KspTest's Imgui mouse): the window over that corner
+                // IMGUI takes a press only inside a window that holds the real mouse (KspTest's Imgui mouse): the window
+                // over it
                 windowAt = Get<Rect>(Far.Editor, "guiRect");
-                Set(Far.Editor, "guiRect", new Rect(0, 0, windowAt.Value.width, windowAt.Value.height));
+                Set(Far.Editor, "guiRect", Imgui.OverRealMouse(windowAt.Value.width, windowAt.Value.height));
                 yield return Wait.Frames(3);
                 yield return Wait.Until(() => Imgui.ImageRect(envTex, Window) != null && Imgui.ImageRect(stabTex, Window) != null, 15,
                                         "both maps drawn", shot: false, detail: Imgui.Dump);

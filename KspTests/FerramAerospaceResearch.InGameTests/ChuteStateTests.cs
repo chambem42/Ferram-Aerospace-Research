@@ -206,7 +206,10 @@ namespace FerramAerospaceResearch.InGameTests
                 {
                     yield return SteadySink(sinks);
                     sink = sinks[0];
-                    areaBefore = FlightGlobals.ActiveVessel.GetComponent<FerramAerospaceResearch.FARAeroComponents.FARVesselAero>().MaxCrossSectionArea;
+                    // under coverage FAR was still rebuilding the model here (a cross-section of 0)
+                    var before = FlightGlobals.ActiveVessel.GetComponent<FerramAerospaceResearch.FARAeroComponents.FARVesselAero>();
+                    yield return Wait.Until(() => before.isValid && before.MaxCrossSectionArea > 0, 120, "FAR's model of the capsule under its canopy", shot: false);
+                    areaBefore = before.MaxCrossSectionArea;
                     ctx.Record("sinkBefore", $"{sink:F2} m/s at {FlightGlobals.ActiveVessel.altitude:F0} m, {CanopyMeshes(chute)} canopy meshes in FAR's geometry, " +
                                              $"max cross-section {areaBefore:F2} m2");
                 }

@@ -36,7 +36,7 @@ namespace FerramAerospaceResearch.InGameTests
         /// ExactCurve evaluates as Unity does: no keys (0), one key (its value everywhere), Hermite segments between
         /// keys, a stepped key (an infinite tangent holds the left value), and before and after the keys clamped to the
         /// end values. With a Loop or PingPong wrap, or a weighted key, it says it is not exact, and its wrap still
-        /// lands where Unity's does. Matches tells a curve with the same keys and wrap from one with a key changed,
+        /// lands where Unity's does; looped with its keys at one time it is the last key's value. Matches tells a curve with the same keys and wrap from one with a key changed,
         /// added or a wrap mode changed.
         /// </summary>
         [UITest(Kind = "Check", StartsAt = StartState.MainMenu, TimeoutSec = 300)]
@@ -74,6 +74,21 @@ namespace FerramAerospaceResearch.InGameTests
 
             var weighted = new Keyframe(1, 1, 0, 0, 0.5f, 0.5f) { weightedMode = WeightedMode.Both };
             Assert.False(new ExactCurve(Curve(new Keyframe(0, 0), weighted, new Keyframe(2, 0))).IsExact, "a weighted key is not exact");
+
+            // keys sharing one time leave a loop nothing to wrap over: every time is that time, past the first key. Unity
+            // gives the first key's value after them and NaN before (measured); a loop is not exact, and a NaN is worse
+            var sameTime = new AnimationCurve(new Keyframe(1, 2), new Keyframe(1, 6)) { preWrapMode = WrapMode.Loop, postWrapMode = WrapMode.Loop };
+            if (sameTime.keys.Length == 2)
+            {
+                var zeroRange = new ExactCurve(sameTime);
+                ctx.Record("zeroRangeLoop", $"Unity {sameTime.Evaluate(3):R} at 3, {sameTime.Evaluate(-3):R} at -3; ExactCurve {zeroRange.Evaluate(3):R}, {zeroRange.Evaluate(-3):R}");
+                Assert.Equal(6f, zeroRange.Evaluate(3), "a looped curve with no length after its keys: the last key's value");
+                Assert.Equal(6f, zeroRange.Evaluate(-3), "and before them");
+            }
+            else
+            {
+                ctx.Record("zeroRangeLoop", $"Unity kept {sameTime.keys.Length} of two keys at one time");
+            }
 
             ctx.Step("Matches");
             var copy = new ExactCurve(smooth);

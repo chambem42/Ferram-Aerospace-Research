@@ -151,8 +151,8 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.True(hereCell.Feasible, $"the vessel's cell is flyable ({Maps.Describe(hereCell)})");
                 Assert.True(AtmosphereAutopilotInterop.Available, "FAR found AtmosphereAutopilot");
                 AaCreateControllers(v);
-                // IMGUI takes a press only in a window that holds the real mouse, at the screen's top left in batchmode
-                SetStatic(typeof(FlightGUI), "heatmapGuiRect", new Rect(0, 0, windowAt.width, windowAt.height));
+                // IMGUI takes a press only in a window that holds the real mouse (KspTest's Imgui mouse)
+                SetStatic(typeof(FlightGUI), "heatmapGuiRect", Imgui.OverRealMouse(windowAt.width, windowAt.height));
                 yield return Wait.Frames(3);
                 var envTex = Get<Texture2D>(env, "_envTex");
                 yield return Wait.Until(() => Imgui.ImageRect(envTex, title) != null, 10, "the envelope map drawn", shot: false, detail: Imgui.Dump);

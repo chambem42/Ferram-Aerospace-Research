@@ -140,7 +140,8 @@ namespace FerramAerospaceResearch.InGameTests
         /// The Aerodynamic Failure tab: picking the rocketFuelTank template and typing its axial and lateral stress
         /// limits sets the template a stock liquid fuel and oxidizer tank gets (FARAeroStress.DetermineStressTemplate);
         /// "Requires Crew Compartment" takes the uncrewed tank off the template and back; "+" adds a 500/500 "default"
-        /// template at the end of the list.
+        /// template at the end of the list. Its resource lists take an entry each with their "+", named as typed, and
+        /// lose it with its "-"; the template's own "-" removes it, and the pick moves to the one before.
         /// </summary>
         [UITest(Kind = "Check", StartsAt = StartState.SpaceCenter, TimeoutSec = 600)]
         public static IEnumerator Settings_AeroStressTabEditsTemplates(TestContext ctx)
@@ -200,6 +201,33 @@ namespace FerramAerospaceResearch.InGameTests
                             $"the new template: 500/500, not special, no crew (XZ {added.XZMaxStress}, Y {added.YMaxStress})");
                 // a catch-all at the end of the list: what the tank gets now
                 ctx.Record("tankTemplateWithNewDefault", FARAeroStress.DetermineStressTemplate(tank).Name);
+
+                ctx.Step("The new template's resource lists: + adds an entry, typing names it, - takes it off");
+                Set(window, "aeroStressIndex", count);
+                yield return Wait.Frames(2);
+                // the "+" buttons in order: the template list's, then the required and the excluded resources' lists'
+                yield return Imgui.ClickNth("+", 1, DebugWindow);
+                yield return Imgui.ClickNth("+", 2, DebugWindow);
+                Assert.True(added.Resources.Resources.Count == 1 && added.Resources.Excluded.Count == 1,
+                            $"an entry in each list ({added.Resources.Resources.Count} required, {added.Resources.Excluded.Count} excluded)");
+                // the text fields: name, the two limits, the resource count, then the lists' entries
+                yield return Imgui.SetTextNth(4, "LiquidFuel", DebugWindow);
+                yield return Imgui.SetTextNth(5, "Ore", DebugWindow);
+                Assert.Equal("LiquidFuel", added.Resources.Resources[0], "the required resource typed");
+                Assert.Equal("Ore", added.Resources.Excluded[0], "the excluded resource typed");
+                // the "-" buttons: one per template, then one per list entry
+                yield return Imgui.ClickNth("-", count + 1, DebugWindow);
+                Assert.True(added.Resources.Resources.Count == 0 && added.Resources.Excluded.Count == 1,
+                            "the required resource's - takes it, and only it, off");
+                yield return Imgui.ClickNth("-", count + 1, DebugWindow);
+                Assert.Equal(0, added.Resources.Excluded.Count, "then the excluded one's");
+
+                ctx.Step("Remove the new template, the one picked, with its -");
+                yield return Imgui.ClickNth("-", count, DebugWindow);
+                Assert.Equal(count, templates.Count, "templates after its -");
+                Assert.False(templates.Contains(added), "the new template gone");
+                Assert.Equal(count - 1, (int)Get(window, "aeroStressIndex"), "the pick moved to the template before it");
+                added = null;
             }
             finally
             {

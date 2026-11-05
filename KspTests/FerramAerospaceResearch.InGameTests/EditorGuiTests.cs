@@ -388,9 +388,24 @@ namespace FerramAerospaceResearch.InGameTests
                 // whether that is the plane or the products of inertia FAR leaves in t m^2 (StabilityDerivCalculator) is open:
                 // recorded, not asserted
                 ctx.Record("lateralGrowth", MaxAbs(beta, 6) / 2);
+
+                ctx.Step("Hovering a derivative: its explanation");
+                yield return Imgui.Select(L("FAREditorSimModeLong"), Window);
+                yield return Wait.Frames(2);
+                Rect? zw = Imgui.LabelRect(L("FAREditorZw").Trim(), Window);
+                Assert.NotNull(zw, "the Zw derivative on the simulation tab");
+                string explanation = L("FAREditorZwExp");
+                string shown = explanation.Substring(0, Math.Min(40, explanation.Length));
+                Assert.False(Imgui.IsVisible(shown, Window), "no explanation before the pointer is on it");
+                yield return Imgui.Hover(zw.Value.center, 3);
+                Assert.True(Imgui.IsVisible(shown, Window), $"Zw's explanation shown under the pointer ('{shown}...')");
+                Rect window = Imgui.FindWindow(Window).Rect;
+                yield return Imgui.Hover(new Vector2(window.center.x, window.yMax - 5), 3);
+                Assert.False(Imgui.IsVisible(shown, Window), "and gone with the pointer off it");
             }
             finally
             {
+                Imgui.ReleasePointer();
                 CloseWindow();
             }
         }

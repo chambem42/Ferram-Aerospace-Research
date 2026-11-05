@@ -83,7 +83,7 @@ namespace FerramAerospaceResearch.InGameTests
 
                 ctx.Step("A box dragged on the stability map");
                 windowAt = Get<Rect>(Far.Editor, "guiRect");
-                Set(Far.Editor, "guiRect", new Rect(0, 0, windowAt.Value.width, windowAt.Value.height));
+                Set(Far.Editor, "guiRect", Imgui.OverRealMouse(windowAt.Value.width, windowAt.Value.height));
                 yield return Wait.Frames(3);
                 var stabTex = Get<Texture2D>(stab, "_stabTex");
                 yield return Wait.Until(() => Imgui.ImageRect(stabTex, Window) != null, 15, "the stability map drawn", shot: false, detail: Imgui.Dump);
