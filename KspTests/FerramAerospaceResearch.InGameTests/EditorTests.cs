@@ -22,6 +22,7 @@ namespace FerramAerospaceResearch.InGameTests
     {
         // stock crafts
         private const string Airliner = "Stearwing A300";
+        private const string AirlinerCovered = "Stearwing A300 Covered";   // crafts/: a Mk7 nose cone on one Goliath's intake
         private const string Rocket = "Kerbal 1";
 
         /// <summary>The voxel model's length and largest cross-section against the craft's bounds.</summary>
@@ -175,6 +176,79 @@ namespace FerramAerospaceResearch.InGameTests
             ctx.Record("alpha", $"0 deg Cl {a0.Cl:F4} Cm {a0.Cm:F4}; 6 deg Cl {a6.Cl:F4} Cm {a6.Cm:F4}");
             Assert.InRange(0.02, 0.12, (a6.Cl - a0.Cl) / 6, "lift slope per degree");
             Assert.True(a6.Cm < a0.Cm, $"stable in pitch: Cm falls with alpha ({a0.Cm:F4} to {a6.Cm:F4})");
+        }
+
+        /// <summary>
+        /// The airliner with a Mk7 nose cone on one Goliath's intake node (its occludeNode, top): the covered Goliath's
+        /// adjuster is no longer an integrated intake but an engine exit (its area negated, ducted in the engines' sweep,
+        /// its threshold read), the open one's still an intake. Each adjuster taken out in turn: the open Goliath's ducting
+        /// takes volume out of the model, the covered one's puts some back. (AJE swaps the Goliath's intake; this runs in
+        /// the instance without it.)
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = AirlinerCovered, TimeoutSec = 900)]
+        public static IEnumerator Editor_CoveredGoliathIntakeIsAnEngineExit(TestContext ctx)
+        {
+            yield return LoadedCraft("the airliner with a covered Goliath", "turboFanSize2", "rocketNoseCone.v3");
+            VehicleAerodynamics vehicle = Far.EditorVehicle;
+            Part[] goliaths = EditorLogic.fetch.ship.parts.Where(p => p.partInfo.name == "turboFanSize2").ToArray();
+            Assert.Equal(2, goliaths.Length, "the airliner's Goliaths");
+            Part covered = goliaths.FirstOrDefault(p => p.FindModuleImplementing<ModuleResourceIntake>().node?.attachedPart != null);
+            Part open = goliaths.FirstOrDefault(p => p != covered);
+            Assert.NotNull(covered, "a Goliath with a part on its intake node");
+            Assert.Equal("rocketNoseCone.v3", covered.FindModuleImplementing<ModuleResourceIntake>().node.attachedPart.partInfo.name, "the nose cone on it");
+            Assert.True(open.FindModuleImplementing<ModuleResourceIntake>().node?.attachedPart == null, "the other Goliath's intake open");
+
+            GeometryPartModule Geo(Part p) => p.FindModuleImplementing<GeometryPartModule>();
+            IntegratedIntakeEngineCrossSectionAdjuster Adjuster(Part p)
+            {
+                var list = Refl.Get<List<ICrossSectionAdjuster>>(Geo(p), "crossSectionAdjusters");
+                Assert.Equal(1, list.Count, $"one cross-section adjuster on the {(p == covered ? "covered" : "open")} Goliath");
+                return list[0] as IntegratedIntakeEngineCrossSectionAdjuster;
+            }
+
+            IntegratedIntakeEngineCrossSectionAdjuster ac = Adjuster(covered), ao = Adjuster(open);
+            Assert.NotNull(ac, "the covered Goliath's adjuster an integrated intake-engine one");
+            Assert.NotNull(ao, "the open Goliath's adjuster an integrated intake-engine one");
+            ctx.Record("adjusters", $"covered: integrated {ac.IntegratedCrossSectionIncreaseDecrease()}, area {ac.AreaRemovedFromCrossSection():F3}, threshold {ac.AreaThreshold()}; " +
+                                    $"open: integrated {ao.IntegratedCrossSectionIncreaseDecrease()}, area {ao.AreaRemovedFromCrossSection():F3}");
+            Assert.True(ao.IntegratedCrossSectionIncreaseDecrease(), "the open Goliath an integrated intake");
+            Assert.False(ac.IntegratedCrossSectionIncreaseDecrease(), "the covered Goliath not one: an engine exit");
+            Assert.True(Math.Abs(ao.AreaRemovedFromCrossSection()) > 0, "the open Goliath ducts area");
+            Assert.Near(-ao.AreaRemovedFromCrossSection(), ac.AreaRemovedFromCrossSection(), 1e-9, "the covered Goliath's area the open one's negated");
+            Assert.Equal(0.0, ac.AreaThreshold(), "an integrated adjuster's threshold");
+
+            double vol = Far.Volume(vehicle);
+            var saved = new Dictionary<GeometryPartModule, List<ICrossSectionAdjuster>>();
+            double volNoCovered = 0, volNoOpen = 0;
+            try
+            {
+                foreach (Part p in new[] { covered, open })
+                {
+                    ctx.Step($"Without the {(p == covered ? "covered" : "open")} Goliath's adjuster");
+                    GeometryPartModule g = Geo(p);
+                    saved[g] = Refl.Get<List<ICrossSectionAdjuster>>(g, "crossSectionAdjusters");
+                    Refl.Set(g, "crossSectionAdjusters", new List<ICrossSectionAdjuster>());
+                    yield return Far.Revoxelize("the airliner without one Goliath's adjuster");
+                    if (p == covered) volNoCovered = Far.Volume(vehicle);
+                    else volNoOpen = Far.Volume(vehicle);
+                    Refl.Set(g, "crossSectionAdjusters", saved[g]);
+                    saved.Remove(g);
+                }
+            }
+            finally
+            {
+                foreach (KeyValuePair<GeometryPartModule, List<ICrossSectionAdjuster>> kv in saved)
+                    Refl.Set(kv.Key, "crossSectionAdjusters", kv.Value);
+            }
+
+            ctx.Record("volume", $"{vol:F3} m3 with both; {volNoCovered:F3} without the covered one's adjuster, {volNoOpen:F3} without the open one's");
+            Assert.True(volNoOpen > vol, $"the open Goliath's ducting takes volume out ({vol:F3} against {volNoOpen:F3} m3)");
+            // an exit's area is ducted with the opposite sign: it puts volume back (335.6 m3 with it, 331.3 without)
+            Assert.True(volNoCovered < vol, $"the covered Goliath's adjuster puts volume back, as an engine exit ({vol:F3} against {volNoCovered:F3} m3)");
+
+            ctx.Step("Both adjusters back");
+            yield return Far.Revoxelize("the airliner with both adjusters");
+            Assert.Near(vol, Far.Volume(vehicle), 1e-4 * vol, "the volume again (m3)");
         }
 
         /// <summary>
