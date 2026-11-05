@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using FerramAerospaceResearch.FARAeroComponents;
@@ -461,8 +460,7 @@ namespace FerramAerospaceResearch.InGameTests
             private readonly bool airstream0, sun0, body0, debugInFlight0;
             private readonly Device device0;
             private readonly object size0;
-            private readonly string customConfig;
-            private readonly bool customExisted;
+            private readonly FarConfigFile configFile = new FarConfigFile();
 
             public Exposure(TestContext ctx, Vessel v)
             {
@@ -477,8 +475,6 @@ namespace FerramAerospaceResearch.InGameTests
                 body0 = FARConfig.Exposure.Body.Value;
                 device0 = X.ComputeDevice;
                 size0 = RenderSizeProperty.GetValue(X);
-                customConfig = Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "Custom_FARConfig.cfg");
-                customExisted = File.Exists(customConfig);
             }
 
             /// <summary>
@@ -532,11 +528,8 @@ namespace FerramAerospaceResearch.InGameTests
                     RenderSizeProperty.SetValue(X, size0);
                 }
                 Directions(airstream0, sun0, body0);
-                if (!customExisted && File.Exists(customConfig))
-                {
+                if (configFile.Restore())
                     ctx.Record("customFARConfigWritten", true);
-                    File.Delete(customConfig);
-                }
             }
 
             private static PropertyInfo RenderSizeProperty =>

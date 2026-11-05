@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Threading;
 using FerramAerospaceResearch.FARAeroComponents;
@@ -194,23 +193,16 @@ namespace FerramAerospaceResearch.InGameTests
             FlightGlobals.Vessels.Where(v => v != null).Select(v => v.GetComponent<FARVesselAero>()).Where(a => a != null)
                          .Select(a => Get<VehicleAerodynamics>(a, "_vehicleAero")).Where(a => a != null);
 
-        /// <summary>
-        /// FAR's debugInFlight put back as it was when a test ends, with the Custom_FARConfig.cfg FAR saves the setting
-        /// into (on leaving flight) removed if the test made it: left there, the next session starts with it on.
-        /// </summary>
+        /// <summary>FAR's debugInFlight put back as it was when a test ends, and FAR's config file with it (FarConfigFile).</summary>
         private sealed class DebugInFlight : IDisposable
         {
             private readonly bool was = FARConfig.Voxelization.DebugInFlight;
-            private readonly string custom = Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "Custom_FARConfig.cfg");
-            private readonly bool existed;
-
-            public DebugInFlight() => existed = File.Exists(custom);
+            private readonly FarConfigFile file = new FarConfigFile();
 
             public void Dispose()
             {
                 FARConfig.Voxelization.DebugInFlight = was;
-                if (!existed && File.Exists(custom))
-                    File.Delete(custom);
+                file.Restore();
             }
         }
 
