@@ -710,8 +710,8 @@ namespace FerramAerospaceResearch.FARAeroComponents
             }
 
             List<Part> children = part.children;
-            // ReSharper disable once ForCanBeConvertedToForeach -> decouple modifies collection
-            for (int i = 0; i < children.Count; i++)
+            // decouple takes the child out of part.children: from the last back, or every second one stays on
+            for (int i = children.Count - 1; i >= 0; i--)
             {
                 Part child = children[i];
                 child.decouple(25);
