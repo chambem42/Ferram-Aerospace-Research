@@ -12,6 +12,7 @@ namespace FerramAerospaceResearch.UnitTests
     /// the file's values land in FARConfig's sections, changed values are taken, a save loads back to the same config,
     /// and a bad value is reported without spoiling the rest. One class: FARConfig is static, so these run in turn.
     /// </summary>
+    [Collection(TestLog.Collection)]
     public class ConfigTests : IDisposable
     {
         private static readonly string FarConfigPath =
@@ -100,6 +101,43 @@ namespace FerramAerospaceResearch.UnitTests
             Load(node);
             Assert.Equal(50, FARConfig.FlightLog.LogPeriod.Value);   // kept: "often" is not an int
             Assert.Equal(7, FARConfig.FlightLog.FlushPeriod.Value);
+        }
+
+        /// <summary>
+        /// Saved as a patch (what Custom_FARConfig.cfg holds, applied over FARConfig.cfg by ModuleManager), each section
+        /// is an edit of the shipped one, each value an edit, and a node list is deleted before its items are written
+        /// again.
+        /// </summary>
+        [SkippableFact]
+        public void APatchSaveEditsTheShippedConfig()
+        {
+            Assert.Equal(0, Load(FileNode()));
+            var patch = new ConfigNode("FARConfig");
+            Root.Save(new SaveVisitor { Node = patch, IsPatch = true }, null);
+
+            ConfigNode log = patch.GetNode("@FlightLog");
+            Assert.NotNull(log);
+            Assert.Equal("50", log.GetValue("%period"));
+            Assert.Equal("yyyy_MM_dd_HH_mm_ss", log.GetValue("%datetimeFormat"));
+            Assert.False(patch.HasNode("FlightLog"), patch.ToString());
+
+            ConfigNode voxels = patch.GetNode("@Voxelization");
+            Assert.NotNull(voxels);
+            Assert.True(voxels.HasNode("!ColorMap,*"), voxels.ToString());
+            ConfigNode old = voxels.GetNodes("ColorMap").FirstOrDefault(n => n.GetValue("name") == "old");
+            Assert.NotNull(old);
+            Assert.Single(old.GetValues("color"));
+            Assert.True(Serialization.TryGetValue(old.GetValue("color"), out object color, typeof(Color)));
+            Assert.Equal(new Color(0.18f, 0f, 0.106f), color);
+        }
+
+        [SkippableFact]
+        public void AnUnknownColorMapNameFallsBackToTheDefaultMap()
+        {
+            Assert.Equal(0, Load(FileNode()));
+            Assert.Equal("old", FARConfig.Voxelization.FirstOrDefault("old").Name);
+            Assert.Same(Config.ColorMap.Default, FARConfig.Voxelization.FirstOrDefault(""));
+            Assert.Same(Config.ColorMap.Default, FARConfig.Voxelization.FirstOrDefault("no such map"));
         }
 
         [SkippableFact]

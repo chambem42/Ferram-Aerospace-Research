@@ -22,6 +22,12 @@ namespace FerramAerospaceResearch.UnitTests
     /// </summary>
     public sealed class TestLog : ILogHandler
     {
+        /// <summary>
+        /// The test collection of the tests that log errors or check the log for them: xunit runs collections side by
+        /// side, so a test checking that nothing logged an error would otherwise see another test's error.
+        /// </summary>
+        public const string Collection = "FAR's log";
+
         public static readonly TestLog Instance = new TestLog();
         private readonly List<string> lines = new List<string>();
 

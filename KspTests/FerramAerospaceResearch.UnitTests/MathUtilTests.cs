@@ -1,4 +1,5 @@
 using System;
+using UnityEngine;
 using Xunit;
 
 namespace FerramAerospaceResearch.UnitTests
@@ -111,6 +112,45 @@ namespace FerramAerospaceResearch.UnitTests
         public void SecantRefusesTwoEqualGuesses()
         {
             Assert.Throws<ArgumentException>(() => FARMathUtil.Secant(x => x, 1, 1));
+        }
+
+        [SkippableFact]
+        public void NearlyEqualVectorsCompareEachComponent()
+        {
+            UnityRuntime.Require();   // Vector3
+            Assert.True(new Vector3(1, 2, 3).NearlyEqual(new Vector3(1, 2, 3 + 1e-7f)));
+            Assert.False(new Vector3(1, 2, 3).NearlyEqual(new Vector3(1, 2.01f, 3)));
+            Assert.True(new Vector3d(1, -2, 3).NearlyEqual(new Vector3d(1, -2, 3 * (1 + 1e-16))));
+            Assert.False(new Vector3d(1, -2, 3).NearlyEqual(new Vector3d(1, -2, 3.000001)));
+            Assert.False(new Vector3d(1, -2, 3).NearlyEqual(new Vector3d(1.000001, -2, 3)));
+        }
+
+        [SkippableFact]
+        public void BrentRunOutOfIterationsIsNotConverged()
+        {
+            UnityRuntime.RequireLog();   // it logs that it did not converge
+            FARMathUtil.OptimizationResult r = FARMathUtil.BrentsMethod(x => x * x - 2, 0, 2, 1e-12, maxIter: 2);
+            Assert.False(r.Converged);
+            Assert.True(FARMathUtil.BrentsMethod(x => x * x - 2, 0, 2, 1e-12, maxIter: 100).Converged);   // given the iterations
+        }
+
+        [Fact]
+        public void SecantOnAFlatFunctionStopsAtOnce()
+        {
+            // the same value at both guesses: the step is undefined, so it stops between them and calls that converged
+            FARMathUtil.OptimizationResult r = FARMathUtil.Secant(x => 1.0, 2, 4);
+            Assert.True(r.Converged);
+            Assert.Equal(3, r.Result, 12);
+            Assert.Equal(2, r.FunctionCalls);
+        }
+
+        [Fact]
+        public void SecantGivesUpOnNaN()
+        {
+            FARMathUtil.OptimizationResult r = FARMathUtil.Secant(x => double.NaN, 1);
+            Assert.False(r.Converged);
+            Assert.True(double.IsNaN(r.Result));
+            Assert.True(r.FunctionCalls < 50);
         }
 
         [Fact]
