@@ -697,6 +697,8 @@ namespace FerramAerospaceResearch.FARAeroComponents
 
         private void ApplyAeroStressFailure()
         {
+            // the vessel the part failed on: decoupled, the part (and its children) are vessels of their own
+            Vessel failedOn = vessel;
             bool failureOccured = false;
             if (part.FindModuleImplementingFast<ModuleProceduralFairing>() is ModuleProceduralFairing fairing)
             {
@@ -722,9 +724,9 @@ namespace FerramAerospaceResearch.FARAeroComponents
                 failureOccured = true;
             }
 
-            if (!failureOccured || !vessel)
+            if (!failureOccured || !failedOn)
                 return;
-            vessel.SendMessage("AerodynamicFailureStatus");
+            failedOn.SendMessage("AerodynamicFailureStatus");
             string msg = Localizer.Format("FARFlightLogAeroFailure",
                                           KSPUtil.PrintTimeStamp(FlightLogger.met),
                                           part.partInfo.title);
