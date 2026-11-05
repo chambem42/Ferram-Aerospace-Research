@@ -31,6 +31,11 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- no shadow copies: FAR runs from bin, where an instrumented build's coverage recorder writes its counts -->
+        <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <ItemGroup>
         <Reference Include="FerramAerospaceResearch" HintPath="$(FarBin)/FerramAerospaceResearch.dll" />
         <Reference Include="FerramAerospaceResearch.Base" HintPath="$(FarBin)/FerramAerospaceResearch.Base.dll" />
         <Reference Include="ferramGraph" HintPath="$(FarBin)/ferramGraph.dll" />
