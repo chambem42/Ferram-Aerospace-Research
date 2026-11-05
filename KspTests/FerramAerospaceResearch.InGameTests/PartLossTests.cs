@@ -92,9 +92,10 @@ namespace FerramAerospaceResearch.InGameTests
 
             ctx.Step($"{lost.part.partInfo.name} destroyed");
             lost.part.explode();
-            yield return Wait.Seconds(2);
-            var geo = Refl.Get<List<GeometryPartModule>>(aero, "_currentGeoModules");
-            Assert.False(geo.Any(g => g == null || ReferenceEquals(g, lostGeo)), "FAR's vessel holds no geometry module of a destroyed part");
+            // 2 s was enough in plain runs, not under coverage
+            yield return Wait.Until(() => !Refl.Get<List<GeometryPartModule>>(aero, "_currentGeoModules").Any(g => g == null || ReferenceEquals(g, lostGeo)),
+                                    30, "FAR's vessel to drop the destroyed part's geometry module", shot: false);
+            yield return Wait.Seconds(1);
             List<FARWingAerodynamicModel> left = Neighbours(wi, dir);
             List<double> after = Influences(wi, dir);
             ctx.Record("after", $"{string.Join(", ", left.Select(x => x == null ? "(destroyed)" : x.part.partInfo.name))}; influences " +
