@@ -216,6 +216,9 @@ namespace FerramAerospaceResearch.InGameTests
             Assert.True(Math.Abs(ao.AreaRemovedFromCrossSection()) > 0, "the open Goliath ducts area");
             Assert.Near(-ao.AreaRemovedFromCrossSection(), ac.AreaRemovedFromCrossSection(), 1e-9, "the covered Goliath's area the open one's negated");
             Assert.Equal(0.0, ac.AreaThreshold(), "an integrated adjuster's threshold");
+            Vector3[] axes = { Vector3.right, Vector3.left, Vector3.up, Vector3.down, Vector3.forward, Vector3.back };
+            double[] along = axes.Select(x => ao.AreaRemovedFromCrossSection(x)).ToArray();
+            Assert.Equal(1, along.Count(x => x > 0), $"the open Goliath ducts along one axis of the six ({string.Join(", ", along.Select(x => x.ToString("F3")))})");
 
             double vol = Far.Volume(vehicle);
             var saved = new Dictionary<GeometryPartModule, List<ICrossSectionAdjuster>>();

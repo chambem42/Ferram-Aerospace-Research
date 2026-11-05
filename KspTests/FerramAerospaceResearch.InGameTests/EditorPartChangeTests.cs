@@ -418,6 +418,129 @@ namespace FerramAerospaceResearch.InGameTests
             }
         }
 
+        private static readonly MethodInfo SetupAdjusters =
+            typeof(GeometryPartModule).GetMethod("SetupICrossSectionAdjusters", BindingFlags.Instance | BindingFlags.NonPublic);
+
+        /// <summary>A part's cross-section adjusters made again, as GeometryPartModule.Start makes them, and its one intake adjuster.</summary>
+        private static IntakeCrossSectionAdjuster RebuiltIntakeAdjuster(Part p)
+        {
+            Assert.NotNull(SetupAdjusters, "GeometryPartModule.SetupICrossSectionAdjusters");
+            GeometryPartModule g = p.FindModuleImplementing<GeometryPartModule>();
+            SetupAdjusters.Invoke(g, null);
+            var list = Refl.Get<List<ICrossSectionAdjuster>>(g, "crossSectionAdjusters");
+            Assert.Equal(1, list.Count, "one cross-section adjuster on the nacelle");
+            var adjuster = list[0] as IntakeCrossSectionAdjuster;
+            Assert.NotNull(adjuster, $"an intake adjuster ({list[0].GetType().Name})");
+            return adjuster;
+        }
+
+        /// <summary>
+        /// Intake configs no stock intake has, as a mod's would set them, on the Mallard's nacelles (their adjusters made
+        /// again for each): an occludeNode (top, where the circular intake sits) makes the intake covered, so it ducts
+        /// nothing and its own node is no threshold, and with both covered the model is the one without the nacelles'
+        /// adjusters, not the one as loaded; a front node of size 0 counts as size 0.5; an intake with no intake
+        /// transform takes the part's. All put back, the adjusters again what they were and the model with them.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Mallard, TimeoutSec = 900)]
+        public static IEnumerator Editor_ModdedIntakeConfigs(TestContext ctx)
+        {
+            yield return LoadedCraft("the Mallard", "nacelleBody");
+            Part[] nacelles = EditorLogic.fetch.ship.parts.Where(p => p.partInfo.name == "nacelleBody").ToArray();
+            Assert.Equal(2, nacelles.Length, "the Mallard's nacelles");
+            Part a = nacelles[0], b = nacelles[1];
+            ModuleResourceIntake ia = a.FindModuleImplementing<ModuleResourceIntake>(), ib = b.FindModuleImplementing<ModuleResourceIntake>();
+            AttachNode topA = a.FindAttachNode("top"), topB = b.FindAttachNode("top");
+            Assert.NotNull(topA?.attachedPart, "a part on the first nacelle's top node");
+            Assert.True(string.IsNullOrEmpty(ia.occludeNode), "a stock nacelle has no occludeNode");
+            yield return Far.Revoxelize("the Mallard as loaded");
+            double vol = Far.Volume(Far.EditorVehicle);
+            double[] sections = Far.EditorVehicle.GetCrossSectionAreas();
+            double Most(double[] x, double[] y) => x.Length == y.Length ? x.Zip(y, (u, w) => Math.Abs(u - w)).Max() : double.NaN;
+            ModuleResourceIntake[] intakes = { ia, ib };
+            AttachNode[] tops = { topA, topB };
+            string[] occludeWas = intakes.Select(i => i.occludeNode).ToArray();
+            AttachNode[] nodeWas = intakes.Select(i => i.node).ToArray();
+            int sizeWas = topB.size;
+            Transform transformWas = ib.intakeTransform;
+            try
+            {
+                // one nacelle's ducting alone does not show on the Mallard (the other's is enough): both covered
+                ctx.Step("An occludeNode on both nacelles' intakes, their top, a circular intake on each");
+                for (int k = 0; k < 2; k++)
+                {
+                    Assert.NotNull(tops[k]?.attachedPart, "a part on the nacelle's top node");
+                    intakes[k].occludeNode = "top";
+                    intakes[k].node = tops[k];   // as ModuleResourceIntake.OnStart finds it
+                    IntakeCrossSectionAdjuster covered = RebuiltIntakeAdjuster(nacelles[k]);
+                    ctx.Record($"occluded{k}", $"node {Refl.Get<AttachNode>(covered, "node")?.id}, on it {tops[k].attachedPart.partInfo.name}; " +
+                                               $"area {covered.AreaRemovedFromCrossSection():F4} m2 (open {100 * intakes[k].area:F4}), threshold {covered.AreaThreshold():F4}");
+                    Assert.True(ReferenceEquals(tops[k], Refl.Get<AttachNode>(covered, "node")), "the adjuster watches the occlude node");
+                    Assert.Equal(0.0, covered.AreaRemovedFromCrossSection(), "covered by the part on it, the intake ducts nothing");
+                    Assert.Equal(0.0, covered.AreaThreshold(), "its own node in front is no threshold");
+                }
+
+                yield return Far.Revoxelize("the Mallard with its nacelles' intakes covered");
+                double volCovered = Far.Volume(Far.EditorVehicle);
+                double[] coveredSections = Far.EditorVehicle.GetCrossSectionAreas();
+                var kept = new Dictionary<GeometryPartModule, List<ICrossSectionAdjuster>>();
+                foreach (Part p in nacelles)
+                {
+                    GeometryPartModule g = p.FindModuleImplementing<GeometryPartModule>();
+                    kept[g] = Refl.Get<List<ICrossSectionAdjuster>>(g, "crossSectionAdjusters");
+                    Refl.Set(g, "crossSectionAdjusters", new List<ICrossSectionAdjuster>());
+                }
+
+                yield return Far.Revoxelize("the Mallard with no adjusters on its nacelles");
+                double[] noneSections = Far.EditorVehicle.GetCrossSectionAreas();
+                foreach (KeyValuePair<GeometryPartModule, List<ICrossSectionAdjuster>> kv in kept)
+                    Refl.Set(kv.Key, "crossSectionAdjusters", kv.Value);
+                double fromLoaded = Most(sections, coveredSections), fromNone = Most(coveredSections, noneSections);
+                ctx.Record("covered", $"{vol:F3} m3 as loaded, {volCovered:F3} covered; covered sections differ from as loaded by up to {fromLoaded:F4} m2, " +
+                                      $"from no adjusters by {fromNone:F4} m2 (no adjusters from as loaded: {Most(sections, noneSections):F4} m2)");
+                Assert.True(fromLoaded > 0.05, $"covering the intakes changes the sections along the nacelles (by up to {fromLoaded:F4} m2)");
+                Assert.Near(0, fromNone, 1e-6, "covered intakes duct as none: the model without their adjusters (m2)");
+                for (int k = 0; k < 2; k++)
+                {
+                    intakes[k].occludeNode = occludeWas[k];
+                    intakes[k].node = nodeWas[k];
+                    RebuiltIntakeAdjuster(nacelles[k]);
+                }
+
+                ctx.Step("A front node of size 0 on the second nacelle");
+                topB.size = 0;
+                IntakeCrossSectionAdjuster small = RebuiltIntakeAdjuster(b);
+                double half = Math.PI * Math.Pow(0.625 * 0.5, 2);
+                ctx.Record("size0", $"threshold {small.AreaThreshold():F4} m2 (size 0.5's {-half:F4})");
+                Assert.Near(-half, small.AreaThreshold(), 1e-6, "a size-0 node taken as size 0.5 (m2)");
+                topB.size = sizeWas;
+
+                ctx.Step("No intake transform on the second nacelle");
+                ib.intakeTransform = null;
+                IntakeCrossSectionAdjuster bare = RebuiltIntakeAdjuster(b);
+                Assert.True(ReferenceEquals(b.partTransform, Refl.Get<Transform>(bare, "intakeTrans")), "the part's transform in its place");
+            }
+            finally
+            {
+                for (int k = 0; k < 2; k++)
+                {
+                    intakes[k].occludeNode = occludeWas[k];
+                    intakes[k].node = nodeWas[k];
+                }
+                topB.size = sizeWas;
+                ib.intakeTransform = transformWas;
+            }
+
+            ctx.Step("The stock configs back");
+            foreach (Part p in nacelles)
+            {
+                IntakeCrossSectionAdjuster again = RebuiltIntakeAdjuster(p);
+                Assert.Near(100 * p.FindModuleImplementing<ModuleResourceIntake>().area, again.AreaRemovedFromCrossSection(), 1e-6, "ducting again (m2)");
+            }
+
+            yield return Far.Revoxelize("the Mallard with its stock intakes");
+            Assert.Near(vol, Far.Volume(Far.EditorVehicle), 1e-4 * vol, "the volume again (m3)");
+        }
+
         /// <summary>A craft loaded in place of another: its parts there, FAR's voxel model as long as the craft, and settled.</summary>
         private static IEnumerator LoadedCraft(string what, params string[] parts)
         {
