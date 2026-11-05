@@ -990,10 +990,11 @@ namespace FerramAerospaceResearch.InGameTests
                 foreach (KeyValuePair<Part, double> pair in before)
                 {
                     after.TryGetValue(pair.Key, out double a);
-                    // 15%: two renders of the same scene were expected to count the same pixels, but the GPU and CPU
-                    // counts of the ComSat Lx's fairing differ by 4.4% and one render to the next by 2% (measured), and
-                    // under coverage a winglet's side view by 9.8% (0.122 -> 0.134 m2): recorded
-                    double tol = 0.15 * Math.Max(pair.Value, a) + 10 * areaPerPixel;
+                    // 5%: two renders of the same scene were expected to count the same pixels, but the GPU and CPU
+                    // counts of the ComSat Lx's fairing differ by 4.4% and one render to the next by 2% (measured):
+                    // recorded. (A winglet's 9.8% after a vessel modification was the renderer reset drawing every
+                    // renderer twice; fixed.)
+                    double tol = 0.05 * Math.Max(pair.Value, a) + 10 * areaPerPixel;
                     Assert.Near(pair.Value, a, tol, $"{pair.Key.partInfo.name}'s area, {what}");
                 }
             }
