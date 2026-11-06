@@ -43,7 +43,6 @@ Copyright 2022, Michael Ferrara, aka Ferram4
  */
 
 using System;
-using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Text.RegularExpressions;
 using ferram4;
@@ -89,8 +88,6 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
             _graph.Update();
         }
 
-        // coverage: IDisposable member nothing calls (EditorGUI drops the reference)
-        [ExcludeFromCodeCoverage]
         public void Dispose()
         {
             simManager = null;
