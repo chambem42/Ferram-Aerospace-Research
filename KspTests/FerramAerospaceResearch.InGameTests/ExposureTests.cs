@@ -774,6 +774,11 @@ namespace FerramAerospaceResearch.InGameTests
 
         // ------------------------------------------------------------------ the renderer's API beyond what FAR calls
 
+        // pixels either way a part's area may move between two renders of the same scene here: the small tank all but
+        // hidden behind the fairing is a sliver of boundary pixels, and the craft settles on the pad between renders
+        // (69 then 88 px under coverage, measured)
+        private const int HiddenPartSlack = 40;
+
         /// <summary>
         /// The parts of the exposure renderer's API FAR does not call agree with the parts it does (CPU device). Set up
         /// a renderer at a time (Renderer.SetupRenderer) the vessel indexes its parts and renders their areas as when
@@ -830,7 +835,8 @@ namespace FerramAerospaceResearch.InGameTests
                 {
                     ctx.Record($"view{i}", $"part by part: {x.Describe(whole[i])}; a renderer at a time: {x.Describe(single[i])}");
                     Exposure.AssertSameAreas(Exposure.Snapshot(whole[i], v), Exposure.Snapshot(single[i], v),
-                                             Exposure.AreaPerPixel(whole[i]), Exposure.AreaPerPixel(single[i]), $"view {i}, a renderer at a time");
+                                             Exposure.AreaPerPixel(whole[i]), Exposure.AreaPerPixel(single[i]), $"view {i}, a renderer at a time",
+                                             HiddenPartSlack);
                 }
 
                 ctx.Step("the batches' settings and handles");
@@ -879,7 +885,7 @@ namespace FerramAerospaceResearch.InGameTests
                     for (int i = 0; i < dirs.Length; i++)
                         Exposure.AssertSameAreas(Exposure.Snapshot(beforeKernel[i], v), Exposure.Snapshot(afterKernel[i], v),
                                                  Exposure.AreaPerPixel(beforeKernel[i]), Exposure.AreaPerPixel(afterKernel[i]),
-                                                 $"view {i} after the kernel given again ({device})");
+                                                 $"view {i} after the kernel given again ({device})", HiddenPartSlack);
                 }
 
                 ctx.Step("the debug background colour");
@@ -1226,7 +1232,7 @@ namespace FerramAerospaceResearch.InGameTests
             /// a pixel given (its framing).
             /// </summary>
             public static void AssertSameAreas(Dictionary<Part, double> before, Dictionary<Part, double> after, double perPixelBefore,
-                                               double perPixelAfter, string what)
+                                               double perPixelAfter, string what, int slackPixels = 10)
             {
                 // reframed: the renders are fitted to FAR's voxel bounds, and its voxelization on the modification can
                 // come out a voxel off the first (the pixel area 2.114E-4 then 2.188E-4 m2 under coverage); a part seen
@@ -1238,7 +1244,7 @@ namespace FerramAerospaceResearch.InGameTests
                     after.TryGetValue(pair.Key, out double a);
                     // 5%: two renders of the same scene were expected to count the same pixels, but the GPU and CPU
                     // counts of the ComSat Lx's fairing differ by 4.4% and one render to the next by 2% (measured): recorded
-                    double tol = (reframed ? 0.15 : 0.05) * Math.Max(pair.Value, a) + 10 * areaPerPixel;
+                    double tol = (reframed ? 0.15 : 0.05) * Math.Max(pair.Value, a) + slackPixels * areaPerPixel;
                     Assert.Near(pair.Value, a, tol, $"{pair.Key.partInfo.name}'s area, {what}");
                 }
             }
