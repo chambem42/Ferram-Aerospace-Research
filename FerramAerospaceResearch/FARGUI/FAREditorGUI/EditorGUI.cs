@@ -274,6 +274,8 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
                 blizzyEditorGUIButton = null;
             }
 
+            // the graphs hold Unity textures, which the garbage collector does not free
+            _stabDerivLinSim?.Dispose();
             _stabDerivLinSim = null;
             _components?.ClearTints();
             _components = null;
@@ -283,6 +285,7 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
             _instantSim = null;
             _areaRulingOverlay.Cleanup();
             _areaRulingOverlay = null;
+            _editorGraph?.Dispose();
             _editorGraph = null;
             _stabDeriv = null;
 
