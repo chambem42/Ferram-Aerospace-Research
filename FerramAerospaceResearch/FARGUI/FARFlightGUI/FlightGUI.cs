@@ -43,7 +43,6 @@ Copyright 2022, Michael Ferrara, aka Ferram4
  */
 
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using ferram4;
 using FerramAerospaceResearch.FARAeroComponents;
@@ -485,16 +484,12 @@ namespace FerramAerospaceResearch.FARGUI.FARFlightGUI
             GUI.DragWindow();
         }
 
-        // coverage: Blizzy toolbar interop, an optional mod the tests do not install
-        [ExcludeFromCodeCoverage]
         private static void ClearBlizzyToolbarButton()
         {
             blizzyFlightGUIButton.Destroy();
             blizzyFlightGUIButton = null;
         }
 
-        // coverage: Blizzy toolbar interop, an optional mod the tests do not install
-        [ExcludeFromCodeCoverage]
         private static void GenerateBlizzyToolbarButton()
         {
             if (blizzyFlightGUIButton != null)

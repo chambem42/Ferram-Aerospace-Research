@@ -44,7 +44,6 @@ Copyright 2022, Michael Ferrara, aka Ferram4
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using FerramAerospaceResearch;
 using FerramAerospaceResearch.FARAeroComponents;
@@ -259,8 +258,6 @@ namespace ferram4
             return ModifierChangeWhen.FIXED;
         }
 
-        // coverage: TweakScale interop, an optional mod the tests do not install
-        [ExcludeFromCodeCoverage]
         public void OnRescale(ScalingFactor factor)
         {
             b_2_actual = factor.absolute.linear * b_2;

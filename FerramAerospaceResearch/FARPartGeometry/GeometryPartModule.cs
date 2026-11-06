@@ -159,8 +159,6 @@ namespace FerramAerospaceResearch.FARPartGeometry
             get { return config.ignoreForMainAxis; }
         }
 
-        // coverage: TweakScale interop, an optional mod the tests do not install
-        [ExcludeFromCodeCoverage]
         public void OnRescale(ScalingFactor factor)
         {
             if (meshDataList == null)
@@ -1055,16 +1053,12 @@ namespace FerramAerospaceResearch.FARPartGeometry
             return CreateBoxMeshFromBoxCollider(new Vector3(0.5f, 0.8f, 0.5f), Vector3.zero);
         }
 
-        // coverage: RealChute (full mod) interop, an optional mod the tests do not install
-        [ExcludeFromCodeCoverage]
         public void RC_Rescale(Vector3 relativeRescaleFactor)
         {
             //this is currently just a wrapper, in the future if Rescale changes this can change to maintain compatibility
             Rescale(relativeRescaleFactor);
         }
 
-        // coverage: only reached from the RealChute/TweakScale rescale hooks
-        [ExcludeFromCodeCoverage]
         public void Rescale(Vector3 relativeRescaleFactor)
         {
             RebuildAllMeshData();
