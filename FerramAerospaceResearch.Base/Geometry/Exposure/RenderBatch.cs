@@ -108,8 +108,6 @@ public class RenderBatch : IDisposable
 
     public Kernel PixelCountKernel
     {
-        // coverage: getter nothing reads
-        [ExcludeFromCodeCoverage]
         get { return pixelCountKernel; }
         set
         {
@@ -124,8 +122,6 @@ public class RenderBatch : IDisposable
 
     public int2 RenderSize
     {
-        // coverage: getter nothing reads
-        [ExcludeFromCodeCoverage]
         get { return renderSize; }
         set
         {
@@ -143,8 +139,6 @@ public class RenderBatch : IDisposable
 
     public PhysicalDevice Device
     {
-        // coverage: getter nothing reads
-        [ExcludeFromCodeCoverage]
         get { return device; }
         set
         {
@@ -393,8 +387,6 @@ public class RenderBatch : IDisposable
         return AsyncGPUReadback.RequestIntoNativeArray(ref tex, data.target);
     }
 
-    // coverage: nothing in FAR calls it
-    [ExcludeFromCodeCoverage]
     public Executor.Handle Handle(int index)
     {
         if (index >= JobsCount)

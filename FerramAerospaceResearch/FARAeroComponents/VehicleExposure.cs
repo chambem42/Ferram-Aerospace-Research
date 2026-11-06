@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using FerramAerospaceResearch.FARGUI;
 using FerramAerospaceResearch.FARPartGeometry;
@@ -94,8 +93,6 @@ namespace FerramAerospaceResearch.FARAeroComponents
 
         private Color debugBackgroundColor = FARConfig.Exposure.DebugBackgroundColor;
 
-        // coverage: property nothing reads or sets
-        [ExcludeFromCodeCoverage]
         public Color DebugBackgroundColor
         {
             get { return debugBackgroundColor; }

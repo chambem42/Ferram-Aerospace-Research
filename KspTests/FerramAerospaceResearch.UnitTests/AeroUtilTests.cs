@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.Serialization;
 using FerramAerospaceResearch.Settings;
 using Xunit;
 
@@ -218,6 +219,26 @@ namespace FerramAerospaceResearch.UnitTests
                 Assert.Equal(0, FARAeroUtil.CalculateReynoldsNumber(1.225, 0, 34, 0.1, 288.15, Gamma));
                 Assert.Equal(0, FARAeroUtil.SkinFrictionDrag(1.225, 0, 34, 0.1, 288.15, Gamma));
             }
+        }
+
+        /// <summary>
+        /// The failure force scaling for a body and altitude: 1 in the air (above sea level) or over a body with no
+        /// ocean, at any altitude; at and below sea level on an ocean body, 5% of FAR's water-to-air density factor
+        /// (814.5) per meter of depth, a meter at least.
+        /// </summary>
+        [Theory]
+        [InlineData(true, 100.0, 1.0)]
+        [InlineData(true, 0.001, 1.0)]
+        [InlineData(false, -50.0, 1.0)]
+        [InlineData(true, 0.0, 40.725510204)]
+        [InlineData(true, -0.5, 40.725510204)]
+        [InlineData(true, -1.0, 40.725510204)]
+        [InlineData(true, -10.0, 407.25510204)]
+        public void FailureForceScalingByDepth(bool ocean, double altitude, double scaling)
+        {
+            var body = (CelestialBody)FormatterServices.GetUninitializedObject(typeof(CelestialBody));
+            body.ocean = ocean;
+            Assert.Equal(scaling, FARAeroUtil.GetFailureForceScaling(body, altitude), 6);
         }
     }
 }

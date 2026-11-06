@@ -349,5 +349,92 @@ namespace FerramAerospaceResearch.InGameTests
             // the one rudder's torque moves with the sideslip the hold leaves it in: x2.16 to x2.56 over runs at x2.21
             Assert.Near(qRatio, sumLow.z / sum.z, 0.3 * qRatio, "the yaw torque grows with the dynamic pressure");
         }
+
+        /// <summary>
+        /// Two of the wing modules' helpers FAR does not call, against the state FAR does use, in cruise with the
+        /// elevons deflected (Mach 0.4, 6 deg, their pitch due to angle of attack at 50%). A control surface's angle of attack at a deflection offset
+        /// (CalculateAoA(velocity, offset)) is, at the surface's own deflection, the angle FAR works its forces out from
+        /// (CalculateAoA(velocity), off the deflected normal), and at no offset the angle off the undeflected surface
+        /// (its part's forward axis). A wing part's velocity at a point (GetVelocity(point)) is, at the
+        /// part's centre of mass, the velocity FAR gives the part (GetVelocity()), and elsewhere on it that plus the
+        /// part's rotation about it (the rigid body turning, given a spin for the check).
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        public static IEnumerator Flight_SurfaceAoAAtAnOffsetAndPointVelocity(TestContext ctx)
+        {
+            yield return Wait.Seconds(5);
+            FarFlightProbe.Condition c = Far.At(0.4, 3000, 6);
+            yield return FlightTests.Airborne(c);
+            Vessel v = FlightGlobals.ActiveVessel;
+            List<FARControllableSurface> surfaces = v.parts.SelectMany(p => p.Modules.OfType<FARControllableSurface>()).ToList();
+            List<Tweakables> saved = surfaces.Select(s => new Tweakables(s)).ToList();
+            try
+            {
+                Ctrl.Attach();
+                Ctrl.Set(pitch: 0, yaw: 0, roll: 0);
+                // pitch due to angle of attack: the elevons deflect by about half the angle they meet the air at
+                foreach (FARControllableSurface s in HorizontalSurfaces(v).Where(s => s.pitchaxis > 0))
+                    s.pitchaxisDueToAoA = 50;
+                yield return FarFlightProbe.Place(c);
+                yield return FarFlightProbe.SettleSurfaces(c);
+                yield return new WaitForFixedUpdate();
+                ctx.Record("deflections", Deflections(surfaces));
+                Assert.True(surfaces.Any(s => Math.Abs(s.ControlDeflection) > 0.5), $"some surface deflected ({Deflections(surfaces)})");
+
+                ctx.Step("a control surface's angle of attack at an offset");
+                int compared = 0;
+                foreach (FARControllableSurface s in surfaces)
+                {
+                    Vector3d vel = s.GetVelocity();
+                    double live = s.CalculateAoA(vel), atOwn = s.CalculateAoA(vel, s.ControlDeflection), atZero = s.CalculateAoA(vel, 0);
+                    // undeflected, the surface's normal is its part's forward axis
+                    Vector3 normal = Refl.Get<Transform>(s, "part_transform").forward;
+                    double undeflected = Math.Asin(Math.Max(-1, Math.Min(1, Vector3d.Dot(normal, vel.normalized))));
+                    string name = s.part.partInfo.name;
+                    ctx.Record($"aoa_{compared}", $"{name} deflected {s.ControlDeflection:F3}: live {live * FARMathUtil.rad2deg:F4}, at it {atOwn * FARMathUtil.rad2deg:F4}, at 0 {atZero * FARMathUtil.rad2deg:F4}, undeflected {undeflected * FARMathUtil.rad2deg:F4} deg (ctrlSurfFrac {s.ctrlSurfFrac})");
+                    Assert.Near(live, atOwn, 1e-5, $"{name}: at its own deflection, the angle FAR's forces take");
+                    Assert.Near(undeflected, atZero, 1e-5, $"{name}: at no offset, the angle off the undeflected surface");
+                    if (Math.Abs(s.ControlDeflection) > 0.5)
+                        Assert.True(Math.Abs(atOwn - atZero) > 1e-4, $"{name}: its deflection changes the angle");
+                    compared++;
+                }
+                Assert.True(compared >= 3, $"control surfaces compared ({compared})");
+
+                ctx.Step("a wing part's velocity at a point");
+                var wings = v.parts.SelectMany(p => p.Modules.OfType<FARWingAerodynamicModel>()).Where(w => w.part.Rigidbody != null).ToList();
+                foreach (FARWingAerodynamicModel w in wings.Take(4))
+                {
+                    Rigidbody rb = w.part.Rigidbody;
+                    Vector3 com = rb.worldCenterOfMass, offset = w.part.partTransform.right * 2;
+                    Vector3 spin0 = rb.angularVelocity;
+                    Vector3d atCom, atPoint, whole;
+                    Vector3 spin = new Vector3(0.3f, -0.2f, 0.5f);
+                    try
+                    {
+                        rb.angularVelocity = spin;
+                        whole = w.GetVelocity();
+                        atCom = w.GetVelocity(com);
+                        atPoint = w.GetVelocity(com + offset);
+                        spin = rb.angularVelocity;   // as the rigid body keeps it (its maximum angular velocity)
+                    }
+                    finally
+                    {
+                        rb.angularVelocity = spin0;
+                    }
+
+                    string name = w.part.partInfo.name;
+                    Vector3d turning = atPoint - atCom, expected = Vector3.Cross(spin, offset);
+                    ctx.Record($"velocity_{name}", $"whole {whole}, at the CoM {atCom}, 2 m out {turning} (spin x r {expected})");
+                    Assert.Near(0, (atCom - whole).magnitude, 1e-3 * whole.magnitude + 1e-3, $"{name}: at its centre of mass, the part's velocity");
+                    Assert.Near(0, (turning - expected).magnitude, 1e-3 * expected.magnitude + 1e-4, $"{name}: 2 m out, its rotation added");
+                    Assert.True(expected.magnitude > 0.5, $"{name}: the spin moves that point ({expected.magnitude:F2} m/s)");
+                }
+            }
+            finally
+            {
+                foreach (Tweakables t in saved)
+                    t.Restore();
+            }
+        }
     }
 }

@@ -11,8 +11,9 @@ namespace FerramAerospaceResearch.InGameTests
         /// <summary>
         /// FARAPI's predictions on a stock plane in cruise: asked twice the same, the live vessel's prediction gives the
         /// same force and torque (from FAR's memo); asked at 100 km, above the atmosphere, nothing. A snapshot asked at
-        /// 100 km still answers, with nothing; once the plane's model changes (gear down, voxelized again) the snapshot
-        /// is no longer current and refuses to predict.
+        /// 100 km still answers, with nothing, and predicts off the main thread; with an atmosphere FAR cannot reproduce
+        /// exactly (LooseAtmosphere) only on it, with the same force. Once the plane's model changes (gear down,
+        /// voxelized again) the snapshot is no longer current and refuses to predict.
         /// </summary>
         [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Flight_PredictionsInVacuumRepeatedAndStale(TestContext ctx)
@@ -45,6 +46,10 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.True(FARAPI.CalculateSnapshotAeroForcesAt(snap, out Vector3 fLow, out _, vel, new Vector3d(v.latitude, v.longitude, alt), ut),
                             "the snapshot answers where the plane is");
                 Assert.True(fLow.magnitude > 1, $"with a force ({fLow.magnitude:F2} kN)");
+                Assert.True(snap.OffMainThread, "a stock atmosphere's snapshot predicts off the main thread");
+
+                ctx.Step("an atmosphere FAR cannot reproduce");
+                yield return LooseAtmosphere(ctx, v, vel, alt, fLow);
 
                 ctx.Step("the model changed");
                 Ctrl.Gear(true);
@@ -57,6 +62,51 @@ namespace FerramAerospaceResearch.InGameTests
             {
                 Ctrl.RetractGear();
             }
+        }
+
+        /// <summary>
+        /// A body whose atmosphere curves FAR cannot reproduce exactly off the main thread (a planet pack's, here Kerbin's
+        /// pressure curve given a looping wrap past its last key, which changes nothing in the atmosphere): its snapshots
+        /// keep no copy of the atmosphere and predict on the main thread only, FAR warns of it once a session however many
+        /// are taken, and the prediction is the one the exact snapshot made.
+        /// </summary>
+        private static IEnumerator LooseAtmosphere(TestContext ctx, Vessel v, Vector3 vel, double alt, Vector3 exactForce)
+        {
+            AnimationCurve curve = v.mainBody.atmospherePressureCurve.Curve;
+            WrapMode wrap = curve.postWrapMode;
+            object warned = Refl.GetStatic(typeof(FARAeroComponents.FARVesselAero), "loggedSnapshotAtmosphere");
+            var warnings = new List<string>();
+            void OnLog(string condition, string stackTrace, LogType type)
+            {
+                if (type == LogType.Warning && condition.Contains("could not be reproduced exactly"))
+                    warnings.Add(condition);
+            }
+
+            Application.logMessageReceived += OnLog;
+            try
+            {
+                Refl.SetStatic(typeof(FARAeroComponents.FARVesselAero), "loggedSnapshotAtmosphere", false);
+                curve.postWrapMode = WrapMode.Loop;
+                FARVesselSnapshot loose = FARAPI.CaptureVesselSnapshot(v);
+                FARVesselSnapshot again = FARAPI.CaptureVesselSnapshot(v);
+                ctx.Record("looseAtmosphere", string.Join(" | ", warnings));
+                Assert.True(loose != null && again != null, "snapshots taken");
+                Assert.True(loose.Atmosphere == null && again.Atmosphere == null, "no copy of the atmosphere kept");
+                Assert.False(loose.OffMainThread || again.OffMainThread, "predictions on the main thread only");
+                Assert.True(warnings.Count == 1 && warnings[0].Contains(v.mainBody.bodyName), $"one warning naming the body ({warnings.Count})");
+                Assert.True(FARAPI.CalculateSnapshotAeroForcesAt(loose, out Vector3 f, out _, vel, new Vector3d(v.latitude, v.longitude, alt), Planetarium.GetUniversalTime()),
+                            "the snapshot answers on the main thread");
+                ctx.Record("looseForce", $"{f} against {exactForce}");
+                Assert.Near(0, (f - exactForce).magnitude, 0.01 * exactForce.magnitude + 0.01, "with the exact snapshot's force");
+            }
+            finally
+            {
+                curve.postWrapMode = wrap;
+                Refl.SetStatic(typeof(FARAeroComponents.FARVesselAero), "loggedSnapshotAtmosphere", warned);
+                Application.logMessageReceived -= OnLog;
+            }
+
+            yield break;
         }
     }
 }

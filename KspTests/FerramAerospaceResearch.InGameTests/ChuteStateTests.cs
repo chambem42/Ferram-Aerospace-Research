@@ -299,5 +299,41 @@ namespace FerramAerospaceResearch.InGameTests
                        v.FindPartModulesImplementing<RealChuteFAR>().FirstOrDefault();
             Assert.NotNull(chute[0], "the reloaded capsule's chute");
         }
+
+        /// <summary>
+        /// RealChuteLite's timer (PhysicsWatch, what times a chute's deployment and failure) runs on the game's clock:
+        /// started new, it counts the game time that passes; stopped, it holds what it counted while the clock goes on,
+        /// and stopping it again changes nothing; started again it counts on from there. At the Space Center, where the
+        /// clock runs.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.SpaceCenter, TimeoutSec = 300)]
+        public static IEnumerator Behaviour_ChuteTimerRunsOnGameTime(TestContext ctx)
+        {
+            double ut0 = Planetarium.GetUniversalTime();
+            PhysicsWatch watch = PhysicsWatch.StartNew();
+            Assert.True(watch.IsRunning, "started new, it runs");
+            yield return Wait.Seconds(2);
+            double ran = Planetarium.GetUniversalTime() - ut0;
+            watch.Stop();
+            long held = watch.ElapsedMilliseconds;
+            ctx.Record("first", $"{ran:F3} s of game time, {held} ms counted");
+            Assert.True(ran > 0.5, $"game time passes at the Space Center ({ran:F3} s)");
+            Assert.Near(ran * 1000, held, 1, "it counted the game time that passed");
+            Assert.False(watch.IsRunning, "stopped");
+
+            yield return Wait.Seconds(1);
+            Assert.Equal(held, watch.ElapsedMilliseconds, "stopped, it holds what it counted");
+            watch.Stop();
+            Assert.Equal(held, watch.ElapsedMilliseconds, "stopped again, still");
+
+            double ut1 = Planetarium.GetUniversalTime();
+            watch.Start();
+            yield return Wait.Seconds(1);
+            double more = Planetarium.GetUniversalTime() - ut1;
+            long counted = watch.ElapsedMilliseconds;
+            ctx.Record("again", $"{more:F3} s more, {counted} ms counted");
+            Assert.True(watch.IsRunning, "started again, it runs");
+            Assert.Near(held + more * 1000, counted, 2, "it counted on from what it held");
+        }
     }
 }

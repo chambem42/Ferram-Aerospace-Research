@@ -737,6 +737,71 @@ namespace FerramAerospaceResearch.InGameTests
             }
         }
 
+        // ------------------------------------------------------------------------------------------ leaving the editor
+
+        /// <summary>
+        /// The graphs of FAR's editor window go with it. After an AoA sweep (the Static Analysis graph's lines drawn) and
+        /// with the simulation tab's graph made, leaving the editor destroys every texture the two graphs drew into:
+        /// each graph's own and its lines'. A wing module's velocity in the editor, at any point, is the one the
+        /// editor's analysis gave it (FARBaseAerodynamics.SetEditorVelocity).
+        /// </summary>
+        // Regression: before the fix, EditorGUI.OnDestroy dropped its StaticAnalysisGraphGUI and
+        // StabilityDerivSimulationGUI without disposing them, and ferramGraph.Dispose left the graph's own texture: they
+        // lived on after the editor (held here, as anything referencing them would).
+        [UITest(Kind = "Check", StartsAt = StartState.Sph, Craft = Far.Plane, TimeoutSec = 900)]
+        public static IEnumerator EditorGui_GraphTexturesGoWithTheEditor(TestContext ctx)
+        {
+            var textures = new List<(string, Texture2D)>();
+            try
+            {
+                ctx.Step("a wing's velocity in the editor");
+                ferram4.FARWingAerodynamicModel wing = EditorLogic.fetch.ship.parts.SelectMany(p => p.Modules.OfType<ferram4.FARWingAerodynamicModel>()).First();
+                Vector3d velocity0 = Get<Vector3d>(wing, "velocityEditor"), given = new Vector3d(12, -3, 40);
+                try
+                {
+                    wing.SetEditorVelocity(given);
+                    Assert.True(wing.GetVelocity() == given, "the velocity the analysis gave it");
+                    Assert.True(wing.GetVelocity(wing.part.partTransform.position + Vector3.up * 3) == given, "the same at any point on it");
+                }
+                finally
+                {
+                    wing.SetEditorVelocity(velocity0);
+                }
+
+                ctx.Step("an AoA sweep drawn");
+                yield return OpenWindow("FAREditorModeStatic");
+                object graphGui = Get(Far.Editor, "_editorGraph");
+                yield return StaticSetup(graphGui, Get(graphGui, "aoASweepInputs"), false);
+                yield return Imgui.SetTextAfterLabel(L("FAREditorStaticGraphLowLim"), "0", Window);
+                yield return Imgui.SetTextAfterLabel(L("FAREditorStaticGraphUpLim"), "10", Window);
+                yield return Imgui.SetTextAfterLabel(L("FAREditorStaticGraphPtCount"), "5", Window);
+                yield return Imgui.Click(L("FAREditorStaticSweepAoA"), Window);
+                foreach ((string name, object gui) in new[] { ("static", graphGui), ("simulation", Get(Far.Editor, "_stabDerivLinSim")) })
+                {
+                    object graph = Get(gui, "_graph");
+                    textures.Add(($"{name} graph", Get<Texture2D>(graph, "graph")));
+                    foreach (DictionaryEntry line in (IDictionary)Get(graph, "allLines"))
+                    {
+                        textures.Add(($"{name} line {line.Key}", Get<Texture2D>(line.Value, "lineDisplay")));
+                        textures.Add(($"{name} legend {line.Key}", Get<Texture2D>(line.Value, "lineLegend")));
+                    }
+                }
+            }
+            finally
+            {
+                CloseWindow();
+            }
+
+            ctx.Record("textures", string.Join(", ", textures.Select(t => $"{t.Item1} {(t.Item2 != null ? $"{t.Item2.width}x{t.Item2.height}" : "none")}")));
+            Assert.True(textures.Count(t => t.Item2 != null) >= 4, "the graphs' textures, and the sweep's lines'");
+
+            ctx.Step("the editor left");
+            yield return Nav.ToSpaceCenter(ctx);
+            yield return Wait.Frames(5);
+            List<string> left = textures.Where(t => t.Item2 != null).Select(t => t.Item1).ToList();
+            Assert.True(left.Count == 0, $"every graph texture destroyed with the editor (left: {string.Join(", ", left)})");
+        }
+
         // ------------------------------------------------------------------------------------------ helpers: window
 
         private static EditorSimManager SimManager => (EditorSimManager)Get(Far.Editor, "_simManager");

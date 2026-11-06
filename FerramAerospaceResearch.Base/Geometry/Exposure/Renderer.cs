@@ -418,8 +418,6 @@ public class Renderer<T> : IDisposable, IReadOnlyDictionary<T, int> where T : Ob
         return color;
     }
 
-    // coverage: overload nothing in FAR calls (FAR uses SetupRenderers)
-    [ExcludeFromCodeCoverage]
     public Color SetupRenderer(T obj, UnityEngine.Renderer renderer, MaterialPropertyBlock propertyBlock = null)
     {
         Color color = GetObjColor(obj);

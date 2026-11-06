@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using FerramAerospaceResearch.Geometry.Exposure;
 using Unity.Mathematics;
 using UnityEngine;
@@ -25,8 +24,6 @@ public class ExposureDebugger : Debugger
 
     public Color ArrowColor
     {
-        // coverage: getter nothing reads (the debug arrow color is only set)
-        [ExcludeFromCodeCoverage]
         get { return debugArrow.Color; }
         set { debugArrow.Color = value; }
     }

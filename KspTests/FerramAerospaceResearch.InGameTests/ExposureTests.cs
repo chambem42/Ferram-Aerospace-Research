@@ -772,6 +772,232 @@ namespace FerramAerospaceResearch.InGameTests
             yield return Wait.Frames(5);
         }
 
+        // ------------------------------------------------------------------ the renderer's API beyond what FAR calls
+
+        /// <summary>
+        /// The parts of the exposure renderer's API FAR does not call agree with the parts it does (CPU device). Set up
+        /// a renderer at a time (Renderer.SetupRenderer) the vessel indexes its parts and renders their areas as when
+        /// set up part by part (SetupRenderers, VehicleExposure.ResetParts). Each of the renderer's batches reports the
+        /// render size, device and pixel counting kernel the renderer gave it, and gives its job handles by index as
+        /// Apply goes through them, refusing an index past the last. The kernel given again to batches already set up
+        /// reaches their cached jobs (on the GPU device, where compute shaders are supported, their output buffers bound
+        /// to it again), and the areas counted after it are the same. The vessel's debug background colour reads back
+        /// and goes to its three debuggers' materials.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.Flight, Craft = Rocket, CraftDir = "VAB", TimeoutSec = 600)]
+        public static IEnumerator Pad_ExposureRendererApiAgreesWithFarsOwnPath(TestContext ctx)
+        {
+            yield return Exposure.OnPad(ctx);
+            using var x = new Exposure(ctx, FlightGlobals.ActiveVessel);
+            using var log = new ExceptionLog();
+            yield return x.KeepVoxel();
+            Vessel v = x.Vessel;
+            var renderer = (Geometry.Exposure.Renderer<Part>)Refl.Get(x.X, "exposureRenderer");
+            var indices = (IReadOnlyDictionary<Part, int>)renderer;
+            var sets = Refl.Get<List<HashSet<UnityEngine.Renderer>>>(renderer, "renderers");
+            var cached = (IDictionary)Refl.Get(x.X, "cachedRenderers");
+            x.X.ComputeDevice = Device.CPU;
+            Vector3 up = ((Vector3)((Vector3d)v.transform.position - v.mainBody.position)).normalized;
+            Vector3 side = Vector3.Cross(up, Vector3.up).normalized;
+            Vector3[] dirs = { -up, side };
+            Color background0 = x.X.DebugBackgroundColor;
+            try
+            {
+                ctx.Step("rendered as FAR sets the parts up");
+                x.X.ResetParts(v.parts);
+                Dictionary<Part, int> wholeIndices = v.parts.ToDictionary(p => p, p => indices[p]);
+                object[] whole = null;
+                yield return x.Render("the vessel set up part by part", dirs, r => whole = r);
+
+                ctx.Step("set up again a renderer at a time");
+                renderer.Reset();
+                int added = 0;
+                foreach (Part p in v.parts)
+                    foreach (UnityEngine.Renderer r in (IEnumerable<UnityEngine.Renderer>)cached[p])
+                    {
+                        Color c = renderer.SetupRenderer(p, r, p.mpb);
+                        Assert.True(c == renderer.ColorOf(p), $"{p.partInfo.name}'s renderer gets the part's colour");
+                        added++;
+                    }
+                ctx.Record("renderers", $"{added} renderers for {v.parts.Count} parts");
+                Assert.Equal(v.parts.Count, indices.Count, "every part indexed once");
+                Assert.True(v.parts.All(p => indices[p] == wholeIndices[p]), "each part at the index it had");
+                Assert.True(v.parts.All(p => sets[indices[p]].SetEquals((IEnumerable<UnityEngine.Renderer>)cached[p])),
+                            "each part's set holds its renderers, as set up part by part");
+                object[] single = null;
+                yield return x.Render("the vessel set up a renderer at a time", dirs, r => single = r);
+                for (int i = 0; i < dirs.Length; i++)
+                {
+                    ctx.Record($"view{i}", $"part by part: {x.Describe(whole[i])}; a renderer at a time: {x.Describe(single[i])}");
+                    Exposure.AssertSameAreas(Exposure.Snapshot(whole[i], v), Exposure.Snapshot(single[i], v),
+                                             Exposure.AreaPerPixel(whole[i]), Exposure.AreaPerPixel(single[i]), $"view {i}, a renderer at a time");
+                }
+
+                ctx.Step("the batches' settings and handles");
+                List<Geometry.Exposure.RenderBatch> batches = Batches(renderer);
+                ctx.Record("batches", batches.Count);
+                Assert.True(batches.Count > 0, "the renderer has batches after rendering");
+                PropertyInfo rendererSize = renderer.GetType().GetProperty("RenderSize"), batchSize = typeof(Geometry.Exposure.RenderBatch).GetProperty("RenderSize");
+                PropertyInfo rendererKernel = renderer.GetType().GetProperty("PixelCountKernel"), batchKernel = typeof(Geometry.Exposure.RenderBatch).GetProperty("PixelCountKernel");
+                object kernel = rendererKernel.GetValue(renderer);
+                foreach (Geometry.Exposure.RenderBatch b in batches)
+                {
+                    Assert.True(Equals(rendererSize.GetValue(renderer), batchSize.GetValue(b)), $"a batch's render size is the renderer's ({batchSize.GetValue(b)})");
+                    Assert.Equal(renderer.ActualDevice, b.Device, "a batch's device is the renderer's");
+                    Assert.True(Equals(kernel, batchKernel.GetValue(b)), "a batch's kernel is the renderer's");
+                    var handles = new List<Geometry.Exposure.Executor.Handle>();
+                    b.Apply(h => handles.Add(h));
+                    for (int i = 0; i < handles.Count; i++)
+                        Assert.True(handles[i].Equals(b.Handle(i)), $"handle {i} by index is the one Apply gives");
+                    bool refused = false;
+                    try { b.Handle(handles.Count); }
+                    catch (ArgumentOutOfRangeException) { refused = true; }
+                    Assert.True(refused, $"an index past the last ({handles.Count}) refused");
+                }
+
+                var devices = new List<Device> { Device.CPU };
+                if (SystemInfo.supportsComputeShaders)
+                    devices.Add(Device.GPU);
+                foreach (Device device in devices)
+                {
+                    ctx.Step($"the kernel given again to the batches set up ({device})");
+                    x.X.ComputeDevice = device;
+                    object[] beforeKernel = null, afterKernel = null;
+                    yield return x.Render($"the vessel rendered ({device})", dirs, r => beforeKernel = r);
+                    rendererKernel.SetValue(renderer, kernel);
+                    int jobs = 0;
+                    foreach (Geometry.Exposure.RenderBatch b in Batches(renderer))
+                        foreach (object job in (IEnumerable)Refl.Get(b, "jobCache"))
+                        {
+                            object resources = Refl.Get(job, "Resources");
+                            Assert.True(Equals(kernel, Refl.Get(resources, "mainKernel")), "a cached job's kernel is the one given");
+                            jobs++;
+                        }
+                    ctx.Record($"jobs{device}", jobs);
+                    Assert.True(jobs > 0, "cached jobs given the kernel");
+                    yield return x.Render($"the vessel rendered after the kernel given again ({device})", dirs, r => afterKernel = r);
+                    for (int i = 0; i < dirs.Length; i++)
+                        Exposure.AssertSameAreas(Exposure.Snapshot(beforeKernel[i], v), Exposure.Snapshot(afterKernel[i], v),
+                                                 Exposure.AreaPerPixel(beforeKernel[i]), Exposure.AreaPerPixel(afterKernel[i]),
+                                                 $"view {i} after the kernel given again ({device})");
+                }
+
+                ctx.Step("the debug background colour");
+                var colour = new Color(0.2f, 0.4f, 0.6f, 1);
+                x.X.DebugBackgroundColor = colour;
+                Assert.True(x.X.DebugBackgroundColor == colour, "the colour reads back");
+                foreach (string d in new[] { "airstream", "sun", "body" })
+                {
+                    var debugger = (Geometry.Exposure.Debugger)Refl.Get(Refl.Get(x.X, d + "Request"), "debugger");
+                    Assert.True(debugger.BackgroundColor == colour, $"the {d} debugger's background");
+                    Assert.True(debugger.Material.GetColor("_BackgroundColor") == colour, $"the {d} debugger's material's background");
+                }
+
+                log.AssertNone("the renderer's API");
+            }
+            finally
+            {
+                x.X.DebugBackgroundColor = background0;
+                x.X.ResetParts(v.parts);
+            }
+        }
+
+        /// <summary>The renderer's batches, active and pooled (Renderer.ForEachJob, as its settings reach them).</summary>
+        private static List<Geometry.Exposure.RenderBatch> Batches(Geometry.Exposure.Renderer<Part> renderer)
+        {
+            var batches = new List<Geometry.Exposure.RenderBatch>();
+            MethodInfo forEach = renderer.GetType().GetMethod("ForEachJob", BindingFlags.NonPublic | BindingFlags.Instance)
+                                         .MakeGenericMethod(typeof(object));
+            forEach.Invoke(renderer, new object[] { null, (Action<Geometry.Exposure.RenderBatch, object>)((b, _) => batches.Add(b)) });
+            return batches;
+        }
+
+        /// <summary>
+        /// The exposure's small pieces, outside flight. The device choice (PhysicalDeviceExtensions.Select) gives the CPU
+        /// and the GPU when asked for them, for PreferGPU the device its callback form picks (the GPU where compute
+        /// shaders are supported), and refuses None. RenderResources.SetupTexture makes a texture of the size asked for
+        /// (a render texture of the resources' own size; a point-filtered ARGB32 texture of the size given) and keeps it
+        /// until the size changes, when the one it replaces is released. A debugger's arrow colour reads back as set, and
+        /// the debugger disposed takes its arrow with it, GameObject and all.
+        /// </summary>
+        // Regression: before the fix, ExposureDebugger.Dispose destroyed the arrow's component (ArrowPointer), not its
+        // GameObject: every vessel exposure disposed left three empty "ArrowPointer" objects in the scene.
+        [UITest(Kind = "Check", StartsAt = StartState.MainMenu, TimeoutSec = 300)]
+        public static IEnumerator Exposure_DeviceChoiceTexturesAndDebugArrow(TestContext ctx)
+        {
+            using var log = new ExceptionLog();
+            ctx.Step("the device choice");
+            Assert.Equal(Resources.PhysicalDevice.CPU, Resources.PhysicalDeviceExtensions.Select(Device.CPU), "CPU asked for, CPU");
+            Assert.Equal(Resources.PhysicalDevice.GPU, Resources.PhysicalDeviceExtensions.Select(Device.GPU), "GPU asked for, GPU");
+            Resources.PhysicalDevice picked = Resources.PhysicalDevice.CPU, preferred = Resources.PhysicalDeviceExtensions.Select(Device.PreferGPU);
+            int calls = 0;
+            Resources.PhysicalDeviceExtensions.Select<int>(Device.PreferGPU, (d, _) => { picked = d; calls++; }, 0);
+            ctx.Record("preferGpu", $"{preferred}, compute shaders {SystemInfo.supportsComputeShaders}");
+            Assert.True(calls == 1 && preferred == picked, $"PreferGPU picks what the callback form picks ({preferred} against {picked})");
+            Assert.Equal(SystemInfo.supportsComputeShaders ? Resources.PhysicalDevice.GPU : Resources.PhysicalDevice.CPU, picked,
+                         "PreferGPU is the GPU where compute shaders are supported");
+            bool refused = false;
+            try { Resources.PhysicalDeviceExtensions.Select(Device.None); }
+            catch (ArgumentOutOfRangeException) { refused = true; }
+            Assert.True(refused, "None refused");
+
+            ctx.Step("textures set up");
+            var resources = new Geometry.Exposure.RenderResources();
+            RenderTexture target = null;
+            Texture2D host = null;
+            try
+            {
+                PropertyInfo texSize = typeof(Geometry.Exposure.RenderResources).GetProperty("ActualTexSize");
+                Type int2 = texSize.PropertyType;
+                object size64x32 = Activator.CreateInstance(int2, 64, 32), size16 = Activator.CreateInstance(int2, 16, 16);
+                texSize.SetValue(resources, size64x32);   // the resources' size, as a job sets it
+                resources.SetupTexture(ref target);
+                Assert.True(target != null && target.width == 64 && target.height == 32, $"a render texture of the resources' size ({target?.width} x {target?.height})");
+                RenderTexture first = target;
+                resources.SetupTexture(ref target);
+                Assert.True(ReferenceEquals(first, target), "the same size keeps it");
+
+                MethodInfo setup2D = typeof(Geometry.Exposure.RenderResources).GetMethods()
+                                                                               .First(m => m.Name == "SetupTexture" && m.GetParameters().Length == 2 &&
+                                                                                           m.GetParameters()[0].ParameterType.GetElementType() == typeof(Texture2D));
+                var args = new object[] { null, size64x32 };
+                setup2D.Invoke(null, args);
+                host = (Texture2D)args[0];
+                Assert.True(host != null && host.width == 64 && host.height == 32, $"a texture of the size given ({host?.width} x {host?.height})");
+                Assert.True(host.format == TextureFormat.ARGB32 && host.filterMode == FilterMode.Point, $"ARGB32, point filtered ({host.format}, {host.filterMode})");
+                Texture2D firstHost = host;
+                setup2D.Invoke(null, args);
+                Assert.True(ReferenceEquals(firstHost, args[0]), "the same size keeps it");
+                args[1] = size16;
+                setup2D.Invoke(null, args);
+                host = (Texture2D)args[0];
+                Assert.True(!ReferenceEquals(firstHost, host) && host.width == 16 && host.height == 16, "a new size, a new texture");
+                yield return null;   // Object.Destroy takes effect at the end of the frame
+                Assert.True(firstHost == null, "the texture it replaced destroyed");
+            }
+            finally
+            {
+                resources.Dispose();
+                if (target != null)
+                    target.Release();
+                if (host != null)
+                    UnityEngine.Object.Destroy(host);
+            }
+
+            ctx.Step("a debugger's arrow");
+            var debugger = new FARGUI.ExposureDebugger();
+            var arrow = (ArrowPointer)Refl.Get(debugger, "debugArrow");
+            GameObject arrowObject = arrow.gameObject;
+            debugger.ArrowColor = Color.green;
+            Assert.True(debugger.ArrowColor == Color.green, $"the arrow's colour reads back ({debugger.ArrowColor})");
+            Assert.True(arrow.Color == Color.green, "and is the arrow's");
+            debugger.Dispose();
+            yield return null;
+            Assert.True(arrow == null, "the arrow destroyed with its debugger");
+            Assert.True(arrowObject == null, "and its GameObject");
+            log.AssertNone("the exposure's small pieces");
+        }
+
         // ------------------------------------------------------------------ access
 
         /// <summary>The active vessel's VehicleExposure, its renderer and results, and the settings a test changes.</summary>

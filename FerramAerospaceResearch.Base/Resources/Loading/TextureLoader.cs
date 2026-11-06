@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using UnityEngine;
 using UnityEngine.Networking;
 
@@ -11,8 +10,6 @@ namespace FerramAerospaceResearch.Resources.Loading
         // cache loaded textures
         private readonly Dictionary<string, Texture2D> loadedTextures = new Dictionary<string, Texture2D>();
 
-        // coverage: the "default" texture loader; FAR's shipped config loads every texture through the GameDatabase loader
-        [ExcludeFromCodeCoverage]
         public IEnumerator Load(IAssetRequest<Texture2D> assetRequest)
         {
             assetRequest.State = Progress.InProgress;

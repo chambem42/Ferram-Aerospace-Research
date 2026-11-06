@@ -21,8 +21,6 @@ public static class PhysicalDeviceExtensions
         supportsComputeShaders = SystemInfo.supportsComputeShaders;
     }
 
-    // coverage: overload nothing in FAR calls
-    [ExcludeFromCodeCoverage]
     public static PhysicalDevice Select(this Device device)
     {
         switch (device)

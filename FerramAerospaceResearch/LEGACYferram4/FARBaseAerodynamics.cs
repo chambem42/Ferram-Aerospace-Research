@@ -130,8 +130,6 @@ namespace ferram4
         }
 
         // ReSharper disable once UnusedMember.Global
-        // coverage: overload FAR does not call
-        [ExcludeFromCodeCoverage]
         public Vector3d GetVelocity(Vector3 refPoint)
         {
             Vector3d velocity = Vector3.zero;

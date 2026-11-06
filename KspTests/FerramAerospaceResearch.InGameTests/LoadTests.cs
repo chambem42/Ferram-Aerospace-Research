@@ -261,5 +261,185 @@ namespace FerramAerospaceResearch.InGameTests
                 configFile.Restore();
             }
         }
+
+        /// <summary>
+        /// Each of FAR's shader assets converts to its shader and to the material made of it, directly and through its
+        /// shader-material pair, as the material FAR's renderers take from it does.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.MainMenu, TimeoutSec = 300)]
+        public static IEnumerator Load_ShaderAssetsGiveTheirShaderAndMaterial(TestContext ctx)
+        {
+            Resources.FARShaderCache shaders = Resources.FARAssets.Instance.Shaders;
+            var assets = new (string, Resources.FARShaderCache.ShaderAssetRequest)[]
+            {
+                ("line renderer", shaders.LineRenderer), ("debug voxel", shaders.DebugVoxel),
+                ("debug voxel fallback", shaders.DebugVoxelFallback), ("exposed surface", shaders.ExposedSurface),
+                ("exposed surface debug", shaders.ExposedSurfaceDebug), ("exposed surface camera", shaders.ExposedSurfaceCamera),
+            };
+            foreach ((string name, Resources.FARShaderCache.ShaderAssetRequest asset) in assets)
+            {
+                Shader shader = asset;
+                Material material = asset;
+                Resources.FARShaderCache.ShaderMaterialPair pair = asset;
+                ctx.Record(name, $"{asset.Asset?.name}, material {material?.name}");
+                Assert.True(asset.Asset != null && shader == asset.Asset, $"the {name} asset converts to its shader");
+                Assert.True(material != null && material == asset.Material && material.shader == shader, $"the {name} asset converts to the material of its shader");
+                Assert.True(pair != null && pair.Shader == shader && (Shader)pair == shader, $"the {name} asset's pair holds its shader");
+                Assert.True((Material)pair == material && pair.Material == material, $"the {name} asset's pair holds its material");
+            }
+
+            yield break;
+        }
+
+        /// <summary>
+        /// The default loaders, which FAR's shipped config does not use (it loads textures through the GameDatabase and
+        /// shaders from its bundle). A texture asset switched to the default loader (a file read from GameData) cannot
+        /// load its GameDatabase url, which has no extension: the error is raised and the texture it had kept. Given the
+        /// file's name, it loads the same image (its size); asked for it again, the loader gives the texture it loaded
+        /// before. The pixel counting compute shader switched to the default loader (Resources.Load) is not found, the
+        /// error raised and the shader and its kernel kept. Switched back, both load as shipped; nothing throws.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.MainMenu, TimeoutSec = 300)]
+        public static IEnumerator Load_DefaultLoadersForTexturesAndComputeShaders(TestContext ctx)
+        {
+            var configFile = new FarConfigFile();
+            Config.ResourceNode texNode = FARConfig.Textures.IconButtonStock;
+            Resources.LoadableAsset<Texture2D> tex = Resources.FARAssets.Instance.Textures.IconLarge;
+            Config.ComputeShaderNode csNode = FARConfig.Shaders.CountColors;
+            Resources.FARComputeShaderCache.ComputeShaderAssetRequest cs = Resources.FARAssets.Instance.ComputeShaders.CountPixels;
+            string texUrl = texNode.Url.Value, texLoader = texNode.Loader.Value, csLoader = csNode.Loader.Value;
+            Texture2D shipped = tex.Asset;
+            ComputeShader shippedCs = cs.Asset;
+            string kernel = cs.Kernel.name;
+            int kernelIndex = cs.Kernel.index;
+            Assert.True(shipped != null && shippedCs != null, $"the stock button's texture and the pixel counting shader as shipped ({texLoader}, {csLoader})");
+
+            var errors = new List<string>();
+            void OnTexError(string key, Resources.Loading.AssetRequest<Texture2D> request) => errors.Add($"{key} {request.Url}");
+            void OnCsError(string key, Resources.Loading.AssetRequest<ComputeShader> request) => errors.Add($"{key} {request.Url}");
+            var logged = new List<string>();
+            void OnLog(string condition, string stackTrace, LogType type)
+            {
+                if (type == LogType.Exception)
+                    logged.Add($"{type}: {condition}");
+            }
+
+            tex.OnAssetLoadError += OnTexError;
+            cs.OnAssetLoadError += OnCsError;
+            Application.logMessageReceived += OnLog;
+            try
+            {
+                ctx.Step("a texture through the default loader, its GameDatabase url");
+                texNode.Loader.Value = "default";
+                yield return Wait.Until(() => tex.State == Resources.Loading.Progress.Error, 15, "the texture's load to fail", shot: false);
+                ctx.Record("noExtension", $"{tex.Loader.Name}: {tex.State}; errors {string.Join(", ", errors)}");
+                Assert.Equal("default", tex.Loader.Name, "the default loader");
+                Assert.True(errors.Count == 1 && errors[0] == $"stock_button {texUrl}", $"the error raised for the url ({string.Join(", ", errors)})");
+                Assert.True(tex.Asset == shipped, "the texture it had kept");
+
+                ctx.Step("the file's name");
+                string file = texUrl + ".png";
+                texNode.Url.Value = file;
+                yield return Wait.Until(() => tex.State == Resources.Loading.Progress.Completed && tex.Asset != shipped, 15, "the texture read from its file", shot: false);
+                Texture2D read = tex.Asset;
+                ctx.Record("file", $"{read.width} x {read.height} {read.format}, shipped {shipped.width} x {shipped.height} {shipped.format}");
+                Assert.True(read.width == shipped.width && read.height == shipped.height, "the same image as the GameDatabase's");
+
+                ctx.Step("the same file again");
+                texNode.Url.Value = texUrl;
+                yield return Wait.Until(() => tex.State == Resources.Loading.Progress.Error, 15, "the url without extension failing again", shot: false);
+                texNode.Url.Value = file;
+                yield return Wait.Until(() => tex.State == Resources.Loading.Progress.Completed, 15, "the file's texture", shot: false);
+                Assert.True(tex.Asset == read, "the texture the loader read before");
+
+                ctx.Step("the compute shader through the default loader");
+                errors.Clear();
+                csNode.Loader.Value = "default";
+                yield return Wait.Until(() => cs.State == Resources.Loading.Progress.Error, 15, "the compute shader's load to fail", shot: false);
+                ctx.Record("computeShader", $"{cs.Loader.Name}: {cs.State}; errors {string.Join(", ", errors)}");
+                Assert.True(errors.Count == 1 && errors[0].StartsWith("countPixels "), $"the error raised ({string.Join(", ", errors)})");
+                Assert.True(cs.Asset == shippedCs && cs.Kernel.name == kernel && cs.Kernel.index == kernelIndex, "the shader and its kernel kept");
+            }
+            finally
+            {
+                tex.OnAssetLoadError -= OnTexError;
+                cs.OnAssetLoadError -= OnCsError;
+                texNode.Url.Value = texUrl;
+                texNode.Loader.Value = texLoader;
+                csNode.Loader.Value = csLoader;
+            }
+
+            ctx.Step("both switched back");
+            yield return Wait.Until(() => tex.State == Resources.Loading.Progress.Completed && cs.State == Resources.Loading.Progress.Completed, 15,
+                                    "the texture and the compute shader loaded as shipped", shot: false);
+            Application.logMessageReceived -= OnLog;
+            configFile.Restore();
+            Assert.True(tex.Asset == shipped && cs.Asset == shippedCs, "the shipped texture and compute shader back");
+            Assert.True(logged.Count == 0, $"nothing thrown ({string.Join(" | ", logged)})");
+        }
+
+        /// <summary>
+        /// The shader bundle's path changed while the game runs (FAR's config reloaded by ModuleManager's database
+        /// reload, with a new bundle path): both bundle loaders, shaders and compute shaders, load the new bundle. A path
+        /// to no bundle is reported and leaves both with the assets they had; the path put back, they load the bundle
+        /// again (from the bundles already open) with the same assets.
+        /// </summary>
+        [UITest(Kind = "Check", StartsAt = StartState.MainMenu, TimeoutSec = 300)]
+        public static IEnumerator Load_ShaderBundlePathChangedAtRuntime(TestContext ctx)
+        {
+            var configFile = new FarConfigFile();
+            Resources.Loading.ShaderBundleLoader shaders = Resources.FARAssets.Instance.ShaderLoader;
+            Resources.Loading.ComputeShaderBundleLoader compute = Resources.FARAssets.Instance.ComputeShaderLoader;
+            Observable<string> path = new[] { FARConfig.Shaders.BundleWindows, FARConfig.Shaders.BundleLinux, FARConfig.Shaders.BundleMac }
+                .FirstOrDefault(o => o.Value == shaders.Url);
+            Assert.NotNull(path, $"the config's bundle path the loaders use ({shaders.Url})");
+            string url = path.Value;
+            string[] shaderNames = shaders.LoadedAssets.Keys.OrderBy(k => k).ToArray(), computeNames = compute.LoadedAssets.Keys.OrderBy(k => k).ToArray();
+            ctx.Record("bundle", $"{url}: {shaderNames.Length} shaders, {computeNames.Length} compute shaders");
+            Assert.True(shaderNames.Length > 0 && computeNames.Length > 0, "the bundle's shaders and compute shaders loaded");
+
+            var logged = new List<string>();
+            void OnLog(string condition, string stackTrace, LogType type)
+            {
+                if (condition.Contains("bundle"))
+                    logged.Add($"{type}: {condition}");
+            }
+
+            Application.logMessageReceived += OnLog;
+            try
+            {
+                ctx.Step("a path to no bundle");
+                path.Value = "FerramAerospaceResearch/Assets/no_such_bundle.far";   // relative to GameData, as in the config
+                string bad = path.Value;
+                ctx.Record("badPath", bad);
+                Assert.True(System.IO.Path.IsPathRooted(bad) && bad.EndsWith("no_such_bundle.far"), $"the config's path made absolute ({bad})");
+                Assert.True(shaders.Url == bad && compute.Url == bad, $"both loaders given the new path ({shaders.Url}, {compute.Url})");
+                yield return Wait.Until(() => shaders.State == Resources.Loading.Progress.Error && compute.State == Resources.Loading.Progress.Error, 15,
+                                        "both loaders to fail", shot: false);
+                ctx.Record("bad", string.Join(" | ", logged));
+                Assert.True(logged.Any(l => l.Contains("Loading shaders bundle")) && logged.Any(l => l.Contains("Loading compute shaders bundle")),
+                            "each loader's reload logged");
+                Assert.True(logged.Any(l => l.StartsWith("Error") && l.Contains("Could not load asset bundle from " + bad)), "the missing bundle reported");
+                Assert.True(shaders.LoadedAssets.Keys.OrderBy(k => k).SequenceEqual(shaderNames) &&
+                            compute.LoadedAssets.Keys.OrderBy(k => k).SequenceEqual(computeNames), "the assets they had kept");
+
+                ctx.Step("the path put back");
+                logged.Clear();
+                path.Value = url;
+                yield return Wait.Until(() => shaders.State == Resources.Loading.Progress.Completed && compute.State == Resources.Loading.Progress.Completed, 15,
+                                        "both loaders to load the bundle again", shot: false);
+                ctx.Record("back", string.Join(" | ", logged));
+                Assert.True(shaders.LoadedAssets.Keys.OrderBy(k => k).SequenceEqual(shaderNames) &&
+                            compute.LoadedAssets.Keys.OrderBy(k => k).SequenceEqual(computeNames), "the same assets");
+                Assert.False(logged.Any(l => l.StartsWith("Error") || l.StartsWith("Exception")), "no error");
+            }
+            finally
+            {
+                Application.logMessageReceived -= OnLog;
+                if (path.Value != url)
+                    path.Value = url;
+                configFile.Restore();
+            }
+        }
     }
 }
