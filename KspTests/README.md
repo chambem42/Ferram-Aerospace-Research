@@ -6,9 +6,9 @@ depend on any of this.
 
 | Project | What |
 |---|---|
-| `FerramAerospaceResearch.KspTests` | the in-game tests on stock KSP and FAR (a few fly on AtmosphereAutopilot, a few use B9 procedural wings) |
+| `FerramAerospaceResearch.KspTests` | the in-game tests on stock KSP and FAR, with the small mods FAR talks to (procedural parts and wings, AtmosphereAutopilot) |
 | `FerramAerospaceResearch.KspTests.MechJeb` | in-game tests that fly on MechJeb; only deployed where MechJeb is installed |
-| `FerramAerospaceResearch.KspTests.RP1` | reentries in an RP-1 career; only deployed where RP-1 is installed |
+| `FerramAerospaceResearch.KspTests.RP1` | heating in an RP-1 career; only deployed where RP-1 is installed |
 | `FerramAerospaceResearch.KspTests.Run` | the `dotnet test` project: one test per in-game test |
 
 ## Running
@@ -19,7 +19,9 @@ as a git submodule (`KspTests/KspTest`): clone with `--recursive`, or run `git s
 ```
 cd KspTests
 set KSPDIR=C:\path\to\Kerbal Space Program        (the build and the runs both use it)
+dotnet test FarKspTests.slnx
 dotnet test FarKspTests.slnx --filter Kind=Check
+set KSPTEST_EXPLICIT=Far_ArCruise
 dotnet test FarKspTests.slnx --filter Far_ArCruise
 ```
 
@@ -28,6 +30,10 @@ Each test deploys the harness and the test assemblies into `GameData/KspTest`, s
 runs at a time; a test waits for a KSP that is already running. The results (result.json, CSVs, screenshots, KSP.log)
 land in `FerramAerospaceResearch.KspTests.Run/bin/<config>/net8.0/results/<time>-<test>/`; each test's output names
 its folder.
+
+Explicit tests (`[UITest(Explicit = true)]`) are skipped unless `KSPTEST_EXPLICIT` names them (`;`-separated method
+names, or `1` for all): the long thermal flights, the tests flown on AtmosphereAutopilot or MechJeb, the RP-1 ones and
+the older `Far_*` tests still to be ported. The examples here that name one set it too.
 
 `Kind=Check` tests assert what they measure. `Kind=Measure` tests record numbers and pictures for comparing FAR builds
 (run them on one build, then the other, and compare the results folders) and fail only when the flight itself does.
@@ -43,6 +49,7 @@ Copy `FerramAerospaceResearch.KspTests.Run/ksptest.example.json` to `ksptest.jso
 ```
 set KSPTEST_CRAFTS=C:\my crafts
 set KSPTEST_PARAMS=crafts=My Plane+My Other Plane
+set KSPTEST_EXPLICIT=Far_ArCruise
 dotnet test FarKspTests.slnx --filter Far_ArCruise
 ```
 

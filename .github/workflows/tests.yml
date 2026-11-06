@@ -220,7 +220,7 @@ jobs:
           echo "DISPLAY=:99" >> "$GITHUB_ENV"
       - name: In-game tests
         run: |
-          args=(test KspTests/FerramAerospaceResearch.InGameTests.Run -p:KspDir="$KSPTEST_GAME"
+          args=(test KspTests/FerramAerospaceResearch.KspTests.Run -p:KspDir="$KSPTEST_GAME"
                 --logger "console;verbosity=normal" --logger "trx;LogFileName=ingame.trx" --results-directory "$WORK/trx")
           [ -n "$TEST_FILTER" ] && args+=(--filter "$TEST_FILTER")
           dotnet "${args[@]}"
@@ -342,7 +342,7 @@ jobs:
           # same instance writes over them)
           KSPTEST_COLLECT: GameData/FerramAerospaceResearch/Plugins/coverage.xml
         run: |
-          args=(test KspTests/FerramAerospaceResearch.InGameTests.Run -p:KspDir="$KSPTEST_GAME" --logger "console;verbosity=normal")
+          args=(test KspTests/FerramAerospaceResearch.KspTests.Run -p:KspDir="$KSPTEST_GAME" --logger "console;verbosity=normal")
           [ -n "$TEST_FILTER" ] && args+=(--filter "$TEST_FILTER")
           # timing-sensitive tests can fail under the instrumentation's slowdown; their counts still go in
           dotnet "${args[@]}" || echo "::warning::in-game tests failed under coverage"

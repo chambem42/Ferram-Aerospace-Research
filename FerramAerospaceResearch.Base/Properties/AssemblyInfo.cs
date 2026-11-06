@@ -36,4 +36,4 @@ using System.Runtime.InteropServices;
 
 // the test suite (KspTests/): unit tests outside the game, in-game tests in it
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("FerramAerospaceResearch.UnitTests")]
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("FerramAerospaceResearch.InGameTests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("FerramAerospaceResearch.KspTests")]
