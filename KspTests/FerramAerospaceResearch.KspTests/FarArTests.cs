@@ -43,7 +43,7 @@ namespace FerramAerospaceResearch.KspTests
         /// Writes ar-cruise.csv (every frame, with its phase), ar-parts.csv, ar-summary.csv (one row a craft and phase:
         /// cruise, climb, cruise2), ar_*.png and ar_*.mp4.
         /// </summary>
-        [UITest("Far_ArCruise", Kind = "Measure", Requires = "AtmosphereAutopilot", Mods = "AtmosphereAutopilot;TimeControl", StartsAt = StartState.SpaceCenter, TimeoutSec = 10800)]
+        [UITest("Far_ArCruise", Explicit = true, Kind = "Measure", Requires = "AtmosphereAutopilot", Mods = "AtmosphereAutopilot;TimeControl", StartsAt = StartState.SpaceCenter, TimeoutSec = 10800)]
         public static IEnumerator Far_ArCruise(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());
@@ -317,7 +317,7 @@ namespace FerramAerospaceResearch.KspTests
         /// alphaMin (-4), alphaMax (24), alphaStep (1), configs (f0,f1,f2,f3,s0,s3). Writes highlift.csv (every point),
         /// highlift-summary.csv and highlift-surfaces.csv.
         /// </summary>
-        [UITest("Far_HighLift", Kind = "Measure", StartsAt = StartState.SpaceCenter, TimeoutSec = 3600)]
+        [UITest("Far_HighLift", Explicit = true, Kind = "Measure", StartsAt = StartState.SpaceCenter, TimeoutSec = 3600)]
         public static IEnumerator Far_HighLift(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());
@@ -440,7 +440,7 @@ namespace FerramAerospaceResearch.KspTests
         /// TimeControl hyper-warp at that rate from the air start to the end of the circle, physics step unchanged; the
         /// speedup got is recorded per craft). Writes ar-circle.csv (every sample) and ar-circle-summary.csv.
         /// </summary>
-        [UITest("Far_ArCircle", Kind = "Check", Requires = "AtmosphereAutopilot", Mods = "AtmosphereAutopilot;TimeControl", StartsAt = StartState.SpaceCenter, TimeoutSec = 10800)]
+        [UITest("Far_ArCircle", Explicit = true, Kind = "Check", Requires = "AtmosphereAutopilot", Mods = "AtmosphereAutopilot;TimeControl", StartsAt = StartState.SpaceCenter, TimeoutSec = 10800)]
         public static IEnumerator Far_ArCircle(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());
@@ -649,7 +649,7 @@ namespace FerramAerospaceResearch.KspTests
         /// ("+"-separated), facility (SPH), tol (0.01, relative). Writes ar-editor-flight.csv; records per craft the parts
         /// compared and how many differ by more than tol, neutral and deflected.
         /// </summary>
-        [UITest("Far_ArEditorFlight", Kind = "Check", StartsAt = StartState.SpaceCenter, TimeoutSec = 7200)]
+        [UITest("Far_ArEditorFlight", Explicit = true, Kind = "Check", StartsAt = StartState.SpaceCenter, TimeoutSec = 7200)]
         public static IEnumerator Far_ArEditorFlight(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());

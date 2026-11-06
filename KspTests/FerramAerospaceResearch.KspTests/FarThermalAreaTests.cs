@@ -20,7 +20,7 @@ namespace FerramAerospaceResearch.KspTests
         /// skinThermalMass. Records how many parts take their radiative area from each model and the sums; writes
         /// thermal_areas.csv. Params: orbitKm (200).
         /// </summary>
-        [UITest("Far_ThermalAreas", Kind = "Measure", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest("Far_ThermalAreas", Explicit = true, Kind = "Measure", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Far_ThermalAreas(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());

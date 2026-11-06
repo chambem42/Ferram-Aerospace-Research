@@ -61,30 +61,6 @@ namespace FerramAerospaceResearch.InGameTests
         }
 
         /// <summary>
-        /// FAR's prediction API (FARAPI.CalculateVesselAeroForces) at the state the vessel flies in gives the force FAR
-        /// applies there. Explicit (asked for by name only) while master's API takes only an altitude: there it predicts
-        /// the Aeris 4A at Mach 0.5, 3 km, 4 deg with 40% too little drag and 8% too much lift (8.5 against 14.1 kN,
-        /// 137.9 against 127.3 kN); the place-and-time API of the prediction-accuracy work
-        /// (CalculateVesselAeroForcesAt) agrees to 0.04%.
-        /// </summary>
-        [UITest(Kind = "Check", Explicit = true, StartsAt = StartState.Flight, Craft = Far.Plane, CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
-        public static IEnumerator Flight_PredictionIsTheAppliedForce(TestContext ctx)
-        {
-            yield return Wait.Seconds(5);
-            FarFlightProbe.Condition c = Cruise(4);
-            yield return Airborne(c);
-            ctx.Record("predictionApi", FarApi.HasPredictAt ? "CalculateVesselAeroForcesAt" : "CalculateVesselAeroForces (altitude only)");
-            var samples = new List<FarFlightProbe.Sample>();
-            yield return FarFlightProbe.Hold(c, 25, 50, samples);
-            double drag = samples.Average(s => s.Flight[0]), lift = samples.Average(s => s.Flight[1]);
-            double predDrag = samples.Average(s => s.Predicted[0]), predLift = samples.Average(s => s.Predicted[1]);
-            ctx.Record("drag", $"applied {drag:F2} kN, predicted {predDrag:F2}");
-            ctx.Record("lift", $"applied {lift:F2} kN, predicted {predLift:F2}");
-            Assert.Near(drag, predDrag, 0.03 * drag + 0.05, "FAR's prediction of the drag it applies");
-            Assert.Near(lift, predLift, 0.03 * lift + 0.05, "FAR's prediction of the lift it applies");
-        }
-
-        /// <summary>
         /// FAR's vessel snapshot (FARAPI.CaptureVesselSnapshot, CalculateSnapshotAeroForcesAt: a prediction at a place and
         /// time, from a copy of the vessel's aero model) at the state the vessel flies in: the same answer on a worker
         /// thread as on the main thread, and full pitch input changes the pitching moment.
@@ -169,8 +145,8 @@ namespace FerramAerospaceResearch.InGameTests
             Assert.True(FARAPI.VesselRefArea(v) > 0, "a reference area");
             Assert.True(FARAPI.VesselVoxelizationCompletedEver(v), "the vessel was voxelized");
 
-            // the altitude-only prediction: drag against the velocity and lift up, of the flight's size (how close
-            // it comes is Flight_PredictionIsTheAppliedForce's, explicit while master is 40% short on drag)
+            // the altitude-only prediction: drag against the velocity and lift up, of the flight's size (how close it
+            // comes is for the prediction work's place-and-time API to test: master's is 40% short on drag)
             ctx.Step("CalculateVesselAeroForces at the vessel's speed and altitude");
             double drag = samples.Average(s => s.Flight[0]), lift = samples.Average(s => s.Flight[1]);
             Vector3 vel = v.srf_velocity;

@@ -18,7 +18,7 @@ namespace FerramAerospaceResearch.KspTests.RP1
         /// temperature; the trajectory is recorded to check the modes flew alike. Params: peKm (30), apKm (250),
         /// entryAltKm (110), incDeg (28.6), aoa (180 = heat shield first), endAltKm (20), modes (Master+Pr156+Hybrid), hyper (10).
         /// </summary>
-        [UITest("Far_ThermalEntry_RP1", Kind = "Measure", NewGame = "career", Requires = "RP-1", StartsAt = StartState.Vab, Craft = "Mk1-3 Test", TimeoutSec = 7200)]
+        [UITest("Far_ThermalEntry_RP1", Explicit = true, Kind = "Measure", NewGame = "career", Requires = "RP-1", StartsAt = StartState.Vab, Craft = "Mk1-3 Test", TimeoutSec = 7200)]
         public static IEnumerator Far_ThermalEntry_RP1(TestContext ctx)
         {
             Ugui.DismissPopups();
@@ -79,7 +79,7 @@ namespace FerramAerospaceResearch.KspTests.RP1
         /// AreaOccluded master hands KSP from FAR's voxels, both on the face toward the flow (YN at 0). Params: craft
         /// (Mk1-3 Test), aoas (0,10,20), grid (400).
         /// </summary>
-        [UITest("Far_FlowFacingArea_RP1", Kind = "Measure", Requires = "RP-1", StartsAt = StartState.Flight, Craft = "Mk1-3 Test", TimeoutSec = 900)]
+        [UITest("Far_FlowFacingArea_RP1", Explicit = true, Kind = "Measure", Requires = "RP-1", StartsAt = StartState.Flight, Craft = "Mk1-3 Test", TimeoutSec = 900)]
         public static IEnumerator Far_FlowFacingArea_RP1(TestContext ctx)
         {
             yield return FarThermalModeTests.WaitVoxels();

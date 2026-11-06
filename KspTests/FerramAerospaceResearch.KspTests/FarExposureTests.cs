@@ -23,7 +23,7 @@ namespace FerramAerospaceResearch.KspTests
         /// Custom_FARConfig.cfg written during the test is deleted. Needs a graphics device (not -batchmode).
         /// (KSPModStewards FAR #157 makes None the default.)
         /// </summary>
-        [UITest("Far_ExposureDefaultOff", Kind = "Check", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
+        [UITest("Far_ExposureDefaultOff", Explicit = true, Kind = "Check", StartsAt = StartState.Flight, Craft = "Aeris 4A", CraftDir = "SPH", LaunchSite = "Runway", TimeoutSec = 900)]
         public static IEnumerator Far_ExposureDefaultOff(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());

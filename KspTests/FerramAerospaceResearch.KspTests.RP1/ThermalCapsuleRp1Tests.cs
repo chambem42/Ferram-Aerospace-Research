@@ -99,7 +99,7 @@ namespace FerramAerospaceResearch.KspTests.RP1
         /// Params: capsules (Mercury+Gemini+Apollo), craft (absolute path of a craft to fly instead, as "User"), combos (Pr156Occl+Pr156Stock+VoxelOccl+VoxelStock; AsIsOccl/AsIsStock leave FAR alone, for a FAR without the option; only the *Stock ones run with a KSPCF before #436), peKm (30), pes ("+"-separated perigees instead), apKm (250; the sim starts in a 250 km circular orbit), lanDeg (0), argPeDeg (0), orients ("lan:argPe+..." instead of those two),
         /// entryAltKm (110), incDeg (28.6), aoa (180 = heat shield first), aoas ("+"-separated instead), hold (steer: set angular velocity; torque: rigidbody forces; part: Part.AddForce/AddTorque, for Principia; torque and part add an integral trim), holdWn (15), place (teleport|sim), editorOnly, shots, endAltKm (20), hyper (10).
         /// </summary>
-        [UITest("Far_ThermalCapsules_RP1", Kind = "Measure", NewGame = "career", Requires = "RP-1", StartsAt = StartState.SpaceCenter, TimeoutSec = 10800)]
+        [UITest("Far_ThermalCapsules_RP1", Explicit = true, Kind = "Measure", NewGame = "career", Requires = "RP-1", StartsAt = StartState.SpaceCenter, TimeoutSec = 10800)]
         public static IEnumerator Far_ThermalCapsules_RP1(TestContext ctx)
         {
             Ugui.DismissPopups();
@@ -268,7 +268,7 @@ namespace FerramAerospaceResearch.KspTests.RP1
         /// ("+"-separated; "free" = no attitude hold), repeats (2), sepAltKm (150), endAltKm (20), hyper (10), hold (part),
         /// holdWn (15), trimKi (2).
         /// </summary>
-        [UITest("Far_UserSaveEntry_RP1", Kind = "Measure", Save = "user-gemini", Requires = "RP-1", StartsAt = StartState.SpaceCenter, TimeoutSec = 14400)]
+        [UITest("Far_UserSaveEntry_RP1", Explicit = true, Kind = "Measure", Save = "user-gemini", Requires = "RP-1", StartsAt = StartState.SpaceCenter, TimeoutSec = 14400)]
         public static IEnumerator Far_UserSaveEntry_RP1(TestContext ctx)
         {
             Ugui.DismissPopups();

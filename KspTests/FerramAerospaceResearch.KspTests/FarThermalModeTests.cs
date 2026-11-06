@@ -54,7 +54,7 @@ namespace FerramAerospaceResearch.KspTests
         /// A cube, sphere and one-sided quad check the tracer first. Params: crafts ("+"-separated Name@VAB|SPH),
         /// dirs (96), grid (rays across the vessel per direction, 220).
         /// </summary>
-        [UITest("Far_ThermalAreaTruth", Kind = "Measure", StartsAt = StartState.SpaceCenter, TimeoutSec = 1800)]
+        [UITest("Far_ThermalAreaTruth", Explicit = true, Kind = "Measure", StartsAt = StartState.SpaceCenter, TimeoutSec = 1800)]
         public static IEnumerator Far_ThermalAreaTruth(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());
@@ -152,7 +152,7 @@ namespace FerramAerospaceResearch.KspTests
         /// the airflow; 180 = heat shield first), peKm, apKm, startAltKm (75), endAltKm (20), modes ("+"-separated
         /// Master/Pr156/Hybrid/VoxelExposed/Native), physWarp (rate index, 1 = 2x), startTempK (300).
         /// </summary>
-        [UITest("Far_ThermalEntry", Kind = "Measure", StartsAt = StartState.SpaceCenter, TimeoutSec = 7200)]
+        [UITest("Far_ThermalEntry", Explicit = true, Kind = "Measure", StartsAt = StartState.SpaceCenter, TimeoutSec = 7200)]
         public static IEnumerator Far_ThermalEntry(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());
@@ -250,7 +250,7 @@ namespace FerramAerospaceResearch.KspTests
         /// emitting area and FAR's voxel sun/body areas the absorbing ones. Params: craft (Name@VAB|SPH, default
         /// Radiator Test), orbitKm (250), soakSec (900), modes (Master+Pr156), physWarp (rate index, 3 = 4x), startTempK (250).
         /// </summary>
-        [UITest("Far_ThermalOrbit", Kind = "Measure", StartsAt = StartState.SpaceCenter, TimeoutSec = 3600)]
+        [UITest("Far_ThermalOrbit", Explicit = true, Kind = "Measure", StartsAt = StartState.SpaceCenter, TimeoutSec = 3600)]
         public static IEnumerator Far_ThermalOrbit(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());
@@ -333,153 +333,6 @@ namespace FerramAerospaceResearch.KspTests
             }
             ThermalAreaModes.Current = ThermalAreaModes.Mode.Native;
             File.WriteAllText(Path.Combine(ctx.ResultsDir, $"orbit_{tag}.csv"), csv.ToString());
-        }
-
-        /// <summary>
-        /// How repeatable FAR's voxel areas (ProjectedAreas.totalArea, what master hands KSP as radiativeArea) are for
-        /// one craft: on the pad, revoxelized `repeats` times; in a 100 km orbit, the same; after loading a save in orbit;
-        /// and during an entry (save loaded at 73 km, heat shield first), every 5 s. Records the voxel size and each
-        /// part's area each time. Params: craft (Name@VAB|SPH, default HS Capsule), repeats (4), aoa (180).
-        /// </summary>
-        [UITest("Far_ThermalVoxelRepeat", Kind = "Measure", StartsAt = StartState.SpaceCenter, TimeoutSec = 1800)]
-        public static IEnumerator Far_ThermalVoxelRepeat(TestContext ctx)
-        {
-            ctx.Record("farBuild", FarSim.FarVersion());
-            var (craft, facility) = CraftSpec(ctx.Param("craft", "HS Capsule"));
-            int repeats = (int)ctx.ParamDouble("repeats", 4);
-            double aoa = ctx.ParamDouble("aoa", 180);
-            ThermalAreaModes.Install();
-            var csv = new StringBuilder("stage,elementSize,boundsX,boundsY,boundsZ,part,index,total,iP,iN,jP,jN,kP,kN\n");
-            void Snap(string stage)
-            {
-                Vessel v = FlightGlobals.ActiveVessel;
-                FarApi.VoxelInfo(out double el, out Vector3 bs, out _, out _);
-                var sb = new StringBuilder();
-                for (int i = 0; i < v.parts.Count; i++)
-                {
-                    double[] f = ThermalAreaModes.FarFaces(v.parts[i]);
-                    csv.Append(string.Join(",", stage, F(el), F(bs.x), F(bs.y), F(bs.z), v.parts[i].partInfo.name, i, F(ThermalAreaModes.FarTotal(v.parts[i])),
-                        string.Join(",", f.Select(F)))).Append('\n');
-                    sb.Append($"{v.parts[i].partInfo.name} {ThermalAreaModes.FarTotal(v.parts[i]):F2}; ");
-                }
-                ctx.Record(stage, $"voxel {el * 100:F2} cm, bounds {bs.x:F2}x{bs.y:F2}x{bs.z:F2}: {sb}");
-            }
-            IEnumerator Revoxel()
-            {
-                FarApi.RequestRevoxel(FlightGlobals.ActiveVessel);
-                yield return Wait.Seconds(1);
-                yield return WaitVoxels();
-            }
-
-            ctx.Step("Pad");
-            yield return LaunchCraft(ctx, craft, facility);
-            Snap("pad0");
-            for (int r = 1; r <= repeats; r++) { yield return Revoxel(); Snap("pad" + r); }
-
-            ctx.Step("100 km orbit");
-            Flight.SetOrbit(100000, 100000);
-            yield return Wait.Seconds(2);
-            yield return WaitVoxels();
-            Snap("orbit0");
-            for (int r = 1; r <= repeats; r++) { yield return Revoxel(); Snap("orbit" + r); }
-
-            ctx.Step("Save loaded in orbit");
-            GamePersistence.SaveGame("ksptest-voxrepeat", HighLogic.SaveFolder, SaveMode.OVERWRITE);
-            Game g = GamePersistence.LoadGame("ksptest-voxrepeat", HighLogic.SaveFolder, true, false);
-            FlightDriver.StartAndFocusVessel(g, g.flightState.activeVesselIdx);
-            yield return Wait.Seconds(2);
-            yield return Wait.FlightReady(120);
-            yield return WaitVoxels();
-            Snap("orbitLoaded");
-
-            ctx.Step("Entry");
-            Flight.SetOrbitDescendingAt(32000, 12000000, 0, 0, 0, 75000);
-            yield return Wait.Seconds(2);
-            yield return Wait.Until(() => !FlightGlobals.ActiveVessel.packed, 60, "off rails");
-            Flight.PointAtAoA(aoa);
-            yield return WaitVoxels();
-            Snap("entryPlaced");
-            Flight.IgnoreMaxTemperature(true);
-            var rec = FlightGlobals.ActiveVessel.gameObject.AddComponent<ThermalEntryRecorder>();
-            rec.Aoa = aoa;
-            rec.Begin(FlightGlobals.ActiveVessel);
-            for (int k = 1; k <= 16 && FlightGlobals.ActiveVessel.altitude > 25000; k++)
-            {
-                yield return Wait.GameSeconds(5);
-                Snap($"entry{k * 5}s_{FlightGlobals.ActiveVessel.altitude / 1000:F0}km_M{FlightGlobals.ActiveVessel.mach:F1}");
-            }
-            UnityEngine.Object.Destroy(rec);
-            Flight.IgnoreMaxTemperature(false);
-            File.WriteAllText(Path.Combine(ctx.ResultsDir, "voxel_repeat.csv"), csv.ToString());
-        }
-
-        /// <summary>
-        /// Whether FAR's per-part voxel areas depend on the vessel turning while it voxelizes: in a 100 km orbit, a
-        /// voxelization held still, then `spins` voxelizations while every part turns at rateDeg/s about the vessel's
-        /// pitch axis (no turning before the request), each followed by one held still. Records each part's total and
-        /// six face areas each time. Params: craft (Name@VAB|SPH, default HS Capsule), rateDeg (30), spins (3).
-        /// </summary>
-        [UITest("Far_VoxelRotationProbe", Kind = "Measure", StartsAt = StartState.SpaceCenter, TimeoutSec = 1200)]
-        public static IEnumerator Far_VoxelRotationProbe(TestContext ctx)
-        {
-            ctx.Record("farBuild", FarSim.FarVersion());
-            var (craft, facility) = CraftSpec(ctx.Param("craft", "HS Capsule"));
-            double rate = ctx.ParamDouble("rateDeg", 30);
-            int spins = (int)ctx.ParamDouble("spins", 3);
-            ThermalAreaModes.Install();
-            var csv = new StringBuilder("stage,part,index,total,iP,iN,jP,jN,kP,kN\n");
-            void Snap(string stage)
-            {
-                Vessel v = FlightGlobals.ActiveVessel;
-                var sb = new StringBuilder();
-                for (int i = 0; i < v.parts.Count; i++)
-                {
-                    double[] f = ThermalAreaModes.FarFaces(v.parts[i]);
-                    double tot = ThermalAreaModes.FarTotal(v.parts[i]);
-                    csv.Append(string.Join(",", stage, v.parts[i].partInfo.name, i, F(tot), string.Join(",", f.Select(F)))).Append('\n');
-                    sb.Append($"{v.parts[i].partInfo.name} {tot:F2} [{string.Join(" ", f.Select(x => x.ToString("F2", Inv)))}]; ");
-                }
-                ctx.Record(stage, sb.ToString());
-            }
-            void Spin(double degPerSec)
-            {
-                Vessel v = FlightGlobals.ActiveVessel;
-                Vector3 w = v.ReferenceTransform.right * (float)(degPerSec * Math.PI / 180);
-                foreach (Part p in v.parts)
-                    if (p.Rigidbody != null) p.Rigidbody.angularVelocity = w;
-            }
-
-            ctx.Step("Launch and orbit");
-            yield return LaunchCraft(ctx, craft, facility);
-            Flight.SetOrbit(100000, 100000);
-            yield return Wait.Seconds(2);
-            yield return WaitVoxels();
-            Spin(0);
-            FarApi.RequestRevoxel(FlightGlobals.ActiveVessel);
-            yield return Wait.Seconds(1);
-            yield return WaitVoxels();
-            Snap("still0");
-            for (int s = 1; s <= spins; s++)
-            {
-                ctx.Step($"Voxelize while turning {rate} deg/s ({s})");
-                Spin(0);
-                yield return Wait.Seconds(1);
-                FarApi.RequestRevoxel(FlightGlobals.ActiveVessel);
-                float t0 = Time.time;
-                while (Time.time - t0 < 3)
-                {
-                    Spin(rate);
-                    yield return null;
-                }
-                Spin(0);
-                yield return WaitVoxels();
-                Snap($"turning{s}");
-                FarApi.RequestRevoxel(FlightGlobals.ActiveVessel);
-                yield return Wait.Seconds(1);
-                yield return WaitVoxels();
-                Snap($"still{s}");
-            }
-            File.WriteAllText(Path.Combine(ctx.ResultsDir, "voxel_rotation.csv"), csv.ToString());
         }
 
         public static void ResetThermal(Vessel v, double k)

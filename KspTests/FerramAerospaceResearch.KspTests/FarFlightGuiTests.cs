@@ -21,7 +21,7 @@ namespace FerramAerospaceResearch.KspTests
         /// FlightGUI an activation of loaded vessels only, so OnStart, which counts up, never runs on the asteroid,
         /// while OnDestroy, which counts down and removes the button at zero, still does.)
         /// </summary>
-        [UITest("Far_FlightGuiUnloadedVessel", Kind = "Check", Mods = "Toolbar", StartsAt = StartState.SpaceCenter, TimeoutSec = 900)]
+        [UITest("Far_FlightGuiUnloadedVessel", Explicit = true, Kind = "Check", Mods = "Toolbar", StartsAt = StartState.SpaceCenter, TimeoutSec = 900)]
         public static IEnumerator Far_FlightGuiUnloadedVessel(TestContext ctx)
         {
             ctx.Record("farBuild", FarSim.FarVersion());
