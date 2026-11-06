@@ -43,7 +43,6 @@ Copyright 2022, Michael Ferrara, aka Ferram4
  */
 
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using UnityEngine;
 
 namespace FerramAerospaceResearch
@@ -52,60 +51,62 @@ namespace FerramAerospaceResearch
     {
         public static class FARPartExtensions
         {
-            // ReSharper disable once UnusedMember.Global
-            // coverage: never called: part.GetPartColliders() resolves to KSP's Part.GetPartColliders, an instance method,
-            // which C# picks over an extension method
-            [ExcludeFromCodeCoverage]
-            public static Collider[] GetPartColliders(this Part part)
-            {
-                Collider[] colliders;
-                try
-                {
-                    if (HighLogic.LoadedSceneIsEditor)
-                    {
-                        //In the editor, this returns all the colliders of this part AND all the colliders of its children, recursively
-                        Collider[] tmpColliderArray = part.GetComponentsInChildren<Collider>();
-                        //However, this can also be called on its child parts to get their colliders, so we can exclude the child colliders
-                        //Also, fortunately, parent colliders are at the beginning of this; we can take advantage of this to reduce the time iterating through lists
-                        var partColliders = new List<Collider>();
-                        //We'll use a hash to make this fast
-                        var excludedCollidersHash = new HashSet<Collider>();
-
-                        foreach (Part p in part.children)
-                        {
-                            //All the colliders associated with the immediate child of this part AND their children
-                            Collider[] excludedColliders = p.GetComponentsInChildren<Collider>();
-
-                            //The first collider _must_ be part of the immediate child; because it is closer to the parent, it will appear earlier in tmpColliderArray
-                            if (!excludedCollidersHash.Contains(excludedColliders[0]))
-                                //That means we only ever need the first collider for our purposes
-                                excludedCollidersHash.Add(excludedColliders[0]);
-                        }
-
-                        foreach (Collider collider in tmpColliderArray)
-                            //If the collider isn't in the hash, that means that it must belong to _this_ part, because it doesn't belong to any child parts
-                            if (!excludedCollidersHash.Contains(collider))
-                                partColliders.Add(collider);
-                            else
-                                //Once we find something that is in the hash, we're out of the colliders associated with the parent part and can escape
-                                break;
-
-                        colliders = partColliders.ToArray();
-                    }
-                    else
-                    {
-                        colliders = part.GetComponentsInChildren<Collider>();
-                    }
-                }
-                catch
-                {
-                    //FIXME
-                    //Fail silently because it's the only way to avoid issues with pWings
-                    colliders = new[] {part.collider};
-                }
-
-                return colliders;
-            }
+            // Unused, and cannot be called as written: part.GetPartColliders() binds to KSP's own Part.GetPartColliders (an
+            // instance method wins over an extension), which FARPartModule.TriggerPartColliderUpdate calls. KSP's takes the
+            // colliders under the part's "model" transform, which leaves the child parts' out in the editor as this one does by
+            // hand; in flight this one would add any collider elsewhere on the part. Commented out after the test suite's
+            // coverage run.
+            // // ReSharper disable once UnusedMember.Global
+            // public static Collider[] GetPartColliders(this Part part)
+            // {
+            //     Collider[] colliders;
+            //     try
+            //     {
+            //         if (HighLogic.LoadedSceneIsEditor)
+            //         {
+            //             //In the editor, this returns all the colliders of this part AND all the colliders of its children, recursively
+            //             Collider[] tmpColliderArray = part.GetComponentsInChildren<Collider>();
+            //             //However, this can also be called on its child parts to get their colliders, so we can exclude the child colliders
+            //             //Also, fortunately, parent colliders are at the beginning of this; we can take advantage of this to reduce the time iterating through lists
+            //             var partColliders = new List<Collider>();
+            //             //We'll use a hash to make this fast
+            //             var excludedCollidersHash = new HashSet<Collider>();
+            //
+            //             foreach (Part p in part.children)
+            //             {
+            //                 //All the colliders associated with the immediate child of this part AND their children
+            //                 Collider[] excludedColliders = p.GetComponentsInChildren<Collider>();
+            //
+            //                 //The first collider _must_ be part of the immediate child; because it is closer to the parent, it will appear earlier in tmpColliderArray
+            //                 if (!excludedCollidersHash.Contains(excludedColliders[0]))
+            //                     //That means we only ever need the first collider for our purposes
+            //                     excludedCollidersHash.Add(excludedColliders[0]);
+            //             }
+            //
+            //             foreach (Collider collider in tmpColliderArray)
+            //                 //If the collider isn't in the hash, that means that it must belong to _this_ part, because it doesn't belong to any child parts
+            //                 if (!excludedCollidersHash.Contains(collider))
+            //                     partColliders.Add(collider);
+            //                 else
+            //                     //Once we find something that is in the hash, we're out of the colliders associated with the parent part and can escape
+            //                     break;
+            //
+            //             colliders = partColliders.ToArray();
+            //         }
+            //         else
+            //         {
+            //             colliders = part.GetComponentsInChildren<Collider>();
+            //         }
+            //     }
+            //     catch
+            //     {
+            //         //FIXME
+            //         //Fail silently because it's the only way to avoid issues with pWings
+            //         colliders = new[] {part.collider};
+            //     }
+            //
+            //     return colliders;
+            // }
 
             // Unused: nothing in FAR calls it (commented out after the test suite's coverage run)
             // // ReSharper disable once UnusedMember.Global
