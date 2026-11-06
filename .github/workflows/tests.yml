@@ -321,11 +321,18 @@ jobs:
           deps=(); for f in "$(cygpath -u "$KSPTEST_GAME")"/KSP_x64_Data/Managed/*.dll; do deps+=("-d=$(cygpath -m "$f")"); done
           "$WORK/altcover/tools/net472/AltCover.exe" -i="$COV/in" -o="$COV/out" --save --portable --linecover -a=ExcludeFromCodeCoverage "${deps[@]}" > "$COV/instrument.log" 2>&1 ||
             { tail -20 "$COV/instrument.log"; exit 1; }
+          # AltCover's recorder allocates and looks up string-keyed dictionaries on every visit, recorded points too:
+          # under Mono's stop-the-world GC FAR's multithreaded sweeps ran ~20x slower for it. Every visit call goes to
+          # FastVisit instead, which passes only a point's first visit on (all AltCover records) and returns at once after
+          dotnet build KspTests/Coverage/FarCoverage.FastVisit -c Release -v q -nologo -o "$COV/fastvisit"
+          dotnet run -c Release --project KspTests/Coverage/CovPatch -- "$COV/out/FerramAerospaceResearch.dll" "$COV/out/FerramAerospaceResearch.Base.dll"
+          cp "$COV/fastvisit/FarCoverage.FastVisit.dll" "$COV/out/"
           # the in-game tests' FAR: the build's GameData with the instrumented assemblies, the recorder and its report
           cp -r "$WORK/far/FerramAerospaceResearch" "$COV/overlay/"; rm -f "$COV/overlay/FerramAerospaceResearch/Plugins/"*.pdb
-          cp "$COV/out"/FerramAerospaceResearch*.dll "$COV/out/AltCover.Recorder.g.dll" "$COV/out/coverage.xml" "$COV/overlay/FerramAerospaceResearch/Plugins/"
+          cp "$COV/out"/FerramAerospaceResearch*.dll "$COV/out/AltCover.Recorder.g.dll" "$COV/out/FarCoverage.FastVisit.dll" "$COV/out/coverage.xml" \
+            "$COV/overlay/FerramAerospaceResearch/Plugins/"
           # the unit tests' FAR
-          cp "$COV/out"/FerramAerospaceResearch*.dll "$COV/out/AltCover.Recorder.g.dll" "$p/ferramGraph.dll" "$COV/farbin/"
+          cp "$COV/out"/FerramAerospaceResearch*.dll "$COV/out/AltCover.Recorder.g.dll" "$COV/out/FarCoverage.FastVisit.dll" "$p/ferramGraph.dll" "$COV/farbin/"
       # against the stripped assemblies as the unit job runs them (they carry Unity.Burst, which the stock game does not)
       - name: Unit tests
         run: |
@@ -333,7 +340,8 @@ jobs:
           7z x -y -bso0 -bsp0 "-o$WORK/ksplibs" "$WORK/ksplibs.zip"
           U=KspTests/FerramAerospaceResearch.UnitTests/bin/Debug/net48
           dotnet build KspTests/FerramAerospaceResearch.UnitTests "-p:KspDir=$WORK/ksplibs" "-p:FarBin=$COV/farbin" -v q -nologo
-          cp "$COV/out/coverage.xml" "$COV/out/AltCover.Recorder.g.dll" "$U/"
+          # the build copies only the FAR assemblies it references: the recorder, FastVisit and the report by hand
+          cp "$COV/out/coverage.xml" "$COV/out/AltCover.Recorder.g.dll" "$COV/out/FarCoverage.FastVisit.dll" "$U/"
           dotnet test KspTests/FerramAerospaceResearch.UnitTests --no-build || echo "::warning::unit tests failed under coverage"
           cp "$U/coverage.xml" "$COV/unit.xml"
       - name: In-game tests
