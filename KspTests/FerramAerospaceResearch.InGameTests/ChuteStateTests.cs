@@ -312,23 +312,25 @@ namespace FerramAerospaceResearch.InGameTests
             double ut0 = Planetarium.GetUniversalTime();
             PhysicsWatch watch = PhysicsWatch.StartNew();
             Assert.True(watch.IsRunning, "started new, it runs");
-            yield return Wait.Seconds(2);
+            // game time, not the wall clock's: a loaded machine runs the Space Center's clock slow (0.48 s of game
+            // time in 2 s with four KSPs side by side)
+            yield return Wait.Until(() => Planetarium.GetUniversalTime() - ut0 > 1, 60, "a second of game time", shot: false);
             double ran = Planetarium.GetUniversalTime() - ut0;
             watch.Stop();
             long held = watch.ElapsedMilliseconds;
             ctx.Record("first", $"{ran:F3} s of game time, {held} ms counted");
-            Assert.True(ran > 0.5, $"game time passes at the Space Center ({ran:F3} s)");
             Assert.Near(ran * 1000, held, 1, "it counted the game time that passed");
             Assert.False(watch.IsRunning, "stopped");
 
-            yield return Wait.Seconds(1);
+            double stopped = Planetarium.GetUniversalTime();
+            yield return Wait.Until(() => Planetarium.GetUniversalTime() - stopped > 0.5, 60, "half a second of game time", shot: false);
             Assert.Equal(held, watch.ElapsedMilliseconds, "stopped, it holds what it counted");
             watch.Stop();
             Assert.Equal(held, watch.ElapsedMilliseconds, "stopped again, still");
 
             double ut1 = Planetarium.GetUniversalTime();
             watch.Start();
-            yield return Wait.Seconds(1);
+            yield return Wait.Until(() => Planetarium.GetUniversalTime() - ut1 > 0.5, 60, "half a second more of game time", shot: false);
             double more = Planetarium.GetUniversalTime() - ut1;
             long counted = watch.ElapsedMilliseconds;
             ctx.Record("again", $"{more:F3} s more, {counted} ms counted");
