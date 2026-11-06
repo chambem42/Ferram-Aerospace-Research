@@ -50,7 +50,11 @@ namespace FerramAerospaceResearch.InGameTests
                 Assert.True(airDecel > 0, $"drag slows the plane in the air ({airDecel:F3} m/s2)");
 
                 ctx.Step("set down just above the sea");
-                v.SetPosition(v.vesselTransform.position - (Vector3d)v.upAxis * (v.altitude - 3));
+                // a meter above the water and sinking at 1 m/s: dropped from 3 m it hit at 9 m/s, a wing crossed the
+                // surface inside a physics frame, and a plane that stopped dead had no wing part-submerged two frames
+                // running (the check below needs that)
+                v.SetPosition(v.vesselTransform.position - (Vector3d)v.upAxis * (v.altitude - 1));
+                v.ChangeWorldVelocity((Vector3d)v.upAxis * (-v.verticalSpeed - 1));
                 var fixedWait = new WaitForFixedUpdate();
                 yield return Wait.Until(() => v.Splashed || v.parts.Any(p => p.submergedPortion > 0), 15, "the plane in the water", shot: false);
                 double t0 = Planetarium.GetUniversalTime(), speed0 = v.horizontalSrfSpeed;
