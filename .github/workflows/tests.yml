@@ -20,10 +20,6 @@ on:
         description: dotnet test --filter for the in-game tests (default all but the Explicit ones)
         required: false
         default: ""
-      coverage:
-        description: measure FAR's line coverage too (an instrumented build; adds a slower job)
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -249,14 +245,12 @@ jobs:
           if-no-files-found: warn
 
   # FAR's line coverage: the unit and in-game tests against FAR instrumented by AltCover, one count per sequence point,
-  # merged into a report (the job summary and the coverage artifact). Slower than the plain run, so on pushes to the
-  # default branch and when a manual run asks for it. Same secrets rule as the in-game job; the game folder and its
+  # merged into a report (the job summary and the coverage artifact). Runs wherever the in-game job does (FastVisit
+  # makes the instrumented run fast enough for every push). Same secrets rule as the in-game job; the game folder and its
   # instances are never uploaded, only the counts.
   coverage:
     needs: build
-    if: >-
-      (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) ||
-      (github.event_name == 'workflow_dispatch' && inputs.coverage)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-2022
     timeout-minutes: 180
     defaults:
