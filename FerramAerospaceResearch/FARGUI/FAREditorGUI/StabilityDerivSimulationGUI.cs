@@ -94,6 +94,7 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
         public void Dispose()
         {
             simManager = null;
+            _graph?.Dispose();
             _graph = null;
         }
 

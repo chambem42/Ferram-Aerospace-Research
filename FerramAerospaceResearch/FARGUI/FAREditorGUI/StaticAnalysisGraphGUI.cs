@@ -121,6 +121,7 @@ namespace FerramAerospaceResearch.FARGUI.FAREditorGUI
             flapSettingDropdown = null;
             bodySettingDropdown = null;
             simManager = null;
+            _graph?.Dispose();
             _graph = null;
         }
 
