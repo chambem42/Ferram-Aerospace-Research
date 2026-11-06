@@ -1,13 +1,10 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using Unity.Mathematics;
 
 namespace FerramAerospaceResearch.Resources
 {
-    // coverage: its only creator (Pool.Borrow) is commented out
-    [ExcludeFromCodeCoverage]
     public struct Disposable<T> : IDisposable
     {
         private readonly Pool<T> pool;
@@ -34,8 +31,6 @@ namespace FerramAerospaceResearch.Resources
         private readonly Func<T> create;
         private readonly Action<T> release;
 
-        // coverage: only builds Pool<T>.Default, which nothing reads
-        [ExcludeFromCodeCoverage]
         public Pool()
         {
             // C# generic constraints are unnecessarily too limiting so can't use new T() in a generic way without
@@ -49,8 +44,6 @@ namespace FerramAerospaceResearch.Resources
             this.release = release;
         }
 
-        // coverage: nothing in FAR reads it
-        [ExcludeFromCodeCoverage]
         public int Count
         {
             get { return objects.Count; }
@@ -83,15 +76,11 @@ namespace FerramAerospaceResearch.Resources
             return objects.GetEnumerator();
         }
 
-        // coverage: explicit interface member nothing calls (foreach binds the struct enumerator)
-        [ExcludeFromCodeCoverage]
         IEnumerator<T> IEnumerable<T>.GetEnumerator()
         {
             return objects.GetEnumerator();
         }
 
-        // coverage: explicit interface member nothing calls (foreach binds the struct enumerator)
-        [ExcludeFromCodeCoverage]
         IEnumerator IEnumerable.GetEnumerator()
         {
             return ((IEnumerable)objects).GetEnumerator();
@@ -109,8 +98,6 @@ namespace FerramAerospaceResearch.Resources
         }
     }
 
-    // coverage: nothing in FAR uses it
-    [ExcludeFromCodeCoverage]
     public class ListPool<T> : Pool<List<T>>
     {
         private const int DefaultCapacity = 64;

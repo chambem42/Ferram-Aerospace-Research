@@ -106,8 +106,6 @@ namespace FerramAerospaceResearch.FARPartGeometry.GeometryModification
             sign = direction;
         }
 
-        // coverage: interface member nothing calls
-        [ExcludeFromCodeCoverage]
         public int GetForwardBackwardNoFlowSign()
         {
             return sign;

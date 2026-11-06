@@ -51,6 +51,31 @@ namespace FerramAerospaceResearch.UnitTests
             Assert.Equal("-007", Of(sb => sb.Concat(-7, 3u, '0', 10u)));
         }
 
+        /// <summary>
+        /// The short integer overloads are the full one with its defaults: base ten, padded with '0' unless another pad
+        /// character is given, never truncated, appended after what the builder already holds.
+        /// </summary>
+        [Fact]
+        public void ShortIntegerOverloadsUseBaseTenAndZeroPadding()
+        {
+            Assert.Equal("4294967295", Of(sb => sb.Concat(uint.MaxValue)));
+            Assert.Equal("0", Of(sb => sb.Concat(0u)));
+            Assert.Equal("0042", Of(sb => sb.Concat(42u, 4u)));
+            Assert.Equal("12345", Of(sb => sb.Concat(12345u, 2u)));
+            Assert.Equal("**42", Of(sb => sb.Concat(42u, 4u, '*')));
+
+            Assert.Equal("-0042", Of(sb => sb.Concat(-42, 4u)));
+            Assert.Equal("0042", Of(sb => sb.Concat(42, 4u)));
+            Assert.Equal("-2147483648", Of(sb => sb.Concat(int.MinValue, 0u)));
+            Assert.Equal("-  7", Of(sb => sb.Concat(-7, 3u, ' ')));
+            Assert.Equal("   7", Of(sb => sb.Concat(7, 4u, ' ')));
+
+            // each returns the builder it was given, so calls chain onto the text already there
+            var builder = new StringBuilder("t=");
+            Assert.Same(builder, builder.Concat(5u).Concat(6u, 2u).Concat(7u, 2u, ' ').Concat(-8, 2u).Concat(9, 2u, ' '));
+            Assert.Equal("t=506 7-08 9", builder.ToString());
+        }
+
         [Theory]
         [InlineData(12.25f, 2u, "12.25")]
         [InlineData(-3.5f, 1u, "-3.5")]

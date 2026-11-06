@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using FerramAerospaceResearch.Reflection;
 
 // ReSharper disable ClassNeverInstantiated.Global
@@ -32,8 +31,6 @@ namespace FerramAerospaceResearch.Settings
                     Overrides.Add(item.ModuleName, item.FieldName);
         }
 
-        // coverage: the node is never saved (shouldSave false)
-        [ExcludeFromCodeCoverage]
         public void BeforeSaved()
         {
             overrideList.Clear();
@@ -48,8 +45,6 @@ namespace FerramAerospaceResearch.Settings
             }
         }
 
-        // coverage: the node is never saved (shouldSave false)
-        [ExcludeFromCodeCoverage]
         public void AfterSaved()
         {
         }

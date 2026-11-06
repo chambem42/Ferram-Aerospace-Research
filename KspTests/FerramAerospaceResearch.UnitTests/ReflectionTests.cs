@@ -285,5 +285,135 @@ namespace FerramAerospaceResearch.UnitTests
             Assert.True(patch.HasNode("!ITEM,*"), patch.ToString());
             Assert.Equal(new[] { "1", "2" }, patch.GetNodes("ITEM").Select(n => n.GetValue("value")));
         }
+
+        // a small hierarchy for the type searches
+
+        public class FindBase
+        {
+        }
+
+        public class FindDerived : FindBase, IDisposable
+        {
+            public void Dispose()
+            {
+            }
+        }
+
+        public class FindDerived2 : FindDerived
+        {
+        }
+
+        /// <summary>
+        /// FindTypes over assemblies: with inherit, every type T is assignable from (T itself included), without it only
+        /// T; the overload without assemblies searches every loaded assembly, which this one is.
+        /// </summary>
+        [SkippableFact]
+        public void FindTypesInAssembliesFindsTheTypeAndItsSubtypes()
+        {
+            UnityRuntime.RequireLog();   // a type load error in an assembly is logged
+            var assemblies = new[] { typeof(FindBase).Assembly };
+            Assert.Equal(new[] { typeof(FindBase), typeof(FindDerived), typeof(FindDerived2) }.OrderBy(t => t.Name),
+                         ReflectionUtils.FindTypes<FindBase>(assemblies, true).OrderBy(t => t.Name));
+            Assert.Equal(new[] { typeof(FindDerived) }, ReflectionUtils.FindTypes<FindDerived>(assemblies, false));
+            Assert.Empty(ReflectionUtils.FindTypes<FindBase>(new System.Reflection.Assembly[0], true));
+
+            Type[] everywhere = ReflectionUtils.FindTypes<FindDerived>(true).ToArray();
+            Assert.Equal(new[] { typeof(FindDerived), typeof(FindDerived2) }.OrderBy(t => t.Name), everywhere.OrderBy(t => t.Name));
+        }
+
+        /// <summary>GetTypes() is every type of every loaded assembly: this test's, FAR's.</summary>
+        [SkippableFact]
+        public void GetTypesListsTheLoadedAssembliesTypes()
+        {
+            UnityRuntime.RequireLog();
+            var types = new HashSet<Type>(ReflectionUtils.GetTypes());
+            Assert.Contains(typeof(FindDerived2), types);
+            Assert.Contains(typeof(ReflectionUtils), types);
+            Assert.Contains(typeof(FARLogger), types);
+        }
+
+        /// <summary>GetParentTypes: the interfaces first, then the base types up to object; none for null.</summary>
+        [Fact]
+        public void ParentTypesAreTheInterfacesThenTheBaseChain()
+        {
+            Assert.Equal(new[] { typeof(IDisposable), typeof(FindDerived), typeof(FindBase), typeof(object) },
+                         typeof(FindDerived2).GetParentTypes());
+            Assert.Equal(new[] { typeof(object) }, typeof(FindBase).GetParentTypes());
+            Assert.Empty(typeof(object).GetParentTypes());
+            Assert.Empty(((Type)null).GetParentTypes());
+        }
+
+        private class StaticProbe : ValueReflection
+        {
+            public bool IsStaticFor(Type declaring)
+            {
+                DeclaringType = declaring;
+                return StaticParser;
+            }
+        }
+
+        /// <summary>StaticParser: a value with no declaring type, or one declared in a static class, is static.</summary>
+        [Fact]
+        public void StaticParserIsTrueForStaticOrNoDeclaringType()
+        {
+            var probe = new StaticProbe();
+            Assert.True(probe.IsStaticFor(null));
+            Assert.True(probe.IsStaticFor(typeof(ReflectionUtils)));
+            Assert.False(probe.IsStaticFor(typeof(TestConfig)));
+        }
+
+        [ConfigNode("WrapperConfig")]
+        public class WrapperConfig
+        {
+            // ignored: config reflection takes every member, and this one would nest the type in itself without end
+            [ConfigValueIgnore] public static readonly WrapperConfig Instance = new WrapperConfig();
+
+            [ConfigValue("count")] public int Count { get; set; } = 1;
+            [ConfigValue("name")] public string Name { get; set; } = "first";
+        }
+
+        private static ConfigNode WrapperNode(int count, string name)
+        {
+            var node = new ConfigNode("WrapperConfig");
+            node.AddValue("count", count);
+            node.AddValue("name", name);
+            return node;
+        }
+
+        /// <summary>
+        /// ConfigAdapter's generic wrappers: Load into a given instance or a new one, Save an instance (or the type's
+        /// singleton) to a new node, as values or as a patch.
+        /// </summary>
+        [SkippableFact]
+        public void ConfigAdapterGenericWrappersLoadAndSave()
+        {
+            UnityRuntime.RequireLog();
+
+            var config = new WrapperConfig();
+            WrapperConfig same = config;
+            ConfigAdapter.Load(ref config, WrapperNode(5, "loaded"));
+            Assert.Same(same, config);
+            Assert.Equal(5, config.Count);
+            Assert.Equal("loaded", config.Name);
+
+            WrapperConfig created = ConfigAdapter.Load<WrapperConfig>(WrapperNode(7, "created"));
+            Assert.NotSame(config, created);
+            Assert.Equal(7, created.Count);
+            Assert.Equal("created", created.Name);
+
+            ConfigNode saved = ConfigAdapter.Save(created);
+            Assert.Equal("7", saved.GetValue("count"));
+            Assert.Equal("created", saved.GetValue("name"));
+            ConfigNode patch = ConfigAdapter.Save(created, asPatch: true);
+            Assert.Equal("7", patch.GetValue("%count"));
+
+            var into = new ConfigNode("WrapperConfig");
+            Assert.Same(into, ConfigAdapter.Save(created, into));
+
+            // without an instance it saves the type's singleton
+            WrapperConfig.Instance.Count = 9;
+            Assert.Equal("9", ConfigAdapter.Save<WrapperConfig>().GetValue("count"));
+            Assert.Equal("9", ConfigAdapter.Save<WrapperConfig>(null, true).GetValue("%count"));
+        }
     }
 }

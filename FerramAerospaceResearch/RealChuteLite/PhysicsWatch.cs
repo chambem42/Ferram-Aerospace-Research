@@ -66,8 +66,6 @@ namespace FerramAerospaceResearch.RealChuteLite
         /// <summary>
         ///     The amount of milliseconds elapsed to the current watch
         /// </summary>
-        // coverage: stopwatch API FAR does not call
-        [ExcludeFromCodeCoverage]
         public long ElapsedMilliseconds
         {
             get
@@ -148,8 +146,6 @@ namespace FerramAerospaceResearch.RealChuteLite
         /// <summary>
         ///     Returns a string representation fo this instance
         /// </summary>
-        // coverage: debug formatting FAR does not call
-        [ExcludeFromCodeCoverage]
         public override string ToString()
         {
             return Elapsed.ToString();

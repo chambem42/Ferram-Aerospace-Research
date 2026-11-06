@@ -43,7 +43,6 @@ Copyright 2022, Michael Ferrara, aka Ferram4
  */
 
 using System;
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using UnityEngine;
 using FerramAerospaceResearch.Threading;
@@ -147,8 +146,6 @@ namespace FerramAerospaceResearch
             return !double.IsNaN(a) && !double.IsInfinity(a);
         }
 
-        // coverage: nothing in FAR calls it (its callers are commented out)
-        [ExcludeFromCodeCoverage]
         public static bool Approximately(double p, double q, double error = double.Epsilon)
         {
             return Math.Abs(p - q) < error;

@@ -10,8 +10,6 @@ namespace FerramAerospaceResearch.Resources
     {
         private readonly List<LoadableAsset<T>> requests = new List<LoadableAsset<T>>();
 
-        // coverage: nothing in FAR calls it
-        [ExcludeFromCodeCoverage]
         public bool Contains(string name)
         {
             return ContainsKey(name);

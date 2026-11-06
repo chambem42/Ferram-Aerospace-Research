@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 
 namespace FerramAerospaceResearch.FARAeroComponents
 {
@@ -19,8 +18,6 @@ namespace FerramAerospaceResearch.FARAeroComponents
         }
 
         /// <inheritdoc />
-        // coverage: IAirstreamShield member KSP never calls
-        [ExcludeFromCodeCoverage]
         public Part GetPart()
         {
             return part;

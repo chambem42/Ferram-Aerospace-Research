@@ -153,6 +153,22 @@ namespace FerramAerospaceResearch.UnitTests
             Assert.True(r.FunctionCalls < 50);
         }
 
+        /// <summary>
+        /// Approximately is a strict absolute tolerance: closer than the error is equal, exactly the error apart is not,
+        /// and with the default (double.Epsilon) only identical values pass.
+        /// </summary>
+        [Fact]
+        public void ApproximatelyIsAStrictAbsoluteTolerance()
+        {
+            Assert.True(FARMathUtil.Approximately(1.0, 1.05, 0.1));
+            Assert.True(FARMathUtil.Approximately(-1.05, -1.0, 0.1));
+            Assert.False(FARMathUtil.Approximately(1.0, 1.2, 0.1));
+            Assert.False(FARMathUtil.Approximately(0.0, 0.5, 0.5));    // strictly less than the error
+            Assert.True(FARMathUtil.Approximately(3.0, 3.0));
+            Assert.False(FARMathUtil.Approximately(1.0, 1.0 + 1e-15));   // the default tolerance is double.Epsilon
+            Assert.False(FARMathUtil.Approximately(double.NaN, double.NaN, 1));
+        }
+
         [Fact]
         public void SecantStopsAtItsLimits()
         {

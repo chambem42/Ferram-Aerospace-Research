@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using FerramAerospaceResearch.Config;
 using UnityEngine;
 
@@ -22,8 +21,6 @@ namespace FerramAerospaceResearch.FARPartGeometry
             map = FARConfig.Voxelization.FirstOrDefault(mapName);
         }
 
-        // coverage: indexer FAR does not use
-        [ExcludeFromCodeCoverage]
         public Color this[Part part]
         {
             get { return tints[part]; }
@@ -41,22 +38,16 @@ namespace FerramAerospaceResearch.FARPartGeometry
             return tint;
         }
 
-        // coverage: only the Debug-level tint log enumerates it
-        [ExcludeFromCodeCoverage]
         public Dictionary<Part, Color>.Enumerator GetEnumerator()
         {
             return tints.GetEnumerator();
         }
 
-        // coverage: explicit interface member nothing calls
-        [ExcludeFromCodeCoverage]
         IEnumerator<KeyValuePair<Part, Color>> IEnumerable<KeyValuePair<Part, Color>>.GetEnumerator()
         {
             return tints.GetEnumerator();
         }
 
-        // coverage: explicit interface member nothing calls
-        [ExcludeFromCodeCoverage]
         IEnumerator IEnumerable.GetEnumerator()
         {
             return tints.GetEnumerator();

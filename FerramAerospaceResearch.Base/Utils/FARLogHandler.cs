@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using UnityEngine;
 using UnityEngine.Assertions;
@@ -41,8 +40,6 @@ namespace FerramAerospaceResearch
                 LogHandler.LogFormat(Convert(logLevel), null, "{0}: {1}", tag, message);
         }
 
-        // coverage: only reached through FARLogger.Trace, [Conditional("LOG_TRACE")]: compiled out of Release builds
-        [ExcludeFromCodeCoverage]
         public void LogTrace(string tag, object message)
         {
             if (EnabledFor(LogLevel.Trace))
@@ -100,8 +97,6 @@ namespace FerramAerospaceResearch
                 LogHandler.LogFormat(Convert(logLevel), null, "{0}: {1}", tag, string.Format(format, args));
         }
 
-        // coverage: only reached through FARLogger.TraceFormat, [Conditional("LOG_TRACE")]: compiled out of Release builds
-        [ExcludeFromCodeCoverage]
         public void LogTraceFormat(string tag, string format, params object[] args)
         {
             if (EnabledFor(LogLevel.Trace))
@@ -140,8 +135,6 @@ namespace FerramAerospaceResearch
             LogHandler.LogException(exception, null);
         }
 
-        // coverage: only reached through FARLogger.Assert, [Conditional("ASSERT")]: compiled out of Release builds
-        [ExcludeFromCodeCoverage]
         public void LogAssertFormat(bool condition, string tag, string format, params object[] args)
         {
             if (condition)

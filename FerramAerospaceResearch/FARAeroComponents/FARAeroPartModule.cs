@@ -44,7 +44,6 @@ Copyright 2022, Michael Ferrara, aka Ferram4
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using ferram4;
 using FerramAerospaceResearch.FARGUI.FAREditorGUI;
 using FerramAerospaceResearch.FARGUI.FARFlightGUI;
@@ -919,8 +918,6 @@ namespace FerramAerospaceResearch.FARAeroComponents
                         return ((double*)areas)[index];
                     }
                 }
-                // coverage: nothing writes ProjectedArea by index
-                [ExcludeFromCodeCoverage]
                 set
                 {
                     FARLogger.Assert(index < 7, "Index out of bounds");
@@ -931,8 +928,6 @@ namespace FerramAerospaceResearch.FARAeroComponents
                 }
             }
 
-            // coverage: operator FAR does not use (only the SideAreaValues one is)
-            [ExcludeFromCodeCoverage]
             public static ProjectedArea operator +(ProjectedArea a, ProjectedArea b)
             {
                 a.iN += b.iN;

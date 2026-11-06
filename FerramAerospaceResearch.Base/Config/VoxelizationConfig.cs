@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using FerramAerospaceResearch.Reflection;
 using UnityEngine;
 
@@ -22,8 +21,6 @@ namespace FerramAerospaceResearch.Config
 
         [ConfigValue("color")] public List<Color> Colors { get; } = new();
 
-        // coverage: indexer nothing in FAR uses
-        [ExcludeFromCodeCoverage]
         public Color this[int index]
         {
             get { return Colors[index]; }
@@ -45,8 +42,6 @@ namespace FerramAerospaceResearch.Config
 
         [ConfigValue("debugInFlight")] public bool DebugInFlight { get; set; } = false;
 
-        // coverage: overload nothing in FAR calls
-        [ExcludeFromCodeCoverage]
         public ColorMap FirstOrDefault()
         {
             return FirstOrDefault(Default);

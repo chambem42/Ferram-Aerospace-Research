@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics.CodeAnalysis;
 using FerramAerospaceResearch.Interfaces;
 
 namespace FerramAerospaceResearch
@@ -52,8 +51,6 @@ namespace FerramAerospaceResearch
             }
         }
 
-        // coverage: nothing uses the non-generic IObservable
-        [ExcludeFromCodeCoverage]
         object IObservable.Value
         {
             get { return Value; }

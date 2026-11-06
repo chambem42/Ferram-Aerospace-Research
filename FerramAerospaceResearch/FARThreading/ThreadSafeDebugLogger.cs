@@ -45,7 +45,6 @@ Copyright 2022, Michael Ferrara, aka Ferram4
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using UnityEngine;
 
 namespace FerramAerospaceResearch.FARThreading
@@ -117,15 +116,11 @@ namespace FerramAerospaceResearch.FARThreading
             Log(LogLevel.Info, message);
         }
 
-        // coverage: only reached from fault paths (voxel chunks given back twice)
-        [ExcludeFromCodeCoverage]
         public static void Warning(string message)
         {
             Log(LogLevel.Warning, message);
         }
 
-        // coverage: only reached from fault paths (NaN or infinite voxel data, mesh errors)
-        [ExcludeFromCodeCoverage]
         public static void Error(string message)
         {
             Log(LogLevel.Error, message);

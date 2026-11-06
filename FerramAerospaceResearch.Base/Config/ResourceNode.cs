@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using FerramAerospaceResearch.Reflection;
 
 namespace FerramAerospaceResearch.Config
@@ -17,8 +16,6 @@ namespace FerramAerospaceResearch.Config
         [ConfigValue("loader")]
         public Observable<string> Loader { get; } = new Observable<string>("default");
 
-        // coverage: conversion nothing in FAR uses
-        [ExcludeFromCodeCoverage]
         public static implicit operator string(ResourceNode node)
         {
             return node.Url;

@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using FerramAerospaceResearch.Reflection;
 using UnityEngine;
@@ -33,16 +32,12 @@ namespace FerramAerospaceResearch.Settings
                     Exceptions.Add(exception.PartModuleName, exception);
         }
 
-        // coverage: the node is never saved (shouldSave: false)
-        [ExcludeFromCodeCoverage]
         public void BeforeSaved()
         {
             exceptions.Clear();
             exceptions.AddRange(Exceptions.Select(pair => pair.Value));
         }
 
-        // coverage: the node is never saved (shouldSave: false)
-        [ExcludeFromCodeCoverage]
         public void AfterSaved()
         {
         }

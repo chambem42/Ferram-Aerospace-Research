@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -85,8 +84,6 @@ namespace FerramAerospaceResearch.Reflection
             }
         }
 
-        // coverage: overload nothing in FAR calls (FARAddonLoader uses FindTypes<T>(IEnumerable<Type>, bool))
-        [ExcludeFromCodeCoverage]
         public static IEnumerable<Type> FindTypes<T>(IEnumerable<Assembly> assemblies, bool inherit)
         {
             // ReSharper disable once LoopCanBeConvertedToQuery
@@ -95,8 +92,6 @@ namespace FerramAerospaceResearch.Reflection
                     yield return type;
         }
 
-        // coverage: overload nothing in FAR calls (FARAddonLoader uses FindTypes<T>(IEnumerable<Type>, bool))
-        [ExcludeFromCodeCoverage]
         public static IEnumerable<Type> FindTypes<T>(bool inherit)
         {
             return FindTypes<T>(LoadedAssemblies, inherit);
@@ -185,8 +180,6 @@ namespace FerramAerospaceResearch.Reflection
                     yield return type;
         }
 
-        // coverage: overload nothing in FAR calls
-        [ExcludeFromCodeCoverage]
         public static IEnumerable<Type> GetTypes()
         {
             return GetTypes(LoadedAssemblies);
@@ -261,8 +254,6 @@ namespace FerramAerospaceResearch.Reflection
             }
         }
 
-        // coverage: nothing in FAR calls it
-        [ExcludeFromCodeCoverage]
         public static IEnumerable<Type> GetParentTypes(this Type type)
         {
             // is there any base type?

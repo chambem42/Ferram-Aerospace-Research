@@ -243,8 +243,6 @@ public class Renderer<T> : IDisposable, IReadOnlyDictionary<T, int> where T : Ob
 
     public PhysicalDevice Device
     {
-        // coverage: getter nothing reads (FAR only sets Device)
-        [ExcludeFromCodeCoverage]
         get { return device; }
         set
         {
@@ -257,8 +255,6 @@ public class Renderer<T> : IDisposable, IReadOnlyDictionary<T, int> where T : Ob
     // actual device pixels are counted on
     public PhysicalDevice ActualDevice { get; private set; }
 
-    // coverage: nothing in FAR reads it
-    [ExcludeFromCodeCoverage]
     public float AspectRatio
     {
         get { return (float)renderSize.x / renderSize.y; }
@@ -384,8 +380,6 @@ public class Renderer<T> : IDisposable, IReadOnlyDictionary<T, int> where T : Ob
             func(job, value);
     }
 
-    // coverage: nothing in FAR calls it
-    [ExcludeFromCodeCoverage]
     public Color ColorOf(T obj)
     {
         return ColorUintConverter.AsColor((uint)objects[obj]);
