@@ -10,7 +10,7 @@ depend on any of this.
 | `FerramAerospaceResearch.KspTests.MechJeb` | in-game tests that fly on MechJeb; only deployed where MechJeb is installed |
 | `FerramAerospaceResearch.KspTests.RP1` | heating in an RP-1 career; only deployed where RP-1 is installed |
 | `FerramAerospaceResearch.KspTests.Run` | the `dotnet test` project: one test per in-game test |
-| `Coverage/` | for coverage runs only: `FarCoverage.FastVisit`, which stands in for AltCover's recorder and passes on only a point's first visit, and `CovPatch`, which points the instrumented FAR's visit calls at it (the workflow's coverage job) |
+| `Coverage/` | for coverage runs only: `FarCoverage.FastVisit`, which stands in for AltCover's recorder and passes on only a point's first visit, and `CovPatch`, which points the instrumented FAR's visit calls at it (the workflow's Windows in-game leg) |
 
 ## Running
 
