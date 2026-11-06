@@ -303,8 +303,8 @@ namespace FerramAerospaceResearch.KspTests
         /// <summary>
         /// RealChuteLite's timer (PhysicsWatch, what times a chute's deployment and failure) runs on the game's clock:
         /// started new, it counts the game time that passes; stopped, it holds what it counted while the clock goes on,
-        /// and stopping it again changes nothing; started again it counts on from there. At the Space Center, where the
-        /// clock runs.
+        /// and stopping it again changes nothing; started again it counts on from there, and started while running it
+        /// keeps the time since it was last read. At the Space Center, where the clock runs.
         /// </summary>
         [UITest(Kind = "Check", StartsAt = StartState.SpaceCenter, TimeoutSec = 300)]
         public static IEnumerator Behaviour_ChuteTimerRunsOnGameTime(TestContext ctx)
@@ -336,6 +336,13 @@ namespace FerramAerospaceResearch.KspTests
             ctx.Record("again", $"{more:F3} s more, {counted} ms counted");
             Assert.True(watch.IsRunning, "started again, it runs");
             Assert.Near(held + more * 1000, counted, 2, "it counted on from what it held");
+
+            double ut2 = Planetarium.GetUniversalTime();
+            yield return Wait.Until(() => Planetarium.GetUniversalTime() - ut2 > 0.5, 60, "half a second more, unread", shot: false);
+            double since = Planetarium.GetUniversalTime() - ut1;
+            watch.Start();
+            Assert.True(watch.IsRunning, "started while running, it runs");
+            Assert.Near(held + since * 1000, watch.ElapsedMilliseconds, 2, "started while running, it kept the time since it was last read");
         }
     }
 }

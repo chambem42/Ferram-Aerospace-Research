@@ -820,7 +820,8 @@ namespace FerramAerospaceResearch.KspTests
                 foreach (Part p in v.parts)
                     foreach (UnityEngine.Renderer r in (IEnumerable<UnityEngine.Renderer>)cached[p])
                     {
-                        Color c = renderer.SetupRenderer(p, r, p.mpb);
+                        // every other one without a property block: the renderer's own is taken and coloured
+                        Color c = renderer.SetupRenderer(p, r, added % 2 == 0 ? p.mpb : null);
                         Assert.True(c == renderer.ColorOf(p), $"{p.partInfo.name}'s renderer gets the part's colour");
                         added++;
                     }
@@ -876,7 +877,7 @@ namespace FerramAerospaceResearch.KspTests
                         foreach (object job in (IEnumerable)Refl.Get(b, "jobCache"))
                         {
                             object resources = Refl.Get(job, "Resources");
-                            Assert.True(Equals(kernel, Refl.Get(resources, "mainKernel")), "a cached job's kernel is the one given");
+                            Assert.True(Equals(kernel, ((Geometry.Exposure.RenderResources)resources).MainKernel), "a cached job's kernel is the one given");
                             jobs++;
                         }
                     ctx.Record($"jobs{device}", jobs);
