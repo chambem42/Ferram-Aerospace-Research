@@ -556,7 +556,8 @@ namespace FerramAerospaceResearch.KspTests
                                     detail: () => (Far.EditorReady ? $"FAR's model is {Far.EditorVehicle.Length:F2} m long" : "FAR's editor not ready") +
                                                   "; parts the length leaves out: " + UnmeasuredParts() +
                                                   $"; with the meshes not drawn too the craft is {CraftExtent(root.up, root.right, root.forward, true).x:F2} m long" +
-                                                  "; not drawn: " + HiddenMeshes() + "; not readable (their bounds measured): " + UnreadableMeshes() + "; " + Safely(() => FarModelShape(root)) + "; " + Safely(() => FarGeometryBeyond(root.up)));
+                                                  "; not drawn: " + HiddenMeshes() + "; not readable (their bounds measured): " + UnreadableMeshes() +
+                                                  "; with points not finite (left out): " + NonFiniteMeshes() + "; " + Safely(() => FarModelShape(root)) + "; " + Safely(() => FarGeometryBeyond(root.up)));
             yield return Far.Settled(what);
         }
 
@@ -646,6 +647,17 @@ namespace FerramAerospaceResearch.KspTests
 
             return $"the craft's drawn meshes 0..{hi - lo:F2} m along the root's up; FAR's geometry past them: " +
                    (lines.Count == 0 ? "none" : string.Join(", ", lines));
+        }
+
+        /// <summary>The drawn meshes with points that are not finite (Far.MeshPoints leaves them out), as part/mesh (count).</summary>
+        private static string NonFiniteMeshes()
+        {
+            var lines = new List<string>();
+            foreach (Part p in EditorLogic.fetch.ship.parts)
+                foreach (MeshFilter mf in p.GetComponentsInChildren<MeshFilter>())
+                    if (mf.sharedMesh != null && mf.GetComponent<Renderer>()?.enabled == true && Far.NonFinitePoints(mf) is int n && n > 0)
+                        lines.Add($"{p.partInfo.name}/{mf.name} ({n} of {mf.sharedMesh.vertexCount}; at {mf.transform.position})");
+            return lines.Count == 0 ? "none" : string.Join(", ", lines);
         }
 
         /// <summary>The drawn meshes whose vertices cannot be read (Far.MeshPoints measures their bounds), as part/mesh.</summary>

@@ -20,10 +20,19 @@ namespace FerramAerospaceResearch.KspTests
     internal static class Far
     {
         /// <summary>
-        /// A mesh's points in world space: its vertices, or for a mesh that cannot be read (its data on the GPU only: on
-        /// Linux a stock fairing's panels, whose vertices come back empty) the corners of its bounds, which can.
+        /// A mesh's points in world space: its vertices, or for a mesh that cannot be read (its data on the GPU only) the
+        /// corners of its bounds, which can; never a point that is not finite. On Linux some drawn mesh of the ComSat Lx
+        /// has such points, and one taken into a running Vector3.Min/Max (whose comparisons a NaN fails) drops all the
+        /// craft measured before it: its length came out 6.5 m for FAR's (right) 9.05.
         /// </summary>
-        public static IEnumerable<Vector3> MeshPoints(MeshFilter mf)
+        public static IEnumerable<Vector3> MeshPoints(MeshFilter mf) => AllMeshPoints(mf).Where(Finite);
+
+        /// <summary>The points of a mesh that are not finite (NaN or infinite, in world space): none in a sound one.</summary>
+        public static int NonFinitePoints(MeshFilter mf) => AllMeshPoints(mf).Count(w => !Finite(w));
+
+        private static bool Finite(Vector3 v) => !float.IsNaN(v.x + v.y + v.z) && !float.IsInfinity(v.x + v.y + v.z);
+
+        private static IEnumerable<Vector3> AllMeshPoints(MeshFilter mf)
         {
             Mesh mesh = mf.sharedMesh;
             if (mesh == null)

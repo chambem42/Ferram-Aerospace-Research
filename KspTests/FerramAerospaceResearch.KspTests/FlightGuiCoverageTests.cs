@@ -350,7 +350,8 @@ namespace FerramAerospaceResearch.KspTests
                 hidden = true;
                 yield return Imgui.WaitWindowClosed(Far.MainWindow);
                 Assert.False(FlightGUI.showAllGUI, "FAR's windows hidden with the UI");
-                Assert.False(Imgui.WindowOpen(Far.DataWindow), "the data window hidden too");
+                // the data window too, though not necessarily the same frame (on a busy CI runner it was a frame behind)
+                yield return Imgui.WaitWindowClosed(Far.DataWindow, 5);
                 GameEvents.onShowUI.Fire();
                 hidden = false;
                 yield return Imgui.WaitWindow(Far.MainWindow);
