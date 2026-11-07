@@ -1,11 +1,13 @@
 #!/bin/bash
-# FAR's line coverage in the Windows in-game leg (tests.yml): AltCover instruments the build job's FAR, the unit and
+# FAR's line coverage in the Windows in-game jobs (tests.yml): AltCover instruments the build job's FAR, the unit and
 # in-game tests run against it, and their counts (one per sequence point) merge into a report.
 #   coverage.sh instrument   the instrumented FAR: an overlay for the in-game tests ($COV/overlay, switched to through
 #                            GITHUB_ENV only once it is complete, so a failure here leaves the tests on the plain build)
 #                            and the assemblies the unit tests build against ($COV/farbin)
 #   coverage.sh unit         the unit tests' counts ($COV/unit.xml); the unit job is the one that passes or fails them
-#   coverage.sh report       every count there is, merged into $COV/report.md and the job summary
+#   coverage.sh collect TAG  each KSP session's counts, from its results, as $COV/ingame-TAG-<n>.xml (TAG: the job's, so
+#                            the jobs' files can go in one folder)
+#   coverage.sh report       every count in $COV merged into $COV/report.md and the job summary (on any runner)
 # Uses WORK, COV, KSPTEST_GAME and KSPTEST_RESULTS (forward-slash Windows paths) and ALTCOVER (the AltCover version).
 set -eo pipefail
 FAR="$WORK/far/FerramAerospaceResearch"
@@ -57,20 +59,26 @@ unit() {
 }
 
 # the counts of every session that got as far as quitting KSP, failed tests or not
-report() {
-  local reports=() i=0 f
-  [ -f "$COV/unit.xml" ] && reports+=("$COV/unit.xml")
+collect() {
+  local tag=${1:?coverage.sh collect TAG} i=0 f
+  mkdir -p "$COV"
   for f in "$(cygpath -u "$KSPTEST_RESULTS")"/*/collected/$REPORT_REL; do
     [ -f "$f" ] || continue
-    i=$((i + 1)); cp "$f" "$COV/ingame-$i.xml"; reports+=("$COV/ingame-$i.xml")
+    i=$((i + 1)); cp "$f" "$COV/ingame-$tag-$i.xml"
   done
   echo "$i KSP session report(s)"
+}
+
+report() {
+  local reports=() f
+  for f in "$COV"/unit.xml "$COV"/ingame-*.xml; do [ -f "$f" ] && reports+=("$f"); done
+  echo "${#reports[@]} report(s)"
   if [ ${#reports[@]} -eq 0 ]; then echo "::warning::no coverage counts to report"; return 0; fi
   python -I .github/scripts/coverage_report.py "${GITHUB_REPOSITORY#*/}/" "$COV/report.md" "${reports[@]}"
   cat "$COV/report.md" >> "$GITHUB_STEP_SUMMARY"
 }
 
 case "$1" in
-  instrument | unit | report) "$1" ;;
-  *) echo "coverage.sh instrument|unit|report"; exit 2 ;;
+  instrument | unit | collect | report) "$@" ;;
+  *) echo "coverage.sh instrument|unit|collect TAG|report"; exit 2 ;;
 esac

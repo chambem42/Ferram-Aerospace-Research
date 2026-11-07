@@ -109,10 +109,12 @@ jobs:
           name: unit-results
           path: ${{ runner.temp }}/trx
 
-  # The Windows leg also measures FAR's line coverage: its in-game tests (and the unit tests again) run against FAR
-  # instrumented by AltCover, one count per sequence point, merged into a report (the job summary and the coverage
-  # artifact). FastVisit keeps that within a few percent of a plain run; Linux still tests the plain build. A failure
-  # to instrument leaves the Windows tests on the plain build, with a warning and no report.
+  # Windows runs the in-game tests split between five jobs (KSPTEST_SHARD k/N: each runs the tests KspTest deals it, by
+  # the tests' durations in earlier runs, and skips the rest), Linux all of them in one. The Windows jobs also measure
+  # FAR's line coverage: their in-game tests (and in the first, the unit tests again) run against FAR instrumented by
+  # AltCover, one count per sequence point, which the coverage job merges into a report. FastVisit keeps that within a
+  # few percent of a plain run; Linux still tests the plain build. A failure to instrument leaves a job's tests on the
+  # plain build, with a warning and no counts.
   ingame:
     needs: build
     # only where the secrets are: never for a fork's pull request
@@ -122,13 +124,17 @@ jobs:
       matrix:
         include:
           # the game's window, and so the shots: Windows' largest desktop mode; Linux batchmode's screen is 640x480
-          # whatever is asked, so its shots are that drawn at twice the size. ksps: KSPs side by side, each running a
-          # shard of the tests (split by their durations in earlier runs of the leg)
-          - { name: windows, os: windows-2022, platform: windows, window: 1920x1080, coverage: true, ksps: 5 }
-          - { name: linux, os: ubuntu-24.04, platform: linux, window: 1280x960, coverage: false, ksps: 1 }
-    name: in-game (${{ matrix.name }}${{ matrix.coverage && ', coverage' || '' }})
+          # whatever is asked, so its shots are that drawn at twice the size. shard: this job's share of its leg's tests;
+          # ksps: KSPs side by side in the job (a runner has 4 cores and 16 GB; a KSP takes about 3 GB)
+          - { name: windows-1, leg: windows, shard: 1/5, os: windows-2022, platform: windows, window: 1920x1080, coverage: true, ksps: 1 }
+          - { name: windows-2, leg: windows, shard: 2/5, os: windows-2022, platform: windows, window: 1920x1080, coverage: true, ksps: 1 }
+          - { name: windows-3, leg: windows, shard: 3/5, os: windows-2022, platform: windows, window: 1920x1080, coverage: true, ksps: 1 }
+          - { name: windows-4, leg: windows, shard: 4/5, os: windows-2022, platform: windows, window: 1920x1080, coverage: true, ksps: 1 }
+          - { name: windows-5, leg: windows, shard: 5/5, os: windows-2022, platform: windows, window: 1920x1080, coverage: true, ksps: 1 }
+          - { name: linux, leg: linux, shard: "", os: ubuntu-24.04, platform: linux, window: 1280x960, coverage: false, ksps: 1 }
+    name: in-game (${{ matrix.leg }}${{ matrix.shard && format(' {0}', matrix.shard) || '' }}${{ matrix.coverage && ', coverage' || '' }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.coverage && 180 || 150 }}
+    timeout-minutes: ${{ matrix.shard && 90 || 150 }}
     defaults:
       run:
         shell: bash
@@ -160,6 +166,7 @@ jobs:
           echo "KSPTEST_TEXTURES=low" >> "$GITHUB_ENV"
           echo "KSPTEST_WINDOW=${{ matrix.window }}" >> "$GITHUB_ENV"
           echo "KSPTEST_MAX_KSPS=${{ matrix.ksps }}" >> "$GITHUB_ENV"
+          if [ -n "${{ matrix.shard }}" ]; then echo "KSPTEST_SHARD=${{ matrix.shard }}" >> "$GITHUB_ENV"; fi
           echo "KSPTEST_DURATIONS=$w/durations" >> "$GITHUB_ENV"
           # KSPs sharing the runner's cores run slower: their waits stretched
           echo "KSPTEST_TIMEOUT_SCALE=${{ matrix.ksps > 1 && 2 || 1 }}" >> "$GITHUB_ENV"
@@ -202,13 +209,14 @@ jobs:
         run: |
           bash .github/scripts/coverage.sh instrument ||
             { echo "::warning::FAR not instrumented: the in-game tests run on the plain build"; exit 1; }
+      # the unit tests' counts, in the first job
       - uses: actions/download-artifact@v6
-        if: matrix.coverage && steps.instrument.outcome == 'success'
+        if: matrix.coverage && steps.instrument.outcome == 'success' && startsWith(matrix.shard, '1/')
         with:
           name: kspburst-unity
           path: ${{ runner.temp }}/kspburst
       - name: Unit tests (coverage)
-        if: matrix.coverage && steps.instrument.outcome == 'success'
+        if: matrix.coverage && steps.instrument.outcome == 'success' && startsWith(matrix.shard, '1/')
         continue-on-error: true
         run: bash .github/scripts/coverage.sh unit
       # batchmode's screen on Windows is no bigger than the desktop (the runner's is 1024x768, with modes up to
@@ -259,45 +267,31 @@ jobs:
           Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp >"$WORK/xvfb.log" 2>&1 &
           for i in $(seq 50); do xdpyinfo -display :99 >/dev/null 2>&1 && break; sleep 0.2; done
           echo "DISPLAY=:99" >> "$GITHUB_ENV"
-      # the leg's last runs' test durations, which the shards are split by (without them, by test count)
+      # the leg's test durations from earlier runs (the durations job keeps them), which the jobs deal the tests by:
+      # every job of a run gets the same, so each test runs in one of them (without any, the tests are dealt by count)
       - uses: actions/cache/restore@v6
-        if: matrix.ksps > 1
+        if: matrix.shard != ''
         with:
           path: ${{ runner.temp }}/durations
-          key: ksptest-durations-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: ksptest-durations-${{ matrix.name }}-
+          key: ksptest-durations-${{ matrix.leg }}-${{ github.run_id }}
+          restore-keys: ksptest-durations-${{ matrix.leg }}-
       - name: In-game tests
         run: |
           args=(test KspTests/FerramAerospaceResearch.KspTests.Run -p:KspDir="$KSPTEST_GAME"
-                --logger "console;verbosity=normal" --logger "trx;LogFileName=ingame.trx" --results-directory "$WORK/trx")
+                --logger "console;verbosity=normal" --logger "trx;LogFileName=ingame-${{ matrix.name }}.trx" --results-directory "$WORK/trx")
           [ -n "$TEST_FILTER" ] && args+=(--filter "$TEST_FILTER")
-          dotnet "${args[@]}"
-      # this run's durations added (each session's result.json), the last few runs' kept
-      - name: Durations
-        if: always() && matrix.ksps > 1
-        run: |
-          d="$(cygpath -u "$KSPTEST_DURATIONS")"; r="$(cygpath -u "$KSPTEST_RESULTS")"; mkdir -p "$d"
-          for f in "$r"/*/result.json; do
-            [ -f "$f" ] || continue
-            s="$d/$(basename "$(dirname "$f")")"; mkdir -p "$s"; cp "$f" "$s/"
-          done
-          ls -1d "$d"/*/ 2>/dev/null | sort | head -n -30 | xargs -r rm -rf
-          echo "$(ls -1d "$d"/*/ 2>/dev/null | wc -l) sessions' durations kept"
-      - uses: actions/cache/save@v6
-        if: always() && matrix.ksps > 1
-        with:
-          path: ${{ runner.temp }}/durations
-          key: ksptest-durations-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Coverage report
+          # without xUnit's "[xUnit.net 0:00:12.34] Assembly: " before each line: KspTest's lines carry their own stamp
+          # (the step's bash has pipefail: a failing run still fails it)
+          dotnet "${args[@]}" 2>&1 | sed -u -E 's/^\[xUnit\.net [0-9:.]+\] ([^ :]+: )?//'
+      - name: Coverage counts
         if: always() && matrix.coverage && steps.instrument.outcome == 'success'
-        run: bash .github/scripts/coverage.sh report
-      # the report and the counts only: never the game or an instance
+        run: bash .github/scripts/coverage.sh collect ${{ matrix.name }}
+      # the counts only: never the game or an instance
       - uses: actions/upload-artifact@v6
         if: always() && matrix.coverage && steps.instrument.outcome == 'success'
         with:
-          name: coverage
+          name: coverage-${{ matrix.name }}
           path: |
-            ${{ runner.temp }}/cov/report.md
             ${{ runner.temp }}/cov/unit.xml
             ${{ runner.temp }}/cov/ingame-*.xml
           if-no-files-found: warn
@@ -343,10 +337,12 @@ jobs:
         with:
           sparse-checkout: .github/scripts
           persist-credentials: false
+      # the leg's jobs' results in one folder (their sessions' folders are named apart)
       - uses: actions/download-artifact@v6
         continue-on-error: true
         with:
-          name: ingame-results-${{ matrix.name }}
+          pattern: ingame-results-${{ matrix.name }}*
+          merge-multiple: true
           path: ${{ runner.temp }}/results-${{ matrix.name }}
       - uses: actions/setup-python@v6
         with:
@@ -361,3 +357,63 @@ jobs:
         with:
           path: ${{ runner.temp }}/gallery/screenshots-${{ matrix.name }}.html
           archive: false
+
+  # the Windows jobs' coverage counts merged into one report (the job summary and the coverage artifact)
+  coverage:
+    needs: ingame
+    if: always() && needs.ingame.result != 'skipped'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/cov
+      - name: Report
+        run: COV="$RUNNER_TEMP/cov" bash .github/scripts/coverage.sh report
+      - uses: actions/upload-artifact@v6
+        with:
+          name: coverage
+          path: ${{ runner.temp }}/cov
+          if-no-files-found: warn
+
+  # this run's Windows test durations added to those the next run deals its jobs' tests by: every job's sessions'
+  # result.json, the last 50 sessions' kept. On Windows, as the jobs that restore them (a cache is for one OS and path)
+  durations:
+    needs: ingame
+    if: always() && needs.ingame.result != 'skipped'
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/durations
+          key: ksptest-durations-windows-${{ github.run_id }}
+          restore-keys: ksptest-durations-windows-
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: ingame-results-windows-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/new
+      - name: Durations
+        run: |
+          d="$(cygpath -u "$RUNNER_TEMP")/durations"; mkdir -p "$d"
+          for f in "$(cygpath -u "$RUNNER_TEMP")"/new/results/*/result.json; do
+            [ -f "$f" ] || continue
+            s="$d/$(basename "$(dirname "$f")")"; mkdir -p "$s"; cp "$f" "$s/"
+          done
+          ls -1d "$d"/*/ 2>/dev/null | sort | head -n -50 | xargs -r rm -rf
+          echo "$(ls -1d "$d"/*/ 2>/dev/null | wc -l) sessions' durations kept"
+      - uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/durations
+          key: ksptest-durations-windows-${{ github.run_id }}-${{ github.run_attempt }}
