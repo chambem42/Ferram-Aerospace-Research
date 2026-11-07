@@ -122,9 +122,10 @@ jobs:
       matrix:
         include:
           # the game's window, and so the shots: Windows' largest desktop mode; Linux batchmode's screen is 640x480
-          # whatever is asked, so its shots are that drawn at twice the size
-          - { name: windows, os: windows-2022, platform: windows, window: 1920x1080, coverage: true }
-          - { name: linux, os: ubuntu-24.04, platform: linux, window: 1280x960, coverage: false }
+          # whatever is asked, so its shots are that drawn at twice the size. ksps: KSPs side by side, each running a
+          # shard of the tests (split by their durations in earlier runs of the leg)
+          - { name: windows, os: windows-2022, platform: windows, window: 1920x1080, coverage: true, ksps: 5 }
+          - { name: linux, os: ubuntu-24.04, platform: linux, window: 1280x960, coverage: false, ksps: 1 }
     name: in-game (${{ matrix.name }}${{ matrix.coverage && ', coverage' || '' }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.coverage && 180 || 150 }}
@@ -158,6 +159,10 @@ jobs:
           echo "KSPTEST_KSP_ARGS=-batchmode" >> "$GITHUB_ENV"
           echo "KSPTEST_TEXTURES=low" >> "$GITHUB_ENV"
           echo "KSPTEST_WINDOW=${{ matrix.window }}" >> "$GITHUB_ENV"
+          echo "KSPTEST_MAX_KSPS=${{ matrix.ksps }}" >> "$GITHUB_ENV"
+          echo "KSPTEST_DURATIONS=$w/durations" >> "$GITHUB_ENV"
+          # KSPs sharing the runner's cores run slower: their waits stretched
+          echo "KSPTEST_TIMEOUT_SCALE=${{ matrix.ksps > 1 && 2 || 1 }}" >> "$GITHUB_ENV"
           echo "COV=$w/cov" >> "$GITHUB_ENV"
           # the plain build; Instrument FAR switches the coverage leg to its instrumented copy once that is complete
           echo "FarGameData=$w/far/FerramAerospaceResearch" >> "$GITHUB_ENV"
@@ -254,12 +259,35 @@ jobs:
           Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp >"$WORK/xvfb.log" 2>&1 &
           for i in $(seq 50); do xdpyinfo -display :99 >/dev/null 2>&1 && break; sleep 0.2; done
           echo "DISPLAY=:99" >> "$GITHUB_ENV"
+      # the leg's last runs' test durations, which the shards are split by (without them, by test count)
+      - uses: actions/cache/restore@v6
+        if: matrix.ksps > 1
+        with:
+          path: ${{ runner.temp }}/durations
+          key: ksptest-durations-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ksptest-durations-${{ matrix.name }}-
       - name: In-game tests
         run: |
           args=(test KspTests/FerramAerospaceResearch.KspTests.Run -p:KspDir="$KSPTEST_GAME"
                 --logger "console;verbosity=normal" --logger "trx;LogFileName=ingame.trx" --results-directory "$WORK/trx")
           [ -n "$TEST_FILTER" ] && args+=(--filter "$TEST_FILTER")
           dotnet "${args[@]}"
+      # this run's durations added (each session's result.json), the last few runs' kept
+      - name: Durations
+        if: always() && matrix.ksps > 1
+        run: |
+          d="$(cygpath -u "$KSPTEST_DURATIONS")"; r="$(cygpath -u "$KSPTEST_RESULTS")"; mkdir -p "$d"
+          for f in "$r"/*/result.json; do
+            [ -f "$f" ] || continue
+            s="$d/$(basename "$(dirname "$f")")"; mkdir -p "$s"; cp "$f" "$s/"
+          done
+          ls -1d "$d"/*/ 2>/dev/null | sort | head -n -30 | xargs -r rm -rf
+          echo "$(ls -1d "$d"/*/ 2>/dev/null | wc -l) sessions' durations kept"
+      - uses: actions/cache/save@v6
+        if: always() && matrix.ksps > 1
+        with:
+          path: ${{ runner.temp }}/durations
+          key: ksptest-durations-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Coverage report
         if: always() && matrix.coverage && steps.instrument.outcome == 'success'
         run: bash .github/scripts/coverage.sh report
