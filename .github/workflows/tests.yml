@@ -195,7 +195,7 @@ jobs:
         if: matrix.coverage
         continue-on-error: true
         run: |
-          .github/scripts/coverage.sh instrument ||
+          bash .github/scripts/coverage.sh instrument ||
             { echo "::warning::FAR not instrumented: the in-game tests run on the plain build"; exit 1; }
       - uses: actions/download-artifact@v6
         if: matrix.coverage && steps.instrument.outcome == 'success'
@@ -205,7 +205,7 @@ jobs:
       - name: Unit tests (coverage)
         if: matrix.coverage && steps.instrument.outcome == 'success'
         continue-on-error: true
-        run: .github/scripts/coverage.sh unit
+        run: bash .github/scripts/coverage.sh unit
       # batchmode's screen on Windows is no bigger than the desktop (the runner's is 1024x768, with modes up to
       # 1920x1080); without the change FAR's windows run off its edges
       - name: Desktop size
@@ -262,7 +262,7 @@ jobs:
           dotnet "${args[@]}"
       - name: Coverage report
         if: always() && matrix.coverage && steps.instrument.outcome == 'success'
-        run: .github/scripts/coverage.sh report
+        run: bash .github/scripts/coverage.sh report
       # the report and the counts only: never the game or an instance
       - uses: actions/upload-artifact@v6
         if: always() && matrix.coverage && steps.instrument.outcome == 'success'
