@@ -6,16 +6,18 @@ name: Tests
 # assemblies lack), the in-game tests the game itself. KSP comes from encrypted 7z volumes in a private repo's release
 # (KspTest/ci/Pack-KspGame.ps1); only the in-game jobs get the secrets, through an environment:
 #   pushes, manual runs, pull requests from branches of this repository: everything, environment ksp-game (no gate)
-#   pull requests from forks: on pull_request_target, so the workflow is the base branch's (a PR cannot change what runs
-#     with the secrets) and the code checked out the PR's head. The build runs at once; the in-game jobs wait in
-#     environment ksp-game-fork, whose required reviewers approve each run after reading the PR (Review deployments on
-#     the run): approved, the PR's code runs on runners with the game and its key, as it would after a merge. Every new
-#     push to the PR is a new run, waiting again. Its timings are not saved for later runs.
+#   pull requests from forks: on pull_request_target, so the workflow is the default branch's (GitHub takes it from
+#     there: a PR cannot change what runs) and the code checked out the PR's head. Nothing of the PR runs before the
+#     approve job, which waits in environment ksp-game-fork until one of its required reviewers approves the run after
+#     reading the PR (Review deployments on the run): approved, the PR's code builds and runs on runners with the game,
+#     its key and this repository's token and cache scope, as it would after a merge. Every new push to the PR is a new
+#     run, waiting again. Its timings are not saved for later runs.
 # The game folder is never cached or uploaded. The fork's pull_request run does nothing (its jobs are skipped).
 #
-# Secrets (environment secrets of ksp-game and ksp-game-fork): KSP_GAME_KEY (the archive key), KSP_GAME_TOKEN
-# (fine-grained, Contents: read-only on the game repo alone). Variables: KSP_GAME_REPO (owner/name of the game repo).
-# ksp-game-fork: Required reviewers (the maintainers), Allow administrators to bypass off. See KspTests/README.md.
+# Environment ksp-game: the secrets KSP_GAME_KEY (the archive key) and KSP_GAME_TOKEN (fine-grained, Contents: read-only
+# on the game repo alone), no protection rules. Environment ksp-game-fork: Required reviewers (the maintainers),
+# administrators not allowed to bypass. Repository variable KSP_GAME_REPO (owner/name of the game repo). See
+# KspTests/README.md.
 
 on:
   push:
@@ -39,17 +41,31 @@ env:
   DOTNET_NOLOGO: 1
 
 jobs:
+  # a fork's pull request: a maintainer's approval (environment ksp-game-fork's required reviewers) before anything of
+  # it runs. Nothing checked out, nothing run
+  approve:
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository
+    environment: ksp-game-fork
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "approved to run ${{ github.event.pull_request.head.repo.full_name }}@${{ github.event.pull_request.head.sha }}"
+
   build:
-    if: &here >-
-      (github.event_name != 'pull_request' && github.event_name != 'pull_request_target') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository)
+    needs: approve
+    # where the run's jobs run (see the top), once a fork's pull request is approved
+    if: >-
+      !cancelled() && (needs.approve.result == 'success' || needs.approve.result == 'skipped') &&
+      ((github.event_name != 'pull_request' && github.event_name != 'pull_request_target') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository))
     runs-on: ubuntu-24.04
     env:
       KSP_ROOT: /tmp/ksp
     steps:
       - uses: actions/checkout@v6
         with:
-          # a fork's pull request (pull_request_target): its head, not the base branch
+          # a fork's pull request (pull_request_target): its head, not the base branch; checkout refuses a fork's code
+          # there unless told, which the approve job before this makes safe to
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
+          allow-unsafe-pr-checkout: ${{ github.event_name == 'pull_request_target' }}
           persist-credentials: false
       - run: git submodule update --init buildtools
       - uses: actions/setup-python@v6
@@ -120,9 +136,8 @@ jobs:
   # Linux job runs the same steps, ingame-steps)
   ingame-windows:
     needs: build
-    if: *here
-    # the secrets' gate: a fork's pull request waits for a reviewer of ksp-game-fork
-    environment: &environment ${{ github.event_name == 'pull_request_target' && 'ksp-game-fork' || 'ksp-game' }}
+    # the secrets (environment secrets); a fork's pull request is approved by the time its build has run
+    environment: ksp-game
     strategy:
       fail-fast: false
       matrix:
@@ -147,6 +162,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
+          allow-unsafe-pr-checkout: ${{ github.event_name == 'pull_request_target' }}
           submodules: recursive
           persist-credentials: false
       - uses: actions/setup-dotnet@v5
@@ -345,8 +361,7 @@ jobs:
 
   ingame-linux:
     needs: build
-    if: *here
-    environment: *environment
+    environment: ksp-game
     strategy:
       matrix:
         include:
