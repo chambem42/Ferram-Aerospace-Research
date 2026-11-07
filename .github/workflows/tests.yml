@@ -329,7 +329,7 @@ jobs:
         include:
           # batchmode's screen on Linux is 640x480 whatever is asked: its shots are that drawn at twice the size
           - { name: linux, leg: linux, shard: "", os: ubuntu-24.04, platform: linux, window: 1280x960, coverage: false, ksps: 1 }
-    name: in-game (linux)
+    name: in-game (${{ matrix.leg }})
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     defaults:
@@ -346,7 +346,7 @@ jobs:
     strategy:
       matrix:
         name: [windows]
-    name: gallery (windows)
+    name: gallery (${{ matrix.name }})
     runs-on: ubuntu-24.04
     steps: &gallery-steps
       - uses: actions/checkout@v6
@@ -380,7 +380,7 @@ jobs:
     strategy:
       matrix:
         name: [linux]
-    name: gallery (linux)
+    name: gallery (${{ matrix.name }})
     runs-on: ubuntu-24.04
     steps: *gallery-steps
 

@@ -554,7 +554,9 @@ namespace FerramAerospaceResearch.KspTests
             yield return Wait.Until(() => Far.EditorReady && Far.EditorVehicle.Length > 0.85 * length && Far.EditorVehicle.Length < 1.1 * length,
                                     120, $"FAR's voxel model of {what}, {length:F1} m long", shot: false,
                                     detail: () => (Far.EditorReady ? $"FAR's model is {Far.EditorVehicle.Length:F2} m long" : "FAR's editor not ready") +
-                                                  "; parts the length leaves out: " + UnmeasuredParts());
+                                                  "; parts the length leaves out: " + UnmeasuredParts() +
+                                                  $"; with the meshes not drawn too the craft is {CraftExtent(root.up, root.right, root.forward, true).x:F2} m long" +
+                                                  "; not drawn: " + HiddenMeshes());
             yield return Far.Settled(what);
         }
 
@@ -578,14 +580,28 @@ namespace FerramAerospaceResearch.KspTests
             return lines.Count == 0 ? "none" : string.Join(", ", lines);
         }
 
-        /// <summary>The craft's size along three axes: the spread of its meshes' vertices (in world space) along each.</summary>
-        private static Vector3 CraftExtent(Vector3 a, Vector3 b, Vector3 c)
+        /// <summary>The meshes CraftExtent leaves out as not drawn (their renderer off), as part/mesh, with vertex counts.</summary>
+        private static string HiddenMeshes()
+        {
+            var lines = new List<string>();
+            foreach (Part p in EditorLogic.fetch.ship.parts)
+                foreach (MeshFilter mf in p.GetComponentsInChildren<MeshFilter>(true))
+                    if (mf.sharedMesh != null && mf.GetComponent<Renderer>()?.enabled != true)
+                        lines.Add($"{p.partInfo.name}/{mf.name} ({mf.sharedMesh.vertexCount} vertices{(mf.gameObject.activeInHierarchy ? "" : ", inactive")})");
+            return lines.Count == 0 ? "none" : string.Join(", ", lines);
+        }
+
+        /// <summary>
+        /// The craft's size along three axes: the spread of its meshes' vertices (in world space) along each; those drawn,
+        /// or with <paramref name="hiddenToo" /> every mesh of its active objects.
+        /// </summary>
+        private static Vector3 CraftExtent(Vector3 a, Vector3 b, Vector3 c, bool hiddenToo = false)
         {
             Vector3 min = Vector3.positiveInfinity, max = Vector3.negativeInfinity;
             foreach (Part p in EditorLogic.fetch.ship.parts)
                 foreach (MeshFilter mf in p.GetComponentsInChildren<MeshFilter>())
                 {
-                    if (mf.sharedMesh == null || mf.GetComponent<Renderer>()?.enabled != true) continue;
+                    if (mf.sharedMesh == null || !hiddenToo && mf.GetComponent<Renderer>()?.enabled != true) continue;
                     foreach (Vector3 local in mf.sharedMesh.vertices)
                     {
                         Vector3 w = mf.transform.TransformPoint(local);
