@@ -116,8 +116,8 @@ jobs:
           name: unit-results
           path: ${{ runner.temp }}/trx
 
-  # Windows runs the in-game tests split between five jobs (KSPTEST_SHARD k/N: each runs the tests KspTest deals it, by
-  # the tests' durations in earlier runs, and skips the rest), Linux all of them in one. The Windows jobs also measure
+  # Each leg runs the in-game tests split between five jobs (KSPTEST_SHARD k/N: each runs the tests KspTest deals it, by
+  # the tests' durations in the leg's earlier runs, and skips the rest). The Windows jobs also measure
   # FAR's line coverage: their in-game tests (and in the first, the unit tests again) run against FAR instrumented by
   # AltCover, one count per sequence point, which the coverage job merges into a report. FastVisit keeps that within a
   # few percent of a plain run; Linux still tests the plain build. A failure to instrument leaves a job's tests on the
@@ -335,10 +335,15 @@ jobs:
       matrix:
         include:
           # batchmode's screen on Linux is 640x480 whatever is asked: its shots are that drawn at twice the size
-          - { name: linux, leg: linux, shard: "", os: ubuntu-24.04, platform: linux, window: 1280x960, coverage: false, ksps: 1 }
-    name: in-game (${{ matrix.leg }})
+          - { name: linux-1, leg: linux, shard: 1/5, os: ubuntu-24.04, platform: linux, window: 1280x960, coverage: false, ksps: 1 }
+          - { name: linux-2, leg: linux, shard: 2/5, os: ubuntu-24.04, platform: linux, window: 1280x960, coverage: false, ksps: 1 }
+          - { name: linux-3, leg: linux, shard: 3/5, os: ubuntu-24.04, platform: linux, window: 1280x960, coverage: false, ksps: 1 }
+          - { name: linux-4, leg: linux, shard: 4/5, os: ubuntu-24.04, platform: linux, window: 1280x960, coverage: false, ksps: 1 }
+          - { name: linux-5, leg: linux, shard: 5/5, os: ubuntu-24.04, platform: linux, window: 1280x960, coverage: false, ksps: 1 }
+      fail-fast: false
+    name: in-game (${{ matrix.leg }}${{ matrix.shard && format(' {0}', matrix.shard) || '' }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
@@ -422,30 +427,36 @@ jobs:
           path: ${{ runner.temp }}/cov
           if-no-files-found: warn
 
-  # this run's Windows test durations added to those the next run deals its jobs' tests by: every job's sessions'
-  # result.json, the last 50 sessions' kept. On Windows, as the jobs that restore them (a cache is for one OS and path)
-  durations:
+  # this run's test durations of one leg added to those its next run deals its jobs' tests by: every job's sessions'
+  # result.json, the last 50 sessions' kept. On the leg's OS, as the jobs that restore them (a cache is for one OS and
+  # path)
+  durations-windows:
     needs: ingame-windows
     if: always() && needs.ingame-windows.result != 'skipped'
+    strategy:
+      matrix:
+        leg: [windows]
+    name: durations (${{ matrix.leg }})
     runs-on: windows-2022
     defaults:
       run:
         shell: bash
-    steps:
+    steps: &durations-steps
       - uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/durations
-          key: ksptest-durations-windows-${{ github.run_id }}
-          restore-keys: ksptest-durations-windows-
+          key: ksptest-durations-${{ matrix.leg }}-${{ github.run_id }}
+          restore-keys: ksptest-durations-${{ matrix.leg }}-
       - uses: actions/download-artifact@v8
         with:
-          pattern: ingame-results-windows-*
+          pattern: ingame-results-${{ matrix.leg }}-*
           merge-multiple: true
           path: ${{ runner.temp }}/new
       - name: Durations
         run: |
-          d="$(cygpath -u "$RUNNER_TEMP")/durations"; mkdir -p "$d"
-          for f in "$(cygpath -u "$RUNNER_TEMP")"/new/results/*/result.json; do
+          t="$RUNNER_TEMP"; command -v cygpath >/dev/null && t=$(cygpath -u "$t")
+          d="$t/durations"; mkdir -p "$d"
+          for f in "$t"/new/results/*/result.json; do
             [ -f "$f" ] || continue
             s="$d/$(basename "$(dirname "$f")")"; mkdir -p "$s"; cp "$f" "$s/"
           done
@@ -454,4 +465,17 @@ jobs:
       - uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/durations
-          key: ksptest-durations-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          key: ksptest-durations-${{ matrix.leg }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  durations-linux:
+    needs: ingame-linux
+    if: always() && needs.ingame-linux.result != 'skipped'
+    strategy:
+      matrix:
+        leg: [linux]
+    name: durations (${{ matrix.leg }})
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps: *durations-steps
