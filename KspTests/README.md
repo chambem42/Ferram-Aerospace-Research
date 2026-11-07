@@ -39,6 +39,33 @@ the older `Far_*` tests still to be ported. The examples here that name one set 
 `Kind=Check` tests assert what they measure. `Kind=Measure` tests record numbers and pictures for comparing FAR builds
 (run them on one build, then the other, and compare the results folders) and fail only when the flight itself does.
 
+## On GitHub Actions
+
+`.github/workflows/tests.yml` runs these and the unit tests on GitHub's runners: five Windows jobs, which also run the
+unit tests and measure FAR's line coverage, and five Linux jobs, the in-game tests dealt between each leg's jobs by
+their timings in earlier runs. A run's page has each leg's test summary and the coverage report; its Artifacts have a
+page of screenshots per leg and every session's results.
+
+The game comes from encrypted archives in a private repository's release, so the in-game jobs need its secrets:
+
+- Pushes, manual runs and pull requests from branches of this repository run everything at once.
+- A pull request from a fork runs the build at once; its tests wait for a maintainer. The workflow is always the
+  default branch's (GitHub takes `pull_request_target`'s from there), so a pull request cannot change what runs with
+  the secrets, but its code (FAR, the tests, their build) does run on runners with the game and its key. Read it for
+  anything reaching beyond the tests, such as the network, files outside the game or the environment, then approve
+  with **Review deployments** on the run. Every new push to the pull request is a new run, waiting again.
+- Contributors can run the unit tests themselves: build FAR (Release), then
+  `dotnet test KspTests/FerramAerospaceResearch.UnitTests -p:KspDir=<your KSP>`.
+
+Setting it up, once, in the repository's settings:
+
+- Environments: `ksp-game`, without protection rules, and `ksp-game-fork`, with **Required reviewers** (the
+  maintainers) and administrators not allowed to bypass them.
+- In both environments, the secrets `KSP_GAME_KEY` (the archives' key) and `KSP_GAME_TOKEN` (a fine-grained token with
+  Contents: read-only on the game repository alone). Environment secrets rather than repository ones: a job sees
+  them only once its environment lets it.
+- The variable `KSP_GAME_REPO` (owner/name of the game repository), a repository variable.
+
 ## Your own crafts
 
 Copy `FerramAerospaceResearch.KspTests.Run/ksptest.example.json` to `ksptest.json` beside it, or use the environment:

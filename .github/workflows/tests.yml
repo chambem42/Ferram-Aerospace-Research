@@ -4,16 +4,25 @@ name: Tests
 #
 # Both need the game: the unit tests its assemblies (a third of them need Unity's own code, which the public stripped
 # assemblies lack), the in-game tests the game itself. KSP comes from encrypted 7z volumes in a private repo's release
-# (KspTest/ci/Pack-KspGame.ps1), so the tests run only where the secrets are: pushes, manual runs and pull requests
-# from branches of this repository; a pull request from a fork gets the build only. It never gets the secrets, and
-# nothing here runs a fork's code with them (no pull_request_target). The game folder is never cached or uploaded.
+# (KspTest/ci/Pack-KspGame.ps1); only the in-game jobs get the secrets, through an environment:
+#   pushes, manual runs, pull requests from branches of this repository: everything, environment ksp-game (no gate)
+#   pull requests from forks: on pull_request_target, so the workflow is the base branch's (a PR cannot change what runs
+#     with the secrets) and the code checked out the PR's head. The build runs at once; the in-game jobs wait in
+#     environment ksp-game-fork, whose required reviewers approve each run after reading the PR (Review deployments on
+#     the run): approved, the PR's code runs on runners with the game and its key, as it would after a merge. Every new
+#     push to the PR is a new run, waiting again. Its timings are not saved for later runs.
+# The game folder is never cached or uploaded. The fork's pull_request run does nothing (its jobs are skipped).
 #
-# Secrets: KSP_GAME_KEY (the archive key), KSP_GAME_TOKEN (fine-grained, Contents: read-only on the game repo alone).
-# Variables: KSP_GAME_REPO (owner/name of the repo with the game releases).
+# Secrets (environment secrets of ksp-game and ksp-game-fork): KSP_GAME_KEY (the archive key), KSP_GAME_TOKEN
+# (fine-grained, Contents: read-only on the game repo alone). Variables: KSP_GAME_REPO (owner/name of the game repo).
+# ksp-game-fork: Required reviewers (the maintainers), Allow administrators to bypass off. See KspTests/README.md.
 
 on:
   push:
   pull_request:
+  # a fork's pull request, its in-game jobs behind the ksp-game-fork environment's reviewers (see above)
+  pull_request_target:
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
       filter:
@@ -31,12 +40,16 @@ env:
 
 jobs:
   build:
+    if: &here >-
+      (github.event_name != 'pull_request' && github.event_name != 'pull_request_target') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-24.04
     env:
       KSP_ROOT: /tmp/ksp
     steps:
       - uses: actions/checkout@v6
         with:
+          # a fork's pull request (pull_request_target): its head, not the base branch
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
           persist-credentials: false
       - run: git submodule update --init buildtools
       - uses: actions/setup-python@v6
@@ -107,8 +120,9 @@ jobs:
   # Linux job runs the same steps, ingame-steps)
   ingame-windows:
     needs: build
-    # only where the secrets are: never for a fork's pull request
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: *here
+    # the secrets' gate: a fork's pull request waits for a reviewer of ksp-game-fork
+    environment: &environment ${{ github.event_name == 'pull_request_target' && 'ksp-game-fork' || 'ksp-game' }}
     strategy:
       fail-fast: false
       matrix:
@@ -132,6 +146,7 @@ jobs:
     steps: &ingame-steps
       - uses: actions/checkout@v6
         with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
           submodules: recursive
           persist-credentials: false
       - uses: actions/setup-dotnet@v5
@@ -330,7 +345,8 @@ jobs:
 
   ingame-linux:
     needs: build
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: *here
+    environment: *environment
     strategy:
       matrix:
         include:
@@ -434,7 +450,8 @@ jobs:
   # build job restores
   durations-windows:
     needs: ingame-windows
-    if: always() && needs.ingame-windows.result != 'skipped'
+    # not from a fork's pull request: what later runs deal their tests by stays this repository's
+    if: always() && needs.ingame-windows.result != 'skipped' && github.event_name != 'pull_request_target'
     strategy:
       matrix:
         leg: [windows]
@@ -468,7 +485,8 @@ jobs:
 
   durations-linux:
     needs: ingame-linux
-    if: always() && needs.ingame-linux.result != 'skipped'
+    # not from a fork's pull request: what later runs deal their tests by stays this repository's
+    if: always() && needs.ingame-linux.result != 'skipped' && github.event_name != 'pull_request_target'
     strategy:
       matrix:
         leg: [linux]
