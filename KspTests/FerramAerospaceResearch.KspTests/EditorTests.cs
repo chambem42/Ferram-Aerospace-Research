@@ -556,7 +556,7 @@ namespace FerramAerospaceResearch.KspTests
                                     detail: () => (Far.EditorReady ? $"FAR's model is {Far.EditorVehicle.Length:F2} m long" : "FAR's editor not ready") +
                                                   "; parts the length leaves out: " + UnmeasuredParts() +
                                                   $"; with the meshes not drawn too the craft is {CraftExtent(root.up, root.right, root.forward, true).x:F2} m long" +
-                                                  "; not drawn: " + HiddenMeshes());
+                                                  "; not drawn: " + HiddenMeshes() + "; " + FarModelShape(root));
             yield return Far.Settled(what);
         }
 
@@ -578,6 +578,21 @@ namespace FerramAerospaceResearch.KspTests
             }
 
             return lines.Count == 0 ? "none" : string.Join(", ", lines);
+        }
+
+        /// <summary>
+        /// How FAR measured its model: Length is its sections along its main axis (from the parts' orientations), so an
+        /// axis off the craft's own makes it longer; with the voxel's bounds.
+        /// </summary>
+        private static string FarModelShape(Transform root)
+        {
+            if (!Far.EditorReady)
+                return "FAR's editor not ready";
+            VehicleAerodynamics v = Far.EditorVehicle;
+            Vector3 axis = Refl.Get<Vector3>(v, "_vehicleMainAxis");
+            double thickness = Refl.Get<double>(v, "_sectionThickness");
+            return $"FAR's main axis {axis} ({Vector3.Angle(axis, root.up):F1} deg from the root's up), " +
+                   $"{(thickness > 0 ? v.Length / thickness : 0):F0} sections of {thickness:F3} m, voxel bounds {v.VoxelBounds.size}";
         }
 
         /// <summary>The meshes CraftExtent leaves out as not drawn (their renderer off), as part/mesh, with vertex counts.</summary>
