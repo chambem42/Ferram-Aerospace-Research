@@ -1053,6 +1053,14 @@ namespace FerramAerospaceResearch.KspTests
                 yield return Wait.Frames(5);   // FARVesselAero hands the voxel bounds to the exposure in FixedUpdate
                 ctx.Record("graphics", $"{SystemInfo.graphicsDeviceType} {SystemInfo.graphicsDeviceVersion}, compute shaders {SystemInfo.supportsComputeShaders}, async readback {SystemInfo.supportsAsyncGPUReadback}");
                 RequireReadback();
+                // held still: the renders look along fixed world directions, and the rocket (no launch clamp: the stock one
+                // does not load in KspTest's instances) never settles on its engine bell, so its parts' areas drift between
+                // two renders seconds apart, past the tolerance on a slow CI runner. Kinematic, not packed: FAR still updates it
+                ctx.Record("moving", $"angular velocity {v.angularVelocity.magnitude:G3} rad/s, speed {v.srf_velocity.magnitude:G3} m/s");
+                foreach (Part p in v.parts)
+                    if (p.Rigidbody != null)
+                        p.Rigidbody.isKinematic = true;
+                yield return Wait.Frames(2);
             }
 
             /// <summary>
