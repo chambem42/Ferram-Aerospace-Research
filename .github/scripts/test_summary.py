@@ -4,7 +4,8 @@
 
 PATH: .trx files, or folders searched for them (and for KspTest's result.json files, whose per-test durations leave out
 the KSP load the first test of each session waits through). Tests a job skipped because another CI job runs them
-(KSPTEST_SHARD) are left out, so a split run reads as one. Writes to stdout; always exits 0.
+(KSPTEST_SHARD) are left out, so a split run reads as one; one that every job skipped so ran nowhere is listed, and makes
+the exit status 1 (else 0). A TRX file that cannot be read is listed, the rest reported.
 """
 import glob
 import json
@@ -56,6 +57,15 @@ def message(raw, stdout):
     return re.sub(r" \(results: [^)]*\)", "", raw).strip()
 
 
+def stamp(value):
+    """A TRX time (ISO 8601 with up to 7 decimals and a Z or an offset) as a datetime, or None."""
+    try:
+        value = re.sub(r"(\.\d{6})\d+", r"\1", value.replace("Z", "+00:00"))
+        return datetime.fromisoformat(value)
+    except (ValueError, AttributeError):
+        return None
+
+
 def clock(sec):
     if sec >= 90:
         return f"{sec / 60:.1f} min"
@@ -81,39 +91,53 @@ def main(title, paths):
         except (OSError, ValueError):
             pass
 
-    jobs, tests = [], {}
+    jobs, tests, elsewhere, unreadable = [], {}, set(), []
     for f in trx:
         job = os.path.splitext(os.path.basename(f))[0]
-        root = ET.parse(f).getroot()
+        try:
+            root = ET.parse(f).getroot()
+        except (ET.ParseError, OSError) as e:
+            unreadable.append(f"{os.path.basename(f)}: {e}")
+            continue
         counts = {"Passed": 0, "Failed": 0, "NotExecuted": 0}
         for r in root.iterfind(".//t:UnitTestResult", NS):
             outcome, msg = r.get("outcome"), text(r, "t:Output/t:ErrorInfo/t:Message")
             if outcome == "NotExecuted" and ELSEWHERE.match(msg):
+                elsewhere.add(r.get("testName"))
                 continue
             counts[outcome] = counts.get(outcome, 0) + 1
             name = r.get("testName")
-            sec = harness.get(name, seconds(r.get("duration", "0:0:0")))
+            try:
+                sec = harness.get(name, seconds(r.get("duration") or "0:0:0"))
+            except ValueError:
+                sec = 0.0
             if outcome == "Failed":
                 msg = message(msg, text(r, "t:Output/t:StdOut"))
             tests[name] = (outcome, msg, sec, job)
         times = root.find("t:Times", NS)
-        wall = 0.0
-        if times is not None and times.get("start") and times.get("finish"):
-            wall = (datetime.fromisoformat(times.get("finish")[:26] + times.get("finish")[-6:]) -
-                    datetime.fromisoformat(times.get("start")[:26] + times.get("start")[-6:])).total_seconds()
+        start, finish = (stamp(times.get("start")), stamp(times.get("finish"))) if times is not None else (None, None)
+        wall = (finish - start).total_seconds() if start and finish else 0.0
         jobs.append((job, counts, wall))
 
-    if not tests:
-        print(f"## {title}\n\nNo test results.\n")
-        return
+    nowhere = sorted(elsewhere - set(tests))
+    if not tests and not nowhere:
+        print(f"## {title}\n\nNo test results." + "".join(f"\n- unreadable: {u}" for u in unreadable) + "\n")
+        return 0
 
     by = {"Passed": [], "Failed": [], "NotExecuted": []}
     for name, (outcome, msg, sec, job) in tests.items():
         by.setdefault(outcome, []).append((name, msg, sec, job))
     passed, failed, skipped = len(by["Passed"]), len(by["Failed"]), len(by["NotExecuted"])
-    verdict = f"{failed} failed" if failed else "all passed"
+    verdict = ", ".join(v for v in (f"{failed} failed" if failed else "", f"{len(nowhere)} run in no job" if nowhere else "") if v) or "all passed"
     out = [f"## {title}: {verdict}", "",
            f"**{passed} passed, {failed} failed, {skipped} skipped** of {len(tests)}", ""]
+
+    if nowhere:
+        # every job left them to another: the jobs dealt the tests from different durations
+        out += ["### Run in no job", "", "Every job skipped these as run by another, so none ran them:", "",
+                ", ".join(short(n)[1] for n in nowhere), ""]
+    if unreadable:
+        out += ["### Unreadable results", ""] + [f"- {u}" for u in unreadable] + [""]
 
     if len(jobs) > 1:
         out += ["| job | passed | failed | skipped | time |", "|---|---|---|---|---|"]
@@ -143,10 +167,11 @@ def main(title, paths):
         out.append("")
 
     print("\n".join(out))
+    return 1 if nowhere else 0
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print(__doc__)
         sys.exit(0)
-    main(sys.argv[1], sys.argv[2:])
+    sys.exit(main(sys.argv[1], sys.argv[2:]))

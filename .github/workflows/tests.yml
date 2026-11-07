@@ -70,6 +70,32 @@ jobs:
           path: ${{ env.KSP_ROOT }}/GameData/000_KSPBurst/Plugins/Unity.*.dll
           retention-days: 1
           if-no-files-found: warn
+      # each leg's test durations from its earlier runs (the durations jobs keep them), restored once here and handed to
+      # every shard of this run as an artifact: the shards deal the tests between them by these, so they must all have
+      # the same, reruns of a failed shard included (a run's artifacts outlive its attempts; a cache entry saved since
+      # would not be the same). Workspace paths and cross-OS archives: the same entry restores on either OS
+      - uses: actions/cache/restore@v6
+        with:
+          path: durations/windows
+          key: ksptest-durations-windows-${{ github.run_id }}
+          restore-keys: ksptest-durations-windows-
+          enableCrossOsArchive: true
+      - uses: actions/cache/restore@v6
+        with:
+          path: durations/linux
+          key: ksptest-durations-linux-${{ github.run_id }}
+          restore-keys: ksptest-durations-linux-
+          enableCrossOsArchive: true
+      - name: Durations so far
+        run: |
+          mkdir -p durations/windows durations/linux
+          echo "windows: $(ls durations/windows | wc -l) sessions, linux: $(ls durations/linux | wc -l) sessions"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: durations
+          path: durations
+          include-hidden-files: true
+          if-no-files-found: ignore
 
   # Each leg runs the in-game tests split between five jobs (KSPTEST_SHARD k/N: each runs the tests KspTest deals it, by
   # the tests' durations in the leg's earlier runs, and skips the rest). The Windows jobs also measure
@@ -129,7 +155,7 @@ jobs:
           echo "KSPTEST_WINDOW=${{ matrix.window }}" >> "$GITHUB_ENV"
           echo "KSPTEST_MAX_KSPS=${{ matrix.ksps }}" >> "$GITHUB_ENV"
           if [ -n "${{ matrix.shard }}" ]; then echo "KSPTEST_SHARD=${{ matrix.shard }}" >> "$GITHUB_ENV"; fi
-          echo "KSPTEST_DURATIONS=$w/durations" >> "$GITHUB_ENV"
+          echo "KSPTEST_DURATIONS=$w/durations-all/${{ matrix.leg }}" >> "$GITHUB_ENV"
           # KSPs sharing the runner's cores run slower: their waits stretched
           echo "KSPTEST_TIMEOUT_SCALE=${{ matrix.ksps > 1 && 2 || 1 }}" >> "$GITHUB_ENV"
           echo "COV=$w/cov" >> "$GITHUB_ENV"
@@ -176,6 +202,7 @@ jobs:
       # A failure fails the job at its end (Unit test result), after the in-game tests have run
       - uses: actions/download-artifact@v8
         if: matrix.platform == 'windows' && startsWith(matrix.shard, '1/')
+        continue-on-error: true
         with:
           name: kspburst-unity
           path: ${{ runner.temp }}/kspburst
@@ -186,6 +213,7 @@ jobs:
         run: bash .github/scripts/coverage.sh unit
       - name: Unit test summary
         if: always() && matrix.platform == 'windows' && startsWith(matrix.shard, '1/')
+        continue-on-error: true
         run: python -I .github/scripts/test_summary.py "Unit tests" "$RUNNER_TEMP/unit-trx" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v6
         if: always() && matrix.platform == 'windows' && startsWith(matrix.shard, '1/')
@@ -241,14 +269,14 @@ jobs:
           Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp >"$WORK/xvfb.log" 2>&1 &
           for i in $(seq 50); do xdpyinfo -display :99 >/dev/null 2>&1 && break; sleep 0.2; done
           echo "DISPLAY=:99" >> "$GITHUB_ENV"
-      # the leg's test durations from earlier runs (the durations job keeps them), which the jobs deal the tests by:
-      # every job of a run gets the same, so each test runs in one of them (without any, the tests are dealt by count)
-      - uses: actions/cache/restore@v6
+      # the leg's test durations the build job restored, which the jobs deal the tests by: every job of the run gets the
+      # same, so each test runs in one of them (without any, the tests are dealt by count)
+      - uses: actions/download-artifact@v8
         if: matrix.shard != ''
+        continue-on-error: true
         with:
-          path: ${{ runner.temp }}/durations
-          key: ksptest-durations-${{ matrix.leg }}-${{ github.run_id }}
-          restore-keys: ksptest-durations-${{ matrix.leg }}-
+          name: durations
+          path: ${{ runner.temp }}/durations-all
       - name: In-game tests
         run: |
           args=(test KspTests/FerramAerospaceResearch.KspTests.Run -p:KspDir="$KSPTEST_GAME"
@@ -347,11 +375,6 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      # the leg's tests, its jobs' results merged (test_summary.py), for the job summary
-      - name: Summary
-        run: |
-          python -I .github/scripts/test_summary.py "In-game tests (${{ matrix.name }})" "$RUNNER_TEMP/results-${{ matrix.name }}" \
-            >> "$GITHUB_STEP_SUMMARY"
       - name: Build the page
         run: |
           python -m pip install --quiet --disable-pip-version-check pillow || echo "no Pillow: the page embeds the PNGs"
@@ -362,6 +385,13 @@ jobs:
         with:
           path: ${{ runner.temp }}/gallery/screenshots-${{ matrix.name }}.html
           archive: false
+      # the leg's tests, its jobs' results merged (test_summary.py), for the job summary; fails the job when a test ran
+      # in none of the leg's jobs
+      - name: Summary
+        if: always()
+        run: |
+          python -I .github/scripts/test_summary.py "In-game tests (${{ matrix.name }})" "$RUNNER_TEMP/results-${{ matrix.name }}" \
+            >> "$GITHUB_STEP_SUMMARY"
 
   gallery-linux:
     needs: ingame-linux
@@ -399,9 +429,9 @@ jobs:
           path: ${{ runner.temp }}/cov
           if-no-files-found: warn
 
-  # this run's test durations of one leg added to those its next run deals its jobs' tests by: every job's sessions'
-  # result.json, the last 50 sessions' kept. On the leg's OS, as the jobs that restore them (a cache is for one OS and
-  # path)
+  # this run's test durations of one leg added to those it dealt its jobs' tests by (the build job's artifact), for its
+  # next run: every job's sessions' result.json, the last 50 sessions' kept, saved cross-OS from the workspace path the
+  # build job restores
   durations-windows:
     needs: ingame-windows
     if: always() && needs.ingame-windows.result != 'skipped'
@@ -409,16 +439,13 @@ jobs:
       matrix:
         leg: [windows]
     name: durations (${{ matrix.leg }})
-    runs-on: windows-2022
-    defaults:
-      run:
-        shell: bash
+    runs-on: ubuntu-24.04
     steps: &durations-steps
-      - uses: actions/cache/restore@v6
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
         with:
-          path: ${{ runner.temp }}/durations
-          key: ksptest-durations-${{ matrix.leg }}-${{ github.run_id }}
-          restore-keys: ksptest-durations-${{ matrix.leg }}-
+          name: durations
+          path: durations
       - uses: actions/download-artifact@v8
         with:
           pattern: ingame-results-${{ matrix.leg }}-*
@@ -426,9 +453,8 @@ jobs:
           path: ${{ runner.temp }}/new
       - name: Durations
         run: |
-          t="$RUNNER_TEMP"; command -v cygpath >/dev/null && t=$(cygpath -u "$t")
-          d="$t/durations"; mkdir -p "$d"
-          for f in "$t"/new/results/*/result.json; do
+          d="durations/${{ matrix.leg }}"; mkdir -p "$d"
+          for f in "$RUNNER_TEMP"/new/results/*/result.json; do
             [ -f "$f" ] || continue
             s="$d/$(basename "$(dirname "$f")")"; mkdir -p "$s"; cp "$f" "$s/"
           done
@@ -436,8 +462,9 @@ jobs:
           echo "$(ls -1d "$d"/*/ 2>/dev/null | wc -l) sessions' durations kept"
       - uses: actions/cache/save@v6
         with:
-          path: ${{ runner.temp }}/durations
+          path: durations/${{ matrix.leg }}
           key: ksptest-durations-${{ matrix.leg }}-${{ github.run_id }}-${{ github.run_attempt }}
+          enableCrossOsArchive: true
 
   durations-linux:
     needs: ingame-linux
@@ -447,7 +474,4 @@ jobs:
         leg: [linux]
     name: durations (${{ matrix.leg }})
     runs-on: ubuntu-24.04
-    defaults:
-      run:
-        shell: bash
     steps: *durations-steps
