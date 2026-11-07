@@ -115,7 +115,9 @@ jobs:
   # AltCover, one count per sequence point, which the coverage job merges into a report. FastVisit keeps that within a
   # few percent of a plain run; Linux still tests the plain build. A failure to instrument leaves a job's tests on the
   # plain build, with a warning and no counts.
-  ingame:
+  # (two jobs, so what needs only the Windows ones - coverage, durations, their gallery - does not wait for Linux; the
+  # Linux job runs the same steps, ingame-steps)
+  ingame-windows:
     needs: build
     # only where the secrets are: never for a fork's pull request
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
@@ -123,25 +125,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # the game's window, and so the shots: Windows' largest desktop mode; Linux batchmode's screen is 640x480
-          # whatever is asked, so its shots are that drawn at twice the size. shard: this job's share of its leg's tests;
-          # ksps: KSPs side by side in the job (a runner has 4 cores and 16 GB; a KSP takes about 3 GB)
+          # the game's window, and so the shots: Windows' largest desktop mode. shard: this job's share of its leg's
+          # tests; ksps: KSPs side by side in the job (a runner has 4 cores and 16 GB; a KSP takes about 3 GB)
           - { name: windows-1, leg: windows, shard: 1/5, os: windows-2022, platform: windows, window: 1920x1080, coverage: true, ksps: 1 }
           - { name: windows-2, leg: windows, shard: 2/5, os: windows-2022, platform: windows, window: 1920x1080, coverage: true, ksps: 1 }
           - { name: windows-3, leg: windows, shard: 3/5, os: windows-2022, platform: windows, window: 1920x1080, coverage: true, ksps: 1 }
           - { name: windows-4, leg: windows, shard: 4/5, os: windows-2022, platform: windows, window: 1920x1080, coverage: true, ksps: 1 }
           - { name: windows-5, leg: windows, shard: 5/5, os: windows-2022, platform: windows, window: 1920x1080, coverage: true, ksps: 1 }
-          - { name: linux, leg: linux, shard: "", os: ubuntu-24.04, platform: linux, window: 1280x960, coverage: false, ksps: 1 }
     name: in-game (${{ matrix.leg }}${{ matrix.shard && format(' {0}', matrix.shard) || '' }}${{ matrix.coverage && ', coverage' || '' }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.shard && 90 || 150 }}
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
-    env:
+    env: &ingame-env
       TEST_FILTER: ${{ inputs.filter }}
       ALTCOVER: "9.0.145"
-    steps:
+    steps: &ingame-steps
       - uses: actions/checkout@v6
         with:
           submodules: recursive
@@ -321,18 +321,34 @@ jobs:
             !${{ runner.temp }}/results/*/collected
           if-no-files-found: warn
 
+  ingame-linux:
+    needs: build
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      matrix:
+        include:
+          # batchmode's screen on Linux is 640x480 whatever is asked: its shots are that drawn at twice the size
+          - { name: linux, leg: linux, shard: "", os: ubuntu-24.04, platform: linux, window: 1280x960, coverage: false, ksps: 1 }
+    name: in-game (linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    env: *ingame-env
+    steps: *ingame-steps
+
   # one HTML page of screenshots per in-game leg, uploaded unzipped so it opens as a single file. Its own job, from
   # the uploaded results only: a pip install never runs beside the extracted game.
-  gallery:
-    needs: ingame
-    if: always() && needs.ingame.result != 'skipped'
+  gallery-windows:
+    needs: ingame-windows
+    if: always() && needs.ingame-windows.result != 'skipped'
     strategy:
-      fail-fast: false
       matrix:
-        name: [windows, linux]
-    name: gallery (${{ matrix.name }})
+        name: [windows]
+    name: gallery (windows)
     runs-on: ubuntu-24.04
-    steps:
+    steps: &gallery-steps
       - uses: actions/checkout@v6
         with:
           sparse-checkout: .github/scripts
@@ -358,10 +374,20 @@ jobs:
           path: ${{ runner.temp }}/gallery/screenshots-${{ matrix.name }}.html
           archive: false
 
+  gallery-linux:
+    needs: ingame-linux
+    if: always() && needs.ingame-linux.result != 'skipped'
+    strategy:
+      matrix:
+        name: [linux]
+    name: gallery (linux)
+    runs-on: ubuntu-24.04
+    steps: *gallery-steps
+
   # the Windows jobs' coverage counts merged into one report (the job summary and the coverage artifact)
   coverage:
-    needs: ingame
-    if: always() && needs.ingame.result != 'skipped'
+    needs: ingame-windows
+    if: always() && needs.ingame-windows.result != 'skipped'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -387,8 +413,8 @@ jobs:
   # this run's Windows test durations added to those the next run deals its jobs' tests by: every job's sessions'
   # result.json, the last 50 sessions' kept. On Windows, as the jobs that restore them (a cache is for one OS and path)
   durations:
-    needs: ingame
-    if: always() && needs.ingame.result != 'skipped'
+    needs: ingame-windows
+    if: always() && needs.ingame-windows.result != 'skipped'
     runs-on: windows-2022
     defaults:
       run:
