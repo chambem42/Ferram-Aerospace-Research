@@ -32,6 +32,8 @@
 
     <ItemGroup>
         <!-- no shadow copies: FAR runs from bin, where an instrumented build's coverage recorder writes its counts -->
+        <!-- no theory enumeration at discovery: it serializes each case's arguments, which for a Unity type (LogType,
+             MeshTopology) reads its assembly's attributes, and a stripped UnityEngine module's attribute throws there -->
         <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
