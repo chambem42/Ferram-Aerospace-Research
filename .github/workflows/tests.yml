@@ -86,7 +86,7 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.x
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           name: far-gamedata
           path: ${{ runner.temp }}/far
@@ -94,7 +94,7 @@ jobs:
         run: |
           curl -fsSL -o "$RUNNER_TEMP/ksp.zip" https://github.com/KSPModdingLibs/KSPLibs/raw/main/KSP-1.12.5.zip
           7z x -y -bso0 -bsp0 "-o$RUNNER_TEMP/ksplibs" "$RUNNER_TEMP/ksp.zip"
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           name: kspburst-unity
           path: ${{ runner.temp }}/ksplibs/GameData/000_KSPBurst/Plugins
@@ -181,7 +181,7 @@ jobs:
             xvfb xauth x11-utils libgl1 libgl1-mesa-dri libglu1-mesa libegl1 \
             libxcursor1 libxrandr2 libxi6 libxinerama1 libxss1 libxext6 libx11-6 libgtk-3-0 \
             libpulse0 libasound2t64 libudev1 mono-runtime mono-devel ca-certificates-mono p7zip-full
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           name: far-gamedata
           path: ${{ runner.temp }}/far/FerramAerospaceResearch
@@ -210,7 +210,7 @@ jobs:
           bash .github/scripts/coverage.sh instrument ||
             { echo "::warning::FAR not instrumented: the in-game tests run on the plain build"; exit 1; }
       # the unit tests' counts, in the first job
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         if: matrix.coverage && steps.instrument.outcome == 'success' && startsWith(matrix.shard, '1/')
         with:
           name: kspburst-unity
@@ -338,7 +338,7 @@ jobs:
           sparse-checkout: .github/scripts
           persist-credentials: false
       # the leg's jobs' results in one folder (their sessions' folders are named apart)
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           pattern: ingame-results-${{ matrix.name }}*
@@ -371,7 +371,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           pattern: coverage-*
           merge-multiple: true
@@ -399,7 +399,7 @@ jobs:
           path: ${{ runner.temp }}/durations
           key: ksptest-durations-windows-${{ github.run_id }}
           restore-keys: ksptest-durations-windows-
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           pattern: ingame-results-windows-*
           merge-multiple: true

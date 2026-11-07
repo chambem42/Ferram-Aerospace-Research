@@ -192,7 +192,7 @@ namespace FerramAerospaceResearch.UnitTests
                 typeof(ThreadSafeDebugLogger).GetMethod("Update", instance).Invoke(logger, null);
                 AssertLogged(LogType.Warning, $"{FARLogger.Tag}: {warn}");
                 AssertLogged(LogType.Error, $"{FARLogger.Tag}: {error}");
-                Assert.Equal(0, ((System.Collections.IList)messagesField.GetValue(logger)).Count);
+                Assert.Empty((System.Collections.IList)messagesField.GetValue(logger));
             }
             finally
             {

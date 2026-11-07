@@ -89,7 +89,7 @@ namespace FerramAerospaceResearch.KspTests
                             $"the legend's scale runs from 0 to the largest aspect ratio, {maxAr:F2}: {legend}");
                 foreach (object r in bodyRows)
                     Assert.False(colored.Contains(Get<Part>(r, "Part")), $"{Get<string>(r, "Name")}, a body, left its own colors");
-                foreach (Part p in shipParts.Where(p => rows.All(r => Get(r, "Part") != p)))
+                foreach (Part p in shipParts.Where(p => rows.All(r => !ReferenceEquals(Get(r, "Part"), p))))
                     Assert.False(colored.Contains(p), $"{p.partInfo.title}, in no row, lost the Parts color");
                 object most = wingRows.First(r => Get<double>(r, "EffectiveAR") == maxAr);
                 AssertTint(Get<Part>(most, "Part"), Color.red, opacity, "the highest aspect ratio panel is red");
