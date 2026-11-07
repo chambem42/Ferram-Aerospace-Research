@@ -62,6 +62,14 @@ jobs:
         with:
           name: far-gamedata
           path: GameData/FerramAerospaceResearch
+      # KSPBurst's Unity packages (Unity.Mathematics and the rest), which FAR's types need and the KSPLibs zip of the
+      # unit tests does not have
+      - uses: actions/upload-artifact@v6
+        with:
+          name: kspburst-unity
+          path: ${{ env.KSP_ROOT }}/GameData/000_KSPBurst/Plugins/Unity.*.dll
+          retention-days: 1
+          if-no-files-found: warn
 
   unit:
     # .NET Framework 4.8 tests: Windows
@@ -86,6 +94,10 @@ jobs:
         run: |
           curl -fsSL -o "$RUNNER_TEMP/ksp.zip" https://github.com/KSPModdingLibs/KSPLibs/raw/main/KSP-1.12.5.zip
           7z x -y -bso0 -bsp0 "-o$RUNNER_TEMP/ksplibs" "$RUNNER_TEMP/ksp.zip"
+      - uses: actions/download-artifact@v6
+        with:
+          name: kspburst-unity
+          path: ${{ runner.temp }}/ksplibs/GameData/000_KSPBurst/Plugins
       - name: Unit tests
         run: |
           w=$(cygpath -m "$RUNNER_TEMP")
@@ -99,7 +111,8 @@ jobs:
 
   # The Windows leg also measures FAR's line coverage: its in-game tests (and the unit tests again) run against FAR
   # instrumented by AltCover, one count per sequence point, merged into a report (the job summary and the coverage
-  # artifact). FastVisit keeps that within a few percent of a plain run; Linux still tests the plain build.
+  # artifact). FastVisit keeps that within a few percent of a plain run; Linux still tests the plain build. A failure
+  # to instrument leaves the Windows tests on the plain build, with a warning and no report.
   ingame:
     needs: build
     # only where the secrets are: never for a fork's pull request
@@ -114,7 +127,7 @@ jobs:
           - { name: linux, os: ubuntu-24.04, platform: linux, window: 1280x960, coverage: false }
     name: in-game (${{ matrix.name }}${{ matrix.coverage && ', coverage' || '' }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 180
+    timeout-minutes: ${{ matrix.coverage && 180 || 150 }}
     defaults:
       run:
         shell: bash
@@ -145,15 +158,9 @@ jobs:
           echo "KSPTEST_KSP_ARGS=-batchmode" >> "$GITHUB_ENV"
           echo "KSPTEST_TEXTURES=low" >> "$GITHUB_ENV"
           echo "KSPTEST_WINDOW=${{ matrix.window }}" >> "$GITHUB_ENV"
-          if [ "${{ matrix.coverage }}" = true ]; then
-            # the instrumented build (made below); each KSP session's counts copied into its results once KSP exits
-            # (the next session's deploy into the same instance writes over them)
-            echo "COV=$w/cov" >> "$GITHUB_ENV"
-            echo "FarGameData=$w/cov/overlay/FerramAerospaceResearch" >> "$GITHUB_ENV"
-            echo "KSPTEST_COLLECT=GameData/FerramAerospaceResearch/Plugins/coverage.xml" >> "$GITHUB_ENV"
-          else
-            echo "FarGameData=$w/far/FerramAerospaceResearch" >> "$GITHUB_ENV"
-          fi
+          echo "COV=$w/cov" >> "$GITHUB_ENV"
+          # the plain build; Instrument FAR switches the coverage leg to its instrumented copy once that is complete
+          echo "FarGameData=$w/far/FerramAerospaceResearch" >> "$GITHUB_ENV"
       - name: Linux packages
         if: matrix.platform == 'linux'
         run: |
@@ -182,44 +189,23 @@ jobs:
         run: |
           mkdir -p "$WORK/ckan"
           curl -fsSL -o "$KSPTEST_CKAN" https://github.com/KSP-CKAN/CKAN/releases/latest/download/ckan.exe
+      # coverage: .github/scripts/coverage.sh
       - name: Instrument FAR
+        id: instrument
         if: matrix.coverage
+        continue-on-error: true
         run: |
-          curl -fsSL -o "$WORK/altcover.nupkg" "https://www.nuget.org/api/v2/package/altcover/$ALTCOVER"
-          7z x -y -bso0 -bsp0 "-o$WORK/altcover" "$WORK/altcover.nupkg" 'tools/net472/*'
-          p="$WORK/far/FerramAerospaceResearch/Plugins"
-          mkdir -p "$COV/in" "$COV/farbin" "$COV/overlay"
-          cp "$p"/FerramAerospaceResearch*.dll "$p"/FerramAerospaceResearch*.pdb "$COV/in/"
-          # --linecover: sequence points only (the report counts lines); the branch probes cost about a fifth of the run
-          # KSP's own assemblies resolve FAR's references (it needs nothing from the mods it talks to)
-          deps=(); for f in "$(cygpath -u "$KSPTEST_GAME")"/KSP_x64_Data/Managed/*.dll; do deps+=("-d=$(cygpath -m "$f")"); done
-          "$WORK/altcover/tools/net472/AltCover.exe" -i="$COV/in" -o="$COV/out" --save --portable --linecover -a=ExcludeFromCodeCoverage "${deps[@]}" > "$COV/instrument.log" 2>&1 ||
-            { tail -20 "$COV/instrument.log"; exit 1; }
-          # AltCover's recorder allocates and looks up string-keyed dictionaries on every visit, recorded points too:
-          # under Mono's stop-the-world GC FAR's multithreaded sweeps ran ~20x slower for it. Every visit call goes to
-          # FastVisit instead, which passes only a point's first visit on (all AltCover records) and returns at once after
-          dotnet build KspTests/Coverage/FarCoverage.FastVisit -c Release -v q -nologo -o "$COV/fastvisit"
-          dotnet run -c Release --project KspTests/Coverage/CovPatch -- "$COV/out/FerramAerospaceResearch.dll" "$COV/out/FerramAerospaceResearch.Base.dll"
-          cp "$COV/fastvisit/FarCoverage.FastVisit.dll" "$COV/out/"
-          # the in-game tests' FAR: the build's GameData with the instrumented assemblies, the recorder and its report
-          cp -r "$WORK/far/FerramAerospaceResearch" "$COV/overlay/"; rm -f "$COV/overlay/FerramAerospaceResearch/Plugins/"*.pdb
-          cp "$COV/out"/FerramAerospaceResearch*.dll "$COV/out/AltCover.Recorder.g.dll" "$COV/out/FarCoverage.FastVisit.dll" "$COV/out/coverage.xml" \
-            "$COV/overlay/FerramAerospaceResearch/Plugins/"
-          # the unit tests' FAR
-          cp "$COV/out"/FerramAerospaceResearch*.dll "$COV/out/AltCover.Recorder.g.dll" "$COV/out/FarCoverage.FastVisit.dll" "$p/ferramGraph.dll" "$COV/farbin/"
-      # the unit tests' counts, against the stripped assemblies as the unit job runs them (they carry Unity.Burst, which
-      # the stock game does not); the unit job is the one that passes or fails them
+          .github/scripts/coverage.sh instrument ||
+            { echo "::warning::FAR not instrumented: the in-game tests run on the plain build"; exit 1; }
+      - uses: actions/download-artifact@v6
+        if: matrix.coverage && steps.instrument.outcome == 'success'
+        with:
+          name: kspburst-unity
+          path: ${{ runner.temp }}/kspburst
       - name: Unit tests (coverage)
-        if: matrix.coverage
-        run: |
-          curl -fsSL -o "$WORK/ksplibs.zip" https://github.com/KSPModdingLibs/KSPLibs/raw/main/KSP-1.12.5.zip
-          7z x -y -bso0 -bsp0 "-o$WORK/ksplibs" "$WORK/ksplibs.zip"
-          U=KspTests/FerramAerospaceResearch.UnitTests/bin/Debug/net48
-          dotnet build KspTests/FerramAerospaceResearch.UnitTests "-p:KspDir=$WORK/ksplibs" "-p:FarBin=$COV/farbin" -v q -nologo
-          # the build copies only the FAR assemblies it references: the recorder, FastVisit and the report by hand
-          cp "$COV/out/coverage.xml" "$COV/out/AltCover.Recorder.g.dll" "$COV/out/FarCoverage.FastVisit.dll" "$U/"
-          dotnet test KspTests/FerramAerospaceResearch.UnitTests --no-build || echo "::warning::unit tests failed under coverage"
-          cp "$U/coverage.xml" "$COV/unit.xml"
+        if: matrix.coverage && steps.instrument.outcome == 'success'
+        continue-on-error: true
+        run: .github/scripts/coverage.sh unit
       # batchmode's screen on Windows is no bigger than the desktop (the runner's is 1024x768, with modes up to
       # 1920x1080); without the change FAR's windows run off its edges
       - name: Desktop size
@@ -274,22 +260,12 @@ jobs:
                 --logger "console;verbosity=normal" --logger "trx;LogFileName=ingame.trx" --results-directory "$WORK/trx")
           [ -n "$TEST_FILTER" ] && args+=(--filter "$TEST_FILTER")
           dotnet "${args[@]}"
-      # the counts of every session that got as far as quitting KSP, failed tests or not
       - name: Coverage report
-        if: always() && matrix.coverage
-        run: |
-          reports=(); [ -f "$COV/unit.xml" ] && reports+=("$COV/unit.xml"); i=0
-          for f in "$(cygpath -u "$KSPTEST_RESULTS")"/*/collected/GameData/FerramAerospaceResearch/Plugins/coverage.xml; do
-            [ -f "$f" ] || continue
-            i=$((i+1)); cp "$f" "$COV/ingame-$i.xml"; reports+=("$COV/ingame-$i.xml")
-          done
-          echo "$i KSP session report(s)"
-          [ ${#reports[@]} -gt 0 ] || { echo "no coverage reports"; exit 0; }
-          python -I .github/scripts/coverage_report.py "${GITHUB_REPOSITORY#*/}/" "$COV/report.md" "${reports[@]}"
-          cat "$COV/report.md" >> "$GITHUB_STEP_SUMMARY"
+        if: always() && matrix.coverage && steps.instrument.outcome == 'success'
+        run: .github/scripts/coverage.sh report
       # the report and the counts only: never the game or an instance
       - uses: actions/upload-artifact@v6
-        if: always() && matrix.coverage
+        if: always() && matrix.coverage && steps.instrument.outcome == 'success'
         with:
           name: coverage
           path: |
@@ -316,9 +292,11 @@ jobs:
         if: always()
         with:
           name: ingame-results-${{ matrix.name }}
+          # the sessions' coverage counts go in the coverage artifact
           path: |
             ${{ runner.temp }}/results
             ${{ runner.temp }}/trx
+            !${{ runner.temp }}/results/*/collected
           if-no-files-found: warn
 
   # one HTML page of screenshots per in-game leg, uploaded unzipped so it opens as a single file. Its own job, from
