@@ -553,8 +553,29 @@ namespace FerramAerospaceResearch.KspTests
             double length = CraftExtent(root.up, root.right, root.forward).x;
             yield return Wait.Until(() => Far.EditorReady && Far.EditorVehicle.Length > 0.85 * length && Far.EditorVehicle.Length < 1.1 * length,
                                     120, $"FAR's voxel model of {what}, {length:F1} m long", shot: false,
-                                    detail: () => Far.EditorReady ? $"FAR's model is {Far.EditorVehicle.Length:F2} m long" : "FAR's editor not ready");
+                                    detail: () => (Far.EditorReady ? $"FAR's model is {Far.EditorVehicle.Length:F2} m long" : "FAR's editor not ready") +
+                                                  "; parts the length leaves out: " + UnmeasuredParts());
             yield return Far.Settled(what);
+        }
+
+        /// <summary>
+        /// The parts none of whose vertices CraftExtent counts, each with why: its mesh filters, those without a mesh,
+        /// those not drawn, and those whose mesh has no vertices to read.
+        /// </summary>
+        private static string UnmeasuredParts()
+        {
+            var lines = new List<string>();
+            foreach (Part p in EditorLogic.fetch.ship.parts)
+            {
+                MeshFilter[] mfs = p.GetComponentsInChildren<MeshFilter>();
+                int noMesh = mfs.Count(mf => mf.sharedMesh == null);
+                int hidden = mfs.Count(mf => mf.sharedMesh != null && mf.GetComponent<Renderer>()?.enabled != true);
+                int empty = mfs.Count(mf => mf.sharedMesh != null && mf.GetComponent<Renderer>()?.enabled == true && mf.sharedMesh.vertices.Length == 0);
+                if (mfs.Length - noMesh - hidden - empty == 0)
+                    lines.Add($"{p.partInfo.name} ({mfs.Length} mesh filters: {noMesh} without a mesh, {hidden} not drawn, {empty} without vertices)");
+            }
+
+            return lines.Count == 0 ? "none" : string.Join(", ", lines);
         }
 
         /// <summary>The craft's size along three axes: the spread of its meshes' vertices (in world space) along each.</summary>
