@@ -103,6 +103,13 @@ jobs:
           w=$(cygpath -m "$RUNNER_TEMP")
           dotnet test KspTests/FerramAerospaceResearch.UnitTests "-p:KspDir=$w/ksplibs" "-p:FarBin=$w/far/Plugins" \
             --logger "console;verbosity=normal" --logger "trx;LogFileName=unit.trx" --results-directory "$w/trx"
+      - uses: actions/setup-python@v6
+        if: always()
+        with:
+          python-version: "3.12"
+      - name: Summary
+        if: always()
+        run: python -I .github/scripts/test_summary.py "Unit tests" "$RUNNER_TEMP/trx" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -338,15 +345,15 @@ jobs:
     env: *ingame-env
     steps: *ingame-steps
 
-  # one HTML page of screenshots per in-game leg, uploaded unzipped so it opens as a single file. Its own job, from
-  # the uploaded results only: a pip install never runs beside the extracted game.
+  # one leg's test summary (the job summary) and its page of screenshots, uploaded unzipped so it opens as a single
+  # file. Its own job, from the uploaded results only: a pip install never runs beside the extracted game.
   gallery-windows:
     needs: ingame-windows
     if: always() && needs.ingame-windows.result != 'skipped'
     strategy:
       matrix:
         name: [windows]
-    name: gallery (${{ matrix.name }})
+    name: results (${{ matrix.name }})
     runs-on: ubuntu-24.04
     steps: &gallery-steps
       - uses: actions/checkout@v6
@@ -363,6 +370,11 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      # the leg's tests, its jobs' results merged (test_summary.py), for the job summary
+      - name: Summary
+        run: |
+          python -I .github/scripts/test_summary.py "In-game tests (${{ matrix.name }})" "$RUNNER_TEMP/results-${{ matrix.name }}" \
+            >> "$GITHUB_STEP_SUMMARY"
       - name: Build the page
         run: |
           python -m pip install --quiet --disable-pip-version-check pillow || echo "no Pillow: the page embeds the PNGs"
@@ -380,7 +392,7 @@ jobs:
     strategy:
       matrix:
         name: [linux]
-    name: gallery (${{ matrix.name }})
+    name: results (${{ matrix.name }})
     runs-on: ubuntu-24.04
     steps: *gallery-steps
 
