@@ -4,7 +4,8 @@
 #   coverage.sh instrument   the instrumented FAR: an overlay for the in-game tests ($COV/overlay, switched to through
 #                            GITHUB_ENV only once it is complete, so a failure here leaves the tests on the plain build)
 #                            and the assemblies the unit tests build against ($COV/farbin)
-#   coverage.sh unit         the unit tests' counts ($COV/unit.xml); the unit job is the one that passes or fails them
+#   coverage.sh unit         the unit tests, against the instrumented FAR (else the plain build), their results in
+#                            $WORK/unit-trx and their counts in $COV/unit.xml; fails when a test does
 #   coverage.sh collect TAG  each KSP session's counts, from its results, as $COV/ingame-TAG-<n>.xml (TAG: the job's, so
 #                            the jobs' files can go in one folder)
 #   coverage.sh report       every count in $COV merged into $COV/report.md and the job summary (on any runner)
@@ -43,19 +44,23 @@ instrument() {
   } >> "$GITHUB_ENV"
 }
 
-# against the game's own assemblies, so the tests that need Unity's code run too (the unit job has only stripped
-# ones), with KSPBurst's Unity packages from the build job ($WORK/kspburst). A folder of their own: the game's stays as
-# extracted for the instances
+# against the game's own assemblies, so the tests that need Unity's code run too (stripped ones, as the public KSPLibs
+# zip has, skip a third of them), with KSPBurst's Unity packages from the build job ($WORK/kspburst). A folder of their
+# own: the game's stays as extracted for the instances
 unit() {
-  local k="$WORK/unit-ksp" u=KspTests/FerramAerospaceResearch.UnitTests/bin/Debug/net48
+  local k="$WORK/unit-ksp" u=KspTests/FerramAerospaceResearch.UnitTests/bin/Debug/net48 farbin="$COV/farbin" status=0
+  # FAR not instrumented (instrument failed): the plain build, without counts
+  [ -f "$farbin/FerramAerospaceResearch.dll" ] || farbin="$FAR/Plugins"
   mkdir -p "$k/KSP_x64_Data" "$k/GameData/000_KSPBurst/Plugins"
   cp -r "$KSPTEST_GAME/KSP_x64_Data/Managed" "$k/KSP_x64_Data/"
   cp "$WORK/kspburst"/Unity.*.dll "$k/GameData/000_KSPBurst/Plugins/"
-  dotnet build KspTests/FerramAerospaceResearch.UnitTests "-p:KspDir=$k" "-p:FarBin=$COV/farbin" -v q -nologo
+  dotnet build KspTests/FerramAerospaceResearch.UnitTests "-p:KspDir=$k" "-p:FarBin=$farbin" -v q -nologo
   # the build copies only the FAR assemblies it references: the recorder, FastVisit and the report by hand
-  cp "$OUT/coverage.xml" "$OUT/AltCover.Recorder.g.dll" "$OUT/FarCoverage.FastVisit.dll" "$u/"
-  dotnet test KspTests/FerramAerospaceResearch.UnitTests --no-build || echo "::warning::unit tests failed under coverage"
-  cp "$u/coverage.xml" "$COV/unit.xml"
+  if [ "$farbin" = "$COV/farbin" ]; then cp "$OUT/coverage.xml" "$OUT/AltCover.Recorder.g.dll" "$OUT/FarCoverage.FastVisit.dll" "$u/"; fi
+  dotnet test KspTests/FerramAerospaceResearch.UnitTests --no-build --logger "console;verbosity=normal" \
+    --logger "trx;LogFileName=unit.trx" --results-directory "$WORK/unit-trx" || status=$?
+  if [ "$farbin" = "$COV/farbin" ]; then cp "$u/coverage.xml" "$COV/unit.xml"; fi
+  return $status
 }
 
 # the counts of every session that got as far as quitting KSP, failed tests or not

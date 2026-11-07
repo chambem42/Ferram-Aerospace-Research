@@ -4,7 +4,7 @@
         FAR's unit tests: the code that runs without the game (aero formulas, curves, formatting, config parsing), in a
         plain .NET Framework process, in seconds. Built against FAR's compiled assemblies (FarBin: FAR's bin/Release by
         default, so build FAR first) and the KSP and Unity assemblies in KspDir, copied beside the tests to run with them.
-        With stripped assemblies (KSPBuildTools' KSPLibs zip, as fork PRs have) Unity's types have no code: the tests that
+        With stripped assemblies (KSPBuildTools' KSPLibs zip) Unity's types have no code: the tests that
         need them skip (UnityRuntime.Available), the rest run.
     -->
     <PropertyGroup>

@@ -2,11 +2,11 @@ name: Tests
 
 # FAR's test suite (KspTests/): unit tests outside the game, and in-game tests in KSP 1.12.5 on GitHub's runners.
 #
-# Unit tests run for every push and pull request, against KSPBuildTools' stripped KSP assemblies (no secrets; the tests
-# that need Unity's own code skip there). In-game tests need the game: KSP comes from encrypted 7z volumes in a private
-# repo's release (KspTest/ci/Pack-KspGame.ps1), so they run only where the secrets are: pushes, manual runs and pull
-# requests from branches of this repository. A pull request from a fork never gets the secrets, and nothing here runs
-# a fork's code with them (no pull_request_target). The game folder is never cached or uploaded.
+# Both need the game: the unit tests its assemblies (a third of them need Unity's own code, which the public stripped
+# assemblies lack), the in-game tests the game itself. KSP comes from encrypted 7z volumes in a private repo's release
+# (KspTest/ci/Pack-KspGame.ps1), so the tests run only where the secrets are: pushes, manual runs and pull requests
+# from branches of this repository; a pull request from a fork gets the build only. It never gets the secrets, and
+# nothing here runs a fork's code with them (no pull_request_target). The game folder is never cached or uploaded.
 #
 # Secrets: KSP_GAME_KEY (the archive key), KSP_GAME_TOKEN (fine-grained, Contents: read-only on the game repo alone).
 # Variables: KSP_GAME_REPO (owner/name of the repo with the game releases).
@@ -62,8 +62,8 @@ jobs:
         with:
           name: far-gamedata
           path: GameData/FerramAerospaceResearch
-      # KSPBurst's Unity packages (Unity.Mathematics and the rest), which FAR's types need and the KSPLibs zip of the
-      # unit tests does not have
+      # KSPBurst's Unity packages (Unity.Mathematics and the rest), which FAR's types need and the stock game the unit
+      # tests run against does not have
       - uses: actions/upload-artifact@v6
         with:
           name: kspburst-unity
@@ -71,54 +71,9 @@ jobs:
           retention-days: 1
           if-no-files-found: warn
 
-  unit:
-    # .NET Framework 4.8 tests: Windows
-    needs: build
-    runs-on: windows-2022
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-          persist-credentials: false
-      - uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: 8.x
-      - uses: actions/download-artifact@v8
-        with:
-          name: far-gamedata
-          path: ${{ runner.temp }}/far
-      - name: Stripped KSP assemblies
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/ksp.zip" https://github.com/KSPModdingLibs/KSPLibs/raw/main/KSP-1.12.5.zip
-          7z x -y -bso0 -bsp0 "-o$RUNNER_TEMP/ksplibs" "$RUNNER_TEMP/ksp.zip"
-      - uses: actions/download-artifact@v8
-        with:
-          name: kspburst-unity
-          path: ${{ runner.temp }}/ksplibs/GameData/000_KSPBurst/Plugins
-      - name: Unit tests
-        run: |
-          w=$(cygpath -m "$RUNNER_TEMP")
-          dotnet test KspTests/FerramAerospaceResearch.UnitTests "-p:KspDir=$w/ksplibs" "-p:FarBin=$w/far/Plugins" \
-            --logger "console;verbosity=normal" --logger "trx;LogFileName=unit.trx" --results-directory "$w/trx"
-      - uses: actions/setup-python@v6
-        if: always()
-        with:
-          python-version: "3.12"
-      - name: Summary
-        if: always()
-        run: python -I .github/scripts/test_summary.py "Unit tests" "$RUNNER_TEMP/trx" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: unit-results
-          path: ${{ runner.temp }}/trx
-
   # Each leg runs the in-game tests split between five jobs (KSPTEST_SHARD k/N: each runs the tests KspTest deals it, by
   # the tests' durations in the leg's earlier runs, and skips the rest). The Windows jobs also measure
-  # FAR's line coverage: their in-game tests (and in the first, the unit tests again) run against FAR instrumented by
+  # FAR's line coverage: their in-game tests (and in the first, the unit tests) run against FAR instrumented by
   # AltCover, one count per sequence point, which the coverage job merges into a report. FastVisit keeps that within a
   # few percent of a plain run; Linux still tests the plain build. A failure to instrument leaves a job's tests on the
   # plain build, with a warning and no counts.
@@ -216,16 +171,28 @@ jobs:
         run: |
           bash .github/scripts/coverage.sh instrument ||
             { echo "::warning::FAR not instrumented: the in-game tests run on the plain build"; exit 1; }
-      # the unit tests' counts, in the first job
+      # the unit tests (.NET Framework 4.8: Windows), in the first Windows job, against the game's own assemblies (all of
+      # them run, as the public stripped ones do not let a third of them) and the instrumented FAR, for their counts too.
+      # A failure fails the job at its end (Unit test result), after the in-game tests have run
       - uses: actions/download-artifact@v8
-        if: matrix.coverage && steps.instrument.outcome == 'success' && startsWith(matrix.shard, '1/')
+        if: matrix.platform == 'windows' && startsWith(matrix.shard, '1/')
         with:
           name: kspburst-unity
           path: ${{ runner.temp }}/kspburst
-      - name: Unit tests (coverage)
-        if: matrix.coverage && steps.instrument.outcome == 'success' && startsWith(matrix.shard, '1/')
+      - name: Unit tests
+        id: unit
+        if: matrix.platform == 'windows' && startsWith(matrix.shard, '1/')
         continue-on-error: true
         run: bash .github/scripts/coverage.sh unit
+      - name: Unit test summary
+        if: always() && matrix.platform == 'windows' && startsWith(matrix.shard, '1/')
+        run: python -I .github/scripts/test_summary.py "Unit tests" "$RUNNER_TEMP/unit-trx" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        if: always() && matrix.platform == 'windows' && startsWith(matrix.shard, '1/')
+        with:
+          name: unit-results
+          path: ${{ runner.temp }}/unit-trx
+          if-no-files-found: warn
       # batchmode's screen on Windows is no bigger than the desktop (the runner's is 1024x768, with modes up to
       # 1920x1080); without the change FAR's windows run off its edges
       - name: Desktop size
@@ -327,6 +294,11 @@ jobs:
             ${{ runner.temp }}/trx
             !${{ runner.temp }}/results/*/collected
           if-no-files-found: warn
+      - name: Unit test result
+        if: always() && steps.unit.outcome == 'failure'
+        run: |
+          echo "::error::unit tests failed: see the Unit tests step and the job summary"
+          exit 1
 
   ingame-linux:
     needs: build
