@@ -552,7 +552,8 @@ namespace FerramAerospaceResearch.KspTests
             Transform root = EditorLogic.RootPart.transform;
             double length = CraftExtent(root.up, root.right, root.forward).x;
             yield return Wait.Until(() => Far.EditorReady && Far.EditorVehicle.Length > 0.85 * length && Far.EditorVehicle.Length < 1.1 * length,
-                                    120, $"FAR's voxel model of {what}, {length:F1} m long", shot: false);
+                                    120, $"FAR's voxel model of {what}, {length:F1} m long", shot: false,
+                                    detail: () => Far.EditorReady ? $"FAR's model is {Far.EditorVehicle.Length:F2} m long" : "FAR's editor not ready");
             yield return Far.Settled(what);
         }
 

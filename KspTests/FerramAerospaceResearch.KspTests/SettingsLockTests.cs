@@ -28,7 +28,9 @@ namespace FerramAerospaceResearch.KspTests
         private static FARDebugAndSettings DebugInstance =>
             UnityEngine.Object.FindObjectOfType<FARDebugAndSettings>() ?? throw new UITestFailure("FAR's FARDebugAndSettings is not there");
 
-        private static Vector2 Away => new Vector2(Screen.width - 3, Screen.height - 3);
+        // left of both windows (the debug window from x 50, the model options from x 80) on any screen: on Linux
+        // batchmode's 640x480 the 700-wide debug window reaches past the right edge and down to the bottom
+        private static Vector2 Away => new Vector2(3, 3);
 
         /// <summary>
         /// At the Space Center: FAR's stock toolbar button opens the debug window and closes it again. The window
