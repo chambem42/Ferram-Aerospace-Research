@@ -556,7 +556,7 @@ namespace FerramAerospaceResearch.KspTests
                                     detail: () => (Far.EditorReady ? $"FAR's model is {Far.EditorVehicle.Length:F2} m long" : "FAR's editor not ready") +
                                                   "; parts the length leaves out: " + UnmeasuredParts() +
                                                   $"; with the meshes not drawn too the craft is {CraftExtent(root.up, root.right, root.forward, true).x:F2} m long" +
-                                                  "; not drawn: " + HiddenMeshes() + "; " + FarModelShape(root));
+                                                  "; not drawn: " + HiddenMeshes() + "; not readable (their bounds measured): " + UnreadableMeshes() + "; " + Safely(() => FarModelShape(root)) + "; " + Safely(() => FarGeometryBeyond(root.up)));
             yield return Far.Settled(what);
         }
 
@@ -580,6 +580,13 @@ namespace FerramAerospaceResearch.KspTests
             return lines.Count == 0 ? "none" : string.Join(", ", lines);
         }
 
+        /// <summary>A diagnostic's text, or what it threw: it goes into a failure's message, which it must not replace.</summary>
+        private static string Safely(Func<string> diagnostic)
+        {
+            try { return diagnostic(); }
+            catch (Exception e) { return $"({e.GetType().Name}: {e.Message})"; }
+        }
+
         /// <summary>
         /// How FAR measured its model: Length is its sections along its main axis (from the parts' orientations), so an
         /// axis off the craft's own makes it longer; with the voxel's bounds.
@@ -593,6 +600,63 @@ namespace FerramAerospaceResearch.KspTests
             double thickness = Refl.Get<double>(v, "_sectionThickness");
             return $"FAR's main axis {axis} ({Vector3.Angle(axis, root.up):F1} deg from the root's up), " +
                    $"{(thickness > 0 ? v.Length / thickness : 0):F0} sections of {thickness:F3} m, voxel bounds {v.VoxelBounds.size}";
+        }
+
+        /// <summary>
+        /// FAR's geometry (each part's GeometryPartModule meshes, its vertices where FAR places them) reaching more than
+        /// 0.25 m past the craft's drawn meshes along <paramref name="axis" />: part/mesh and its span from the craft's start.
+        /// </summary>
+        private static string FarGeometryBeyond(Vector3 axis)
+        {
+            double lo = double.PositiveInfinity, hi = double.NegativeInfinity;
+            foreach (Part p in EditorLogic.fetch.ship.parts)
+                foreach (MeshFilter mf in p.GetComponentsInChildren<MeshFilter>())
+                {
+                    if (mf.sharedMesh == null || mf.GetComponent<Renderer>()?.enabled != true) continue;
+                    foreach (Vector3 w in Far.MeshPoints(mf))
+                    {
+                        double d = Vector3.Dot(w, axis);
+                        lo = Math.Min(lo, d);
+                        hi = Math.Max(hi, d);
+                    }
+                }
+
+            var lines = new List<string>();
+            foreach (Part p in EditorLogic.fetch.ship.parts)
+            {
+                GeometryPartModule geo = p.FindModuleImplementing<GeometryPartModule>();
+                if (geo?.meshDataList == null) continue;
+                foreach (GeometryMesh m in geo.meshDataList)
+                {
+                    if (!m.valid || m.vertices == null || m.vertices.Length == 0) continue;
+                    // FAR keeps the vertices in its vessel frame (thisToVesselMatrix of the mesh's local ones): back to world
+                    Matrix4x4 toWorld = m.meshLocalToWorld * m.thisToVesselMatrix.inverse;
+                    double a = double.PositiveInfinity, b = double.NegativeInfinity;
+                    foreach (Vector3 v in m.vertices)
+                    {
+                        double d = Vector3.Dot(toWorld.MultiplyPoint3x4(v), axis);
+                        a = Math.Min(a, d);
+                        b = Math.Max(b, d);
+                    }
+
+                    if (a < lo - 0.25 || b > hi + 0.25)
+                        lines.Add($"{p.partInfo.name}/{(m.meshTransform != null ? m.meshTransform.name : "?")} {a - lo:F2}..{b - lo:F2} m");
+                }
+            }
+
+            return $"the craft's drawn meshes 0..{hi - lo:F2} m along the root's up; FAR's geometry past them: " +
+                   (lines.Count == 0 ? "none" : string.Join(", ", lines));
+        }
+
+        /// <summary>The drawn meshes whose vertices cannot be read (Far.MeshPoints measures their bounds), as part/mesh.</summary>
+        private static string UnreadableMeshes()
+        {
+            var lines = new List<string>();
+            foreach (Part p in EditorLogic.fetch.ship.parts)
+                foreach (MeshFilter mf in p.GetComponentsInChildren<MeshFilter>())
+                    if (mf.sharedMesh != null && !mf.sharedMesh.isReadable && mf.GetComponent<Renderer>()?.enabled == true)
+                        lines.Add($"{p.partInfo.name}/{mf.name} ({mf.sharedMesh.vertexCount} vertices)");
+            return lines.Count == 0 ? "none" : string.Join(", ", lines);
         }
 
         /// <summary>The meshes CraftExtent leaves out as not drawn (their renderer off), as part/mesh, with vertex counts.</summary>
@@ -617,9 +681,8 @@ namespace FerramAerospaceResearch.KspTests
                 foreach (MeshFilter mf in p.GetComponentsInChildren<MeshFilter>())
                 {
                     if (mf.sharedMesh == null || !hiddenToo && mf.GetComponent<Renderer>()?.enabled != true) continue;
-                    foreach (Vector3 local in mf.sharedMesh.vertices)
+                    foreach (Vector3 w in Far.MeshPoints(mf))
                     {
-                        Vector3 w = mf.transform.TransformPoint(local);
                         var d = new Vector3(Vector3.Dot(w, a), Vector3.Dot(w, b), Vector3.Dot(w, c));
                         min = Vector3.Min(min, d);
                         max = Vector3.Max(max, d);

@@ -19,6 +19,28 @@ namespace FerramAerospaceResearch.KspTests
     /// </summary>
     internal static class Far
     {
+        /// <summary>
+        /// A mesh's points in world space: its vertices, or for a mesh that cannot be read (its data on the GPU only: on
+        /// Linux a stock fairing's panels, whose vertices come back empty) the corners of its bounds, which can.
+        /// </summary>
+        public static IEnumerable<Vector3> MeshPoints(MeshFilter mf)
+        {
+            Mesh mesh = mf.sharedMesh;
+            if (mesh == null)
+                yield break;
+            if (mesh.isReadable)
+            {
+                foreach (Vector3 v in mesh.vertices)
+                    yield return mf.transform.TransformPoint(v);
+                yield break;
+            }
+
+            Bounds b = mesh.bounds;
+            for (int i = 0; i < 8; i++)
+                yield return mf.transform.TransformPoint(new Vector3((i & 1) == 0 ? b.min.x : b.max.x, (i & 2) == 0 ? b.min.y : b.max.y,
+                                                                     (i & 4) == 0 ? b.min.z : b.max.z));
+        }
+
         /// <summary>The stock plane most tests fly or analyse.</summary>
         public const string Plane = "Aeris 4A";
 

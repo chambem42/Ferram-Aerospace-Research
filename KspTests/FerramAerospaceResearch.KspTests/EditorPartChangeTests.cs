@@ -562,9 +562,9 @@ namespace FerramAerospaceResearch.KspTests
                 foreach (MeshFilter mf in p.GetComponentsInChildren<MeshFilter>())
                 {
                     if (mf.sharedMesh == null || mf.GetComponent<Renderer>()?.enabled != true) continue;
-                    foreach (Vector3 local in mf.sharedMesh.vertices)
+                    foreach (Vector3 w in Far.MeshPoints(mf))
                     {
-                        double d = Vector3.Dot(mf.transform.TransformPoint(local), axis);
+                        double d = Vector3.Dot(w, axis);
                         min = Math.Min(min, d);
                         max = Math.Max(max, d);
                     }
