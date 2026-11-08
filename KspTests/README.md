@@ -48,18 +48,25 @@ page of screenshots per leg and every session's results.
 
 The game comes from encrypted archives in a private repository's release, so the in-game jobs need its secrets:
 
-- Pushes, manual runs and pull requests from branches of this repository run everything at once.
+- Pushes and manual runs run everything at once. A pull request from a branch of this repository shows its branch's
+  push runs. A newer push to a branch other than the default one cancels the branch's run still going.
 - A pull request from a fork runs on `pull_request_target`, whose workflow is always the default branch's, so a pull
   request cannot change what runs. Nothing of it runs (not even its build) until a small gate job, which runs none of
   its code, lets it:
-  - opened by the repository's owner, a member of its organization or a collaborator: at once, on every push;
-  - anyone else's: when someone with write access adds the label **run-ingame**. The gate takes the label off at
-    once, so it starts one run, of the commit the pull request was at when labelled; a new push runs nothing until
-    it is labelled again. A label from someone without write access is taken off and starts nothing.
+  - opened by someone with write access to this repository: at once, on every push;
+  - anyone else's: when someone with write access reviews its latest commit and then adds the label **run-ingame**.
+    The review can be a comment (Files changed > Review changes > Comment): it is not an approval to merge, but GitHub
+    records which commit it was of. The gate takes the label off at once and runs the pull request only if the
+    labeller's review is of the commit it is at, so a push between the review and the label runs nothing; it says
+    why in a comment. A new push needs a new review and the label again. A label from someone without write access
+    is taken off and starts nothing.
 
   Let in, its code (FAR, the tests, their build) runs on runners with the game, its key and this repository's token
-  and cache, as it would after a merge. Before labelling, read it for anything reaching beyond the tests, such as the
-  network, files outside the game or the environment.
+  and cache, as it would after a merge: it could write cache entries, such as the test timings later runs deal their
+  tests by, itself. Before reviewing, read it for anything reaching beyond the tests, such as the network, the cache,
+  files outside the game or the environment.
+- Without the `ksp-game` environment's `KSP_GAME_REPO` (a fork running its own pushes, say), only the build runs: the
+  in-game jobs are skipped with a notice.
 - Contributors can run the unit tests themselves: build FAR (Release), then
   `dotnet test KspTests/FerramAerospaceResearch.UnitTests -p:KspDir=<your KSP>`.
 
@@ -69,11 +76,11 @@ Setting it up, once, in the repository's settings:
 - An Actions policy allowing `pull_request_target` for this workflow (Settings > Actions > Policies): since December
   2, 2026 GitHub blocks that event in public repositories unless a policy allows it. Target the workflow path
   `.github/workflows/tests.yml`, enforcement Active, with the protection **Restrict events** allowing `push`,
-  `pull_request`, `pull_request_target` and `workflow_dispatch`: Restrict events lets the targeted workflow run on
-  the listed events only, so one listing just `pull_request_target` stops its push runs. Through the REST API:
+  `pull_request_target` and `workflow_dispatch`: Restrict events lets the targeted workflow run on the listed events
+  only, so one listing just `pull_request_target` stops its push runs. Through the REST API:
   `POST /repos/{owner}/{repo}/actions/policies` with `{"name": ..., "enforcement": "active", "conditions":
   {"workflow_path": {"include": [".github/workflows/tests.yml"], "exclude": []}}, "rules": [{"type":
-  "restrict_action_events", "parameters": {"allowed_events": ["push", "pull_request", "pull_request_target",
+  "restrict_action_events", "parameters": {"allowed_events": ["push", "pull_request_target",
   "workflow_dispatch"]}}]}` (header `X-GitHub-Api-Version: 2026-03-10`).
 - Environment `ksp-game`, without protection rules, with the secrets `KSP_GAME_KEY` (the archives' key) and
   `KSP_GAME_TOKEN` (a fine-grained token with Contents: read-only on the game repository alone), and the variable

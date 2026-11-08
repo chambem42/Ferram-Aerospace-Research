@@ -56,12 +56,17 @@ def tail(path, n=60):
 def run_section(run_dir, out):
     name = os.path.basename(run_dir.rstrip("/\\"))
     result_file = os.path.join(run_dir, "result.json")
-    if not os.path.exists(result_file):
-        out.append(f'<section class="run"><h2>{badge("crash")} {esc(name)}</h2><p>No result.json: the end of harness.log</p>'
+    r, why = None, "No result.json"
+    if os.path.exists(result_file):
+        try:
+            with open(result_file, encoding="utf-8") as f:
+                r = json.load(f)
+        except (OSError, ValueError) as e:
+            why = f"Unreadable result.json ({e})"
+    if not isinstance(r, dict):
+        out.append(f'<section class="run"><h2>{badge("crash")} {esc(name)}</h2><p>{esc(why)}: the end of harness.log</p>'
                    f'<pre>{esc(tail(os.path.join(run_dir, "harness.log")))}</pre></section>')
         return 0
-    with open(result_file, encoding="utf-8") as f:
-        r = json.load(f)
     shots = 0
     out.append(f'<section class="run"><h2>{badge(r.get("status"))} {esc(name)}</h2>'
                f'<p class="meta">{secs(r.get("durationSec"))} &middot; ended in {esc(r.get("scene"))}</p>')
