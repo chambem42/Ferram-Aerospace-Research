@@ -66,6 +66,15 @@ The game comes from encrypted archives in a private repository's release, so the
 Setting it up, once, in the repository's settings:
 
 - The label `run-ingame` (Issues > Labels).
+- An Actions policy allowing `pull_request_target` for this workflow (Settings > Actions > Policies): since December
+  2, 2026 GitHub blocks that event in public repositories unless a policy allows it. Target the workflow path
+  `.github/workflows/tests.yml`, enforcement Active, with the protection **Restrict events** allowing `push`,
+  `pull_request`, `pull_request_target` and `workflow_dispatch`: Restrict events lets the targeted workflow run on
+  the listed events only, so one listing just `pull_request_target` stops its push runs. Through the REST API:
+  `POST /repos/{owner}/{repo}/actions/policies` with `{"name": ..., "enforcement": "active", "conditions":
+  {"workflow_path": {"include": [".github/workflows/tests.yml"], "exclude": []}}, "rules": [{"type":
+  "restrict_action_events", "parameters": {"allowed_events": ["push", "pull_request", "pull_request_target",
+  "workflow_dispatch"]}}]}` (header `X-GitHub-Api-Version: 2026-03-10`).
 - Environment `ksp-game`, without protection rules, with the secrets `KSP_GAME_KEY` (the archives' key) and
   `KSP_GAME_TOKEN` (a fine-grained token with Contents: read-only on the game repository alone): environment secrets
   rather than repository ones, so only the in-game jobs see them.
