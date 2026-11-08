@@ -76,9 +76,9 @@ Setting it up, once, in the repository's settings:
   "restrict_action_events", "parameters": {"allowed_events": ["push", "pull_request", "pull_request_target",
   "workflow_dispatch"]}}]}` (header `X-GitHub-Api-Version: 2026-03-10`).
 - Environment `ksp-game`, without protection rules, with the secrets `KSP_GAME_KEY` (the archives' key) and
-  `KSP_GAME_TOKEN` (a fine-grained token with Contents: read-only on the game repository alone): environment secrets
-  rather than repository ones, so only the in-game jobs see them.
-- The variable `KSP_GAME_REPO` (owner/name of the game repository), a repository variable.
+  `KSP_GAME_TOKEN` (a fine-grained token with Contents: read-only on the game repository alone), and the variable
+  `KSP_GAME_REPO` (owner/name of the game repository): environment secrets rather than repository ones, so only the
+  in-game jobs see them.
 
 ## Your own crafts
 

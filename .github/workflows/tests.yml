@@ -17,7 +17,7 @@ name: Tests
 # The game folder is never cached or uploaded. The fork's pull_request run does nothing (its jobs are skipped).
 #
 # Environment ksp-game: the secrets KSP_GAME_KEY (the archive key) and KSP_GAME_TOKEN (fine-grained, Contents: read-only
-# on the game repo alone). Repository variable KSP_GAME_REPO (owner/name of the game repo). Label run-ingame. See
+# on the game repo alone), the variable KSP_GAME_REPO (owner/name of the game repo). Label run-ingame. See
 # KspTests/README.md.
 
 on:
