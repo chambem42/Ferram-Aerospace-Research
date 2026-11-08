@@ -62,6 +62,7 @@ namespace FerramAerospaceResearch.KspTests
 
                 ctx.Step("Left the editor with the new model still held");
                 yield return Nav.ToSpaceCenter(ctx);
+                Assert.True(!Hold.TimedOut, "the new model still held as the scene closed (the hold gave up first)");
                 VoxelChunk[] free;
                 lock (pool)
                     free = pool.ToArray();
@@ -169,6 +170,7 @@ namespace FerramAerospaceResearch.KspTests
 
                 ctx.Step("Left flight with the new model still held");
                 yield return Nav.ToSpaceCenter(ctx);
+                Assert.True(!Hold.TimedOut, "the new model still held as the scene closed (the hold gave up first)");
 
                 ctx.Step("The held model let go");
                 Hold.Release.Set();
@@ -218,12 +220,15 @@ namespace FerramAerospaceResearch.KspTests
         {
             private static int armed;
             public static volatile VehicleVoxel Built;
+            /// <summary>The hold gave up before the test let it go: what the test checked did not happen during it.</summary>
+            public static volatile bool TimedOut;
             public static readonly ManualResetEvent Reached = new ManualResetEvent(false);
             public static readonly ManualResetEvent Release = new ManualResetEvent(false);
 
             public static void Arm()
             {
                 Built = null;
+                TimedOut = false;
                 Reached.Reset();
                 Release.Reset();
                 Interlocked.Exchange(ref armed, 1);
@@ -242,8 +247,10 @@ namespace FerramAerospaceResearch.KspTests
                 Built = __result;
                 Reached.Set();
                 // never for good: the test lets it go when it ends however it ends (the harness disposes a test it
-                // stops), and so does this, well before a voxelization the next test waits on gives up
-                Release.WaitOne(TimeSpan.FromSeconds(60));
+                // stops), and so does this, well before a voxelization the next test waits on gives up; stretched on a
+                // run known to be slow, as the test's own waits are
+                if (!Release.WaitOne(TimeSpan.FromSeconds(60 * Math.Max(1, Wait.TimeoutScale))))
+                    TimedOut = true;
             }
         }
     }

@@ -30,47 +30,53 @@ namespace FerramAerospaceResearch.KspTests.RP1
             string[] modes = (ctx.Param("modes") ?? "Master+Pr156+Hybrid").Split('+');
             string tag = ctx.Param("tag", "Mk1-3_Test_RP1");
             ThermalAreaModes.Install();
-            ctx.Record("exposedAreaLimited", ThermalAreaModes.ExposedAreaLimited);
-
-            var summary = new StringBuilder(FarThermalModeTests.EntrySummaryHeader);
-            foreach (string modeName in modes)
+            try
             {
-                var mode = (ThermalAreaModes.Mode)Enum.Parse(typeof(ThermalAreaModes.Mode), modeName, true);
-                ctx.Step($"Entry, mode {mode}");
-                ThermalAreaModes.Current = mode;
-                yield return Rp1.Simulate(ctx, new SimSpec
+                ctx.Record("exposedAreaLimited", ThermalAreaModes.ExposedAreaLimited);
+
+                var summary = new StringBuilder(FarThermalModeTests.EntrySummaryHeader);
+                foreach (string modeName in modes)
                 {
-                    StartInOrbit = true, Mode = "Reentry", PeKm = peKm, Arrival = "Apoapsis", ApKm = apKm, EntryAltKm = entryAltKm,
-                    IncDeg = incDeg, Attitude = "Retrograde",
-                });
-                yield return FarThermalModeTests.WaitVoxels();
-                Vessel v = FlightGlobals.ActiveVessel;
-                if (v.altitude < entryAltKm * 500)
-                    throw new UITestFailure($"the sim did not start in orbit (alt {v.altitude / 1000:F1} km, {v.situation}): KCT rejected the entry?");
-                ThermalAreaModes.Set(mode, v);
-                Flight.IgnoreMaxTemperature(true);
-                Ctrl.Sas(false);
-                string Areas() => string.Join("; ", v.parts.ConvertAll(p => $"{p.partInfo.name} {ThermalAreaModes.FarTotal(p):F2} [{string.Join(" ", Array.ConvertAll(ThermalAreaModes.FarFaces(p), x => x.ToString("F2")))}]"));
-                ctx.Record($"{mode}.farAreasPlaced", Areas());
-                Flight.PointAtAoA(aoa);
-                if (ctx.Param("revoxel", "off") == "on")
-                {
-                    // voxelize again with the vessel held still at its entry attitude (KCT turned it while FAR voxelized)
-                    foreach (Part p in v.parts)
-                        if (p.Rigidbody != null) p.Rigidbody.angularVelocity = UnityEngine.Vector3.zero;
-                    yield return Wait.Seconds(0.5);
-                    FarApi.RequestRevoxel(v);
-                    yield return Wait.Seconds(1);
+                    var mode = (ThermalAreaModes.Mode)Enum.Parse(typeof(ThermalAreaModes.Mode), modeName, true);
+                    ctx.Step($"Entry, mode {mode}");
+                    ThermalAreaModes.Current = mode;
+                    yield return Rp1.Simulate(ctx, new SimSpec
+                    {
+                        StartInOrbit = true, Mode = "Reentry", PeKm = peKm, Arrival = "Apoapsis", ApKm = apKm, EntryAltKm = entryAltKm,
+                        IncDeg = incDeg, Attitude = "Retrograde",
+                    });
                     yield return FarThermalModeTests.WaitVoxels();
-                    ctx.Record($"{mode}.farAreasRevoxel", Areas());
+                    Vessel v = FlightGlobals.ActiveVessel;
+                    if (v.altitude < entryAltKm * 500)
+                        throw new UITestFailure($"the sim did not start in orbit (alt {v.altitude / 1000:F1} km, {v.situation}): KCT rejected the entry?");
+                    ThermalAreaModes.Set(mode, v);
+                    Flight.IgnoreMaxTemperature(true);
+                    Ctrl.Sas(false);
+                    string Areas() => string.Join("; ", v.parts.ConvertAll(p => $"{p.partInfo.name} {ThermalAreaModes.FarTotal(p):F2} [{string.Join(" ", Array.ConvertAll(ThermalAreaModes.FarFaces(p), x => x.ToString("F2")))}]"));
+                    ctx.Record($"{mode}.farAreasPlaced", Areas());
+                    Flight.PointAtAoA(aoa);
+                    if (ctx.Param("revoxel", "off") == "on")
+                    {
+                        // voxelize again with the vessel held still at its entry attitude (KCT turned it while FAR voxelized)
+                        foreach (Part p in v.parts)
+                            if (p.Rigidbody != null) p.Rigidbody.angularVelocity = UnityEngine.Vector3.zero;
+                        yield return Wait.Seconds(0.5);
+                        FarApi.RequestRevoxel(v);
+                        yield return Wait.Seconds(1);
+                        yield return FarThermalModeTests.WaitVoxels();
+                        ctx.Record($"{mode}.farAreasRevoxel", Areas());
+                    }
+                    ctx.Record($"{mode}.start", $"UT {Planetarium.GetUniversalTime():F0}, alt {v.altitude / 1000:F1} km, speed {v.srfSpeed:F0} m/s");
+                    yield return FarThermalModeTests.FlyEntry(ctx, v, mode, aoa, endAltKm, 0, hyper, tag, summary);
+                    Flight.IgnoreMaxTemperature(false);
+                    yield return Rp1.RevertToEditorViaWindow();
                 }
-                ctx.Record($"{mode}.start", $"UT {Planetarium.GetUniversalTime():F0}, alt {v.altitude / 1000:F1} km, speed {v.srfSpeed:F0} m/s");
-                yield return FarThermalModeTests.FlyEntry(ctx, v, mode, aoa, endAltKm, 0, hyper, tag, summary);
-                Flight.IgnoreMaxTemperature(false);
-                yield return Rp1.RevertToEditorViaWindow();
+                File.WriteAllText(Path.Combine(ctx.ResultsDir, $"entry_{tag}_parts.csv"), summary.ToString());
             }
-            ThermalAreaModes.Current = ThermalAreaModes.Mode.Native;
-            File.WriteAllText(Path.Combine(ctx.ResultsDir, $"entry_{tag}_parts.csv"), summary.ToString());
+            finally
+            {
+                FarThermalModeTests.PutBack();
+            }
         }
 
         /// <summary>

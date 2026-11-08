@@ -169,41 +169,46 @@ namespace FerramAerospaceResearch.KspTests
             ctx.Step("Launch " + craft);
             yield return LaunchCraft(ctx, craft, facility);
             ThermalAreaModes.Install();
-            Flight.IgnoreMaxTemperature(true);
-            Ctrl.Sas(false);
-
-            ctx.Step($"Place on a {peKm} x {apKm} km orbit descending through {startAltKm} km");
-            Vessel v = FlightGlobals.ActiveVessel;
-            Flight.SetOrbitDescendingAt(peKm * 1000, apKm * 1000, 0, 0, 0, startAltKm * 1000);
-            yield return Wait.Seconds(2);
-            yield return Wait.Until(() => !FlightGlobals.ActiveVessel.packed, 60, "off rails");
-            Flight.PointAtAoA(aoa);
-            ResetThermal(FlightGlobals.ActiveVessel, startTemp);
-            yield return Wait.Frames(3);
-            GamePersistence.SaveGame("ksptest-entry", HighLogic.SaveFolder, SaveMode.OVERWRITE);
-            ctx.Record("start", $"alt {FlightGlobals.ActiveVessel.altitude / 1000:F1} km, speed {FlightGlobals.ActiveVessel.srfSpeed:F0} m/s");
-
-            var summary = new StringBuilder(EntrySummaryHeader);
-            foreach (string modeName in modes)
+            try
             {
-                var mode = (ThermalAreaModes.Mode)Enum.Parse(typeof(ThermalAreaModes.Mode), modeName, true);
-                ctx.Step($"Entry, mode {mode}");
-                ThermalAreaModes.Current = mode;
-                Game g = GamePersistence.LoadGame("ksptest-entry", HighLogic.SaveFolder, true, false);
-                FlightDriver.StartAndFocusVessel(g, g.flightState.activeVesselIdx);
-                yield return Wait.Seconds(2);
-                yield return Wait.FlightReady(120);
-                yield return WaitVoxels();
-                v = FlightGlobals.ActiveVessel;
-                ThermalAreaModes.Set(mode, v);
                 Flight.IgnoreMaxTemperature(true);
                 Ctrl.Sas(false);
 
-                yield return FlyEntry(ctx, v, mode, aoa, endAltKm, warp, ctx.ParamDouble("hyper", 0), tag, summary);
+                ctx.Step($"Place on a {peKm} x {apKm} km orbit descending through {startAltKm} km");
+                Vessel v = FlightGlobals.ActiveVessel;
+                Flight.SetOrbitDescendingAt(peKm * 1000, apKm * 1000, 0, 0, 0, startAltKm * 1000);
+                yield return Wait.Seconds(2);
+                yield return Wait.Until(() => !FlightGlobals.ActiveVessel.packed, 60, "off rails");
+                Flight.PointAtAoA(aoa);
+                ResetThermal(FlightGlobals.ActiveVessel, startTemp);
+                yield return Wait.Frames(3);
+                GamePersistence.SaveGame("ksptest-entry", HighLogic.SaveFolder, SaveMode.OVERWRITE);
+                ctx.Record("start", $"alt {FlightGlobals.ActiveVessel.altitude / 1000:F1} km, speed {FlightGlobals.ActiveVessel.srfSpeed:F0} m/s");
+
+                var summary = new StringBuilder(EntrySummaryHeader);
+                foreach (string modeName in modes)
+                {
+                    var mode = (ThermalAreaModes.Mode)Enum.Parse(typeof(ThermalAreaModes.Mode), modeName, true);
+                    ctx.Step($"Entry, mode {mode}");
+                    ThermalAreaModes.Current = mode;
+                    Game g = GamePersistence.LoadGame("ksptest-entry", HighLogic.SaveFolder, true, false);
+                    FlightDriver.StartAndFocusVessel(g, g.flightState.activeVesselIdx);
+                    yield return Wait.Seconds(2);
+                    yield return Wait.FlightReady(120);
+                    yield return WaitVoxels();
+                    v = FlightGlobals.ActiveVessel;
+                    ThermalAreaModes.Set(mode, v);
+                    Flight.IgnoreMaxTemperature(true);
+                    Ctrl.Sas(false);
+
+                    yield return FlyEntry(ctx, v, mode, aoa, endAltKm, warp, ctx.ParamDouble("hyper", 0), tag, summary);
+                }
+                File.WriteAllText(Path.Combine(ctx.ResultsDir, $"entry_{tag}_parts.csv"), summary.ToString());
             }
-            ThermalAreaModes.Current = ThermalAreaModes.Mode.Native;
-            Flight.IgnoreMaxTemperature(false);
-            File.WriteAllText(Path.Combine(ctx.ResultsDir, $"entry_{tag}_parts.csv"), summary.ToString());
+            finally
+            {
+                FarThermalModeTests.PutBack();
+            }
         }
 
         public const string EntrySummaryHeader = "mode,part,index,peakSkinK,skinMaxK,peakSkinFrac,peakIntK,intMaxK,peakIntFrac,ablatorUsed,radArea,expArea,convArea,convAreaMult,convTempMult,skinExpFrac,skinMass,crossSection\n";
@@ -263,76 +268,95 @@ namespace FerramAerospaceResearch.KspTests
             ctx.Step("Launch " + craft);
             yield return LaunchCraft(ctx, craft, facility);
             ThermalAreaModes.Install();
-            Ctrl.Sas(false);
-
-            ctx.Step($"Place in a {orbitKm} km orbit under the sun");
-            Flight.SetOrbitAtMeanAnomaly(orbitKm * 1000, orbitKm * 1000, 0, 0, 0, 0);
-            yield return Wait.Seconds(2);
-            yield return Wait.Until(() => !FlightGlobals.ActiveVessel.packed, 60, "off rails");
-            // turn the orbit so the vessel sits under the sun, a quarter orbit before noon
-            Vessel v = FlightGlobals.ActiveVessel;
-            Vector3d r = (v.CoMD - v.mainBody.position).normalized, s = (Planetarium.fetch.Sun.position - v.mainBody.position).normalized;
-            Vector3d nrm = v.orbit.GetOrbitNormal().xzy.normalized;
-            Vector3d sIn = (s - Vector3d.Dot(s, nrm) * nrm).normalized;
-            double ang = Math.Atan2(Vector3d.Dot(Vector3d.Cross(r, sIn), nrm), Vector3d.Dot(r, sIn));
-            double target = ang - ctx.ParamDouble("leadDeg", 30) * Math.PI / 180;
-            for (int attempt = 0; attempt < 2; attempt++)
+            try
             {
-                Flight.SetOrbitAtMeanAnomaly(orbitKm * 1000, orbitKm * 1000, 0, 0, 0, attempt == 0 ? target : -target);
+                Ctrl.Sas(false);
+
+                ctx.Step($"Place in a {orbitKm} km orbit under the sun");
+                Flight.SetOrbitAtMeanAnomaly(orbitKm * 1000, orbitKm * 1000, 0, 0, 0, 0);
                 yield return Wait.Seconds(2);
                 yield return Wait.Until(() => !FlightGlobals.ActiveVessel.packed, 60, "off rails");
-                v = FlightGlobals.ActiveVessel;
-                r = (v.CoMD - v.mainBody.position).normalized;
-                s = (Planetarium.fetch.Sun.position - v.mainBody.position).normalized;
-                if (Vector3d.Dot(r, s) > 0.5) break;
-            }
-            ctx.Record("sunElevationDeg", F(90 - Vector3d.Angle(r, s)));
-            foreach (Part p in v.parts)
-                if (p.Rigidbody != null) p.Rigidbody.angularVelocity = Vector3.zero;
-            ResetThermal(v, startTemp);
-            yield return Wait.Frames(3);
-            GamePersistence.SaveGame("ksptest-orbit", HighLogic.SaveFolder, SaveMode.OVERWRITE);
-
-            var csv = new StringBuilder("mode,part,index,t,skinK,unexpSkinK,intK,radArea,sunArea,bodyArea,skinMass,radFlux,sunlit\n");
-            foreach (string modeName in modes)
-            {
-                var mode = (ThermalAreaModes.Mode)Enum.Parse(typeof(ThermalAreaModes.Mode), modeName, true);
-                ctx.Step($"Soak, mode {mode}");
-                ThermalAreaModes.Current = mode;
-                Game g = GamePersistence.LoadGame("ksptest-orbit", HighLogic.SaveFolder, true, false);
-                FlightDriver.StartAndFocusVessel(g, g.flightState.activeVesselIdx);
-                yield return Wait.Seconds(2);
-                yield return Wait.FlightReady(120);
-                yield return WaitVoxels();
-                v = FlightGlobals.ActiveVessel;
-                ThermalAreaModes.Set(mode, v);
+                // turn the orbit so the vessel sits under the sun, a quarter orbit before noon
+                Vessel v = FlightGlobals.ActiveVessel;
+                Vector3d r = (v.CoMD - v.mainBody.position).normalized, s = (Planetarium.fetch.Sun.position - v.mainBody.position).normalized;
+                Vector3d nrm = v.orbit.GetOrbitNormal().xzy.normalized;
+                Vector3d sIn = (s - Vector3d.Dot(s, nrm) * nrm).normalized;
+                double ang = Math.Atan2(Vector3d.Dot(Vector3d.Cross(r, sIn), nrm), Vector3d.Dot(r, sIn));
+                double target = ang - ctx.ParamDouble("leadDeg", 30) * Math.PI / 180;
+                for (int attempt = 0; attempt < 2; attempt++)
+                {
+                    Flight.SetOrbitAtMeanAnomaly(orbitKm * 1000, orbitKm * 1000, 0, 0, 0, attempt == 0 ? target : -target);
+                    yield return Wait.Seconds(2);
+                    yield return Wait.Until(() => !FlightGlobals.ActiveVessel.packed, 60, "off rails");
+                    v = FlightGlobals.ActiveVessel;
+                    r = (v.CoMD - v.mainBody.position).normalized;
+                    s = (Planetarium.fetch.Sun.position - v.mainBody.position).normalized;
+                    if (Vector3d.Dot(r, s) > 0.5) break;
+                }
+                ctx.Record("sunElevationDeg", F(90 - Vector3d.Angle(r, s)));
                 foreach (Part p in v.parts)
                     if (p.Rigidbody != null) p.Rigidbody.angularVelocity = Vector3.zero;
-                var fi = v.GetComponent<FlightIntegrator>();
-                double t0 = Planetarium.GetUniversalTime(), next = 0;
-                if (warp > 0) Flight.PhysicsWarp(warp);
-                while (Planetarium.GetUniversalTime() - t0 < soak)
+                ResetThermal(v, startTemp);
+                yield return Wait.Frames(3);
+                GamePersistence.SaveGame("ksptest-orbit", HighLogic.SaveFolder, SaveMode.OVERWRITE);
+
+                var csv = new StringBuilder("mode,part,index,t,skinK,unexpSkinK,intK,radArea,sunArea,bodyArea,skinMass,radFlux,sunlit\n");
+                foreach (string modeName in modes)
                 {
-                    double t = Planetarium.GetUniversalTime() - t0;
-                    if (t >= next)
+                    var mode = (ThermalAreaModes.Mode)Enum.Parse(typeof(ThermalAreaModes.Mode), modeName, true);
+                    ctx.Step($"Soak, mode {mode}");
+                    ThermalAreaModes.Current = mode;
+                    Game g = GamePersistence.LoadGame("ksptest-orbit", HighLogic.SaveFolder, true, false);
+                    FlightDriver.StartAndFocusVessel(g, g.flightState.activeVesselIdx);
+                    yield return Wait.Seconds(2);
+                    yield return Wait.FlightReady(120);
+                    yield return WaitVoxels();
+                    v = FlightGlobals.ActiveVessel;
+                    ThermalAreaModes.Set(mode, v);
+                    foreach (Part p in v.parts)
+                        if (p.Rigidbody != null) p.Rigidbody.angularVelocity = Vector3.zero;
+                    var fi = v.GetComponent<FlightIntegrator>();
+                    double t0 = Planetarium.GetUniversalTime(), next = 0;
+                    if (warp > 0) Flight.PhysicsWarp(warp);
+                    while (Planetarium.GetUniversalTime() - t0 < soak)
                     {
-                        next += 60;
-                        for (int i = 0; i < v.parts.Count; i++)
+                        double t = Planetarium.GetUniversalTime() - t0;
+                        if (t >= next)
                         {
-                            Part p = v.parts[i];
-                            PartThermalData ptd = p.ptd;
-                            csv.Append(string.Join(",", mode, p.partInfo.name, i, F(t), F(p.skinTemperature), F(p.skinUnexposedTemperature), F(p.temperature), F(p.radiativeArea),
-                                ptd == null ? "" : F(fi.GetSunArea(ptd)), ptd == null ? "" : F(fi.GetBodyArea(ptd)), F(p.skinThermalMass), F(p.thermalRadiationFlux), v.directSunlight)).Append('\n');
+                            next += 60;
+                            for (int i = 0; i < v.parts.Count; i++)
+                            {
+                                Part p = v.parts[i];
+                                PartThermalData ptd = p.ptd;
+                                csv.Append(string.Join(",", mode, p.partInfo.name, i, F(t), F(p.skinTemperature), F(p.skinUnexposedTemperature), F(p.temperature), F(p.radiativeArea),
+                                    ptd == null ? "" : F(fi.GetSunArea(ptd)), ptd == null ? "" : F(fi.GetBodyArea(ptd)), F(p.skinThermalMass), F(p.thermalRadiationFlux), v.directSunlight)).Append('\n');
+                            }
                         }
+                        yield return null;
                     }
-                    yield return null;
+                    Flight.PhysicsWarp(0);
+                    ctx.Record($"{mode}.end", string.Join("; ", v.parts.Select((p, i) => $"{p.partInfo.name}#{i} skin {p.skinTemperature:F0} int {p.temperature:F0} K rad {p.radiativeArea:F2} m2")));
+                    ctx.Record($"{mode}.sunlit", v.directSunlight);
                 }
-                Flight.PhysicsWarp(0);
-                ctx.Record($"{mode}.end", string.Join("; ", v.parts.Select((p, i) => $"{p.partInfo.name}#{i} skin {p.skinTemperature:F0} int {p.temperature:F0} K rad {p.radiativeArea:F2} m2")));
-                ctx.Record($"{mode}.sunlit", v.directSunlight);
+                File.WriteAllText(Path.Combine(ctx.ResultsDir, $"orbit_{tag}.csv"), csv.ToString());
             }
+            finally
+            {
+                FarThermalModeTests.PutBack();
+            }
+        }
+
+        /// <summary>
+        /// What the mode tests change, put back however they end (a failure included), so the session's later tests run
+        /// on FAR's own thermal areas: the mode (the Harmony prefix stays, passing straight through on Native), the
+        /// max-temperature cheat and any warp.
+        /// </summary>
+        public static void PutBack()
+        {
             ThermalAreaModes.Current = ThermalAreaModes.Mode.Native;
-            File.WriteAllText(Path.Combine(ctx.ResultsDir, $"orbit_{tag}.csv"), csv.ToString());
+            Flight.IgnoreMaxTemperature(false);
+            Flight.HyperWarpOff();
+            if (TimeWarp.fetch != null) Flight.PhysicsWarp(0);
         }
 
         public static void ResetThermal(Vessel v, double k)
