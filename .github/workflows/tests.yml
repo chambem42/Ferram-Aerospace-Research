@@ -173,6 +173,9 @@ jobs:
   # Linux job runs the same steps, ingame-steps)
   ingame-windows:
     needs: build
+    # after the build, whatever the gate before it did: without this a gate skipped (every run but a fork's pull
+    # request) skips these too, as GitHub skips a job below a skipped one unless its condition says otherwise
+    if: &after-build ${{ !cancelled() && needs.build.result == 'success' }}
     # the secrets (environment secrets); a fork's pull request is past its gate by the time its build has run
     environment: ksp-game
     strategy:
@@ -398,6 +401,7 @@ jobs:
 
   ingame-linux:
     needs: build
+    if: *after-build
     environment: ksp-game
     strategy:
       matrix:
