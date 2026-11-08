@@ -4,27 +4,28 @@ name: Tests
 #
 # Both need the game: the unit tests its assemblies (a third of them need Unity's own code, which the public stripped
 # assemblies lack), the in-game tests the game itself. KSP comes from encrypted 7z volumes in a private repo's release
-# (KspTest/ci/Pack-KspGame.ps1); only the in-game jobs get the secrets, through an environment:
-#   pushes, manual runs, pull requests from branches of this repository: everything, environment ksp-game (no gate)
+# (KspTest/ci/Pack-KspGame.ps1); only the in-game jobs get the secrets, through the environment ksp-game:
+#   pushes, manual runs, pull requests from branches of this repository: everything, at once
 #   pull requests from forks: on pull_request_target, so the workflow is the default branch's (GitHub takes it from
 #     there: a PR cannot change what runs) and the code checked out the PR's head. Nothing of the PR runs before the
-#     approve job, which waits in environment ksp-game-fork until one of its required reviewers approves the run after
-#     reading the PR (Review deployments on the run): approved, the PR's code builds and runs on runners with the game,
-#     its key and this repository's token and cache scope, as it would after a merge. Every new push to the PR is a new
-#     run, waiting again. Its timings are not saved for later runs.
+#     gate job lets it, which runs no code of it:
+#       - opened by the repository's owner, a member of its organization or a collaborator: at once, every push
+#       - anyone else's: when someone with write access labels it run-ingame, after reading it. The gate takes the label
+#         off at once, so it starts one run, of the commit labelled; a new push runs nothing until labelled again
+#     Let in, the PR's code builds and runs on runners with the game, its key and this repository's token and cache
+#     scope, as it would after a merge. Its timings are not saved for later runs.
 # The game folder is never cached or uploaded. The fork's pull_request run does nothing (its jobs are skipped).
 #
 # Environment ksp-game: the secrets KSP_GAME_KEY (the archive key) and KSP_GAME_TOKEN (fine-grained, Contents: read-only
-# on the game repo alone), no protection rules. Environment ksp-game-fork: Required reviewers (the maintainers),
-# administrators not allowed to bypass. Repository variable KSP_GAME_REPO (owner/name of the game repo). See
+# on the game repo alone). Repository variable KSP_GAME_REPO (owner/name of the game repo). Label run-ingame. See
 # KspTests/README.md.
 
 on:
   push:
   pull_request:
-  # a fork's pull request, its in-game jobs behind the ksp-game-fork environment's reviewers (see above)
+  # a fork's pull request, behind the gate job (see above): labeled for the run-ingame label
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
     inputs:
       filter:
@@ -41,29 +42,65 @@ env:
   DOTNET_NOLOGO: 1
 
 jobs:
-  # a fork's pull request: a maintainer's approval (environment ksp-game-fork's required reviewers) before anything of
-  # it runs. Nothing checked out, nothing run
-  approve:
-    if: github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository
-    environment: ksp-game-fork
+  # a fork's pull request: whether this run may run its code (see the top). Checks out nothing, runs nothing of the PR;
+  # its token may take the label off. Other labels than run-ingame start nothing at all
+  gate:
+    if: >-
+      github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository &&
+      (github.event.action != 'labeled' || github.event.label.name == 'run-ingame')
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
     steps:
-      - run: echo "approved to run ${{ github.event.pull_request.head.repo.full_name }}@${{ github.event.pull_request.head.sha }}"
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTION: ${{ github.event.action }}
+          SENDER: ${{ github.event.sender.login }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          run=false
+          if [ "$ACTION" = labeled ]; then
+            # spent: the label starts this run only; the next needs it again
+            gh api -X DELETE "repos/$REPO/issues/$PR/labels/run-ingame" --silent || echo "::warning::could not take the run-ingame label off"
+            permission=$(gh api "repos/$REPO/collaborators/$SENDER/permission" --jq .permission 2>/dev/null || echo none)
+            case "$permission" in
+              admin|maintain|write) run=true; echo "labelled by $SENDER ($permission): running $SHA" ;;
+              *) echo "::warning::$SENDER ($permission access) labelled it run-ingame: only someone with write access starts the tests" ;;
+            esac
+          else
+            case "$ASSOCIATION" in
+              OWNER|MEMBER|COLLABORATOR) run=true; echo "opened by $AUTHOR ($ASSOCIATION): running $SHA" ;;
+              *) echo "::notice::the in-game tests of $AUTHOR's pull request wait for a maintainer's run-ingame label" ;;
+            esac
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: approve
-    # where the run's jobs run (see the top), once a fork's pull request is approved
+    needs: gate
+    # where the run's jobs run (see the top): a fork's pull request only when its gate said so, never by its gate
+    # being skipped
     if: >-
-      !cancelled() && (needs.approve.result == 'success' || needs.approve.result == 'skipped') &&
-      ((github.event_name != 'pull_request' && github.event_name != 'pull_request_target') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository))
+      !cancelled() && (
+      (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository &&
+       needs.gate.outputs.run == 'true') ||
+      (github.event_name != 'pull_request_target' &&
+       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)))
     runs-on: ubuntu-24.04
     env:
       KSP_ROOT: /tmp/ksp
     steps:
       - uses: actions/checkout@v6
         with:
-          # a fork's pull request (pull_request_target): its head, not the base branch; checkout refuses a fork's code
-          # there unless told, which the approve job before this makes safe to
+          # a fork's pull request (pull_request_target): its head as the event saw it (the commit labelled), not the
+          # base branch; checkout refuses a fork's code there unless told, which the gate before this makes safe to
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
           allow-unsafe-pr-checkout: ${{ github.event_name == 'pull_request_target' }}
           persist-credentials: false
@@ -136,7 +173,7 @@ jobs:
   # Linux job runs the same steps, ingame-steps)
   ingame-windows:
     needs: build
-    # the secrets (environment secrets); a fork's pull request is approved by the time its build has run
+    # the secrets (environment secrets); a fork's pull request is past its gate by the time its build has run
     environment: ksp-game
     strategy:
       fail-fast: false

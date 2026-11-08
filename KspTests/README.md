@@ -49,19 +49,23 @@ page of screenshots per leg and every session's results.
 The game comes from encrypted archives in a private repository's release, so the in-game jobs need its secrets:
 
 - Pushes, manual runs and pull requests from branches of this repository run everything at once.
-- A pull request from a fork waits for a maintainer before any of it runs, even its build. The workflow is always the
-  default branch's (GitHub takes `pull_request_target`'s from there), so a pull request cannot change what runs, but
-  once approved its code (FAR, the tests, their build) runs on runners with the game, its key and this repository's
-  token and cache. Read it for anything reaching beyond the tests, such as the network, files outside the game or the
-  environment, then approve with **Review deployments** on the run. Every new push to the pull request is a new run,
-  waiting again.
+- A pull request from a fork runs on `pull_request_target`, whose workflow is always the default branch's, so a pull
+  request cannot change what runs. Nothing of it runs (not even its build) until a small gate job, which runs none of
+  its code, lets it:
+  - opened by the repository's owner, a member of its organization or a collaborator: at once, on every push;
+  - anyone else's: when someone with write access adds the label **run-ingame**. The gate takes the label off at
+    once, so it starts one run, of the commit the pull request was at when labelled; a new push runs nothing until
+    it is labelled again. A label from someone without write access is taken off and starts nothing.
+
+  Let in, its code (FAR, the tests, their build) runs on runners with the game, its key and this repository's token
+  and cache, as it would after a merge. Before labelling, read it for anything reaching beyond the tests, such as the
+  network, files outside the game or the environment.
 - Contributors can run the unit tests themselves: build FAR (Release), then
   `dotnet test KspTests/FerramAerospaceResearch.UnitTests -p:KspDir=<your KSP>`.
 
 Setting it up, once, in the repository's settings:
 
-- Environment `ksp-game-fork`, with **Required reviewers** (the maintainers) and administrators not allowed to
-  bypass them: the gate a fork's pull request waits at. It needs no secrets.
+- The label `run-ingame` (Issues > Labels).
 - Environment `ksp-game`, without protection rules, with the secrets `KSP_GAME_KEY` (the archives' key) and
   `KSP_GAME_TOKEN` (a fine-grained token with Contents: read-only on the game repository alone): environment secrets
   rather than repository ones, so only the in-game jobs see them.
