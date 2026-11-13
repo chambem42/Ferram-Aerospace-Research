@@ -54,7 +54,7 @@ using FerramAerospaceResearch.FARPartGeometry.GeometryModification;
 using FerramAerospaceResearch.Settings;
 using KSP.UI.Screens;
 using KSPCommunityFixes;
-using TweakScale;
+using TweakScale; // fork test: conflicts with test A
 using UnityEngine;
 
 namespace FerramAerospaceResearch.FARPartGeometry
