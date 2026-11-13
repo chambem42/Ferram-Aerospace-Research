@@ -142,5 +142,8 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "$zip" -R "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "$zip" -R "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "$TITLE"
+            # notes from the last stable release, not from a testing prerelease (testing.yml) since
+            since=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" -q .tag_name 2> /dev/null || true)
+            gh release create "$GITHUB_REF_NAME" "$zip" -R "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+              ${since:+--notes-start-tag "$since"} --title "$TITLE"
           fi
